@@ -53,7 +53,7 @@ extension NotchModule {
     func setExpanded(_ expanded: Bool) {}
     func handleBack() -> Bool { false }
     var compactEarWidth: CGFloat { NotchLayout.earWidth }
-    var bodyWidth: CGFloat { NotchLayout.expandedWidth }
+    var bodyWidth: CGFloat { NotchLayout.minExpandedWidth }
     func handleKey(_ press: KeyPress) -> Bool { false }
     var holdsOpen: Bool { false }
     var needsAttention: Bool { false }

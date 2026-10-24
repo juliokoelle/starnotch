@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import NotchCore
 
@@ -45,6 +46,19 @@ final class CaptureInbox {
             "delivered": outcome == .delivered,
         ])
         return outcome
+    }
+
+    /// The Markdown file captures land in, when no connector takes them.
+    nonisolated static var markdownFile: URL? { Runtime.inbox == nil ? Runtime.captureMarkdownFile : nil }
+
+    /// Opens the Markdown inbox in its default app, creating it first so the click always lands somewhere.
+    static func openMarkdown(_ file: URL) {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: file.path) {
+            try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            fm.createFile(atPath: file.path, contents: Data("# Inbox\n\n".utf8))
+        }
+        NSWorkspace.shared.open(file)
     }
 
     /// `- [ ] text (due 2026-10-23)` for tasks and questions, `- 14:32 text` for notes.

@@ -1,0 +1,47 @@
+{
+  "id": "2026-10-19-weekly",
+  "title": "Weekly Lumen-Abo",
+  "date": "2026-10-19",
+  "participants": [
+    "Max",
+    "Lisa",
+    "Jonas"
+  ],
+  "transcript": [
+    {
+      "speaker": "Jonas",
+      "t": 3,
+      "text": "Kurzer Stand zum Lumen-Abo. Lisa, wie sieht es mit dem Raum aus?"
+    },
+    {
+      "speaker": "Lisa",
+      "t": 12,
+      "text": "Der Raum ist gebucht, Donnerstag nächste Woche, Raum Ahorn."
+    },
+    {
+      "speaker": "Jonas",
+      "t": 20,
+      "text": "Max, sind die Margenzahlen schon raus?"
+    },
+    {
+      "speaker": "Max",
+      "t": 27,
+      "text": "Noch nicht, mir fehlen noch die Supportkosten. Die kommen diese Woche."
+    },
+    {
+      "speaker": "Jonas",
+      "t": 41,
+      "text": "Okay. Und wir bleiben beim Preis von 30 Euro, die Landingpage geht damit diese Woche live."
+    }
+  ],
+  "summary": "Workshop-Raum ist gebucht. Margenzahlen von Max fehlen noch (Supportkosten offen). Preis 30 Euro bestätigt, Landingpage geht damit diese Woche live.",
+  "decisions": [
+    {
+      "text": "Preis bleibt bei 30 Euro, die Landingpage geht damit diese Woche live.",
+      "quote": "Okay. Und wir bleiben beim Preis von 30 Euro, die Landingpage geht damit diese Woche live.",
+      "speaker": "Jonas",
+      "t": 41
+    }
+  ],
+  "commitments": []
+}

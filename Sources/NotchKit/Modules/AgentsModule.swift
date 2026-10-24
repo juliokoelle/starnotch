@@ -267,12 +267,21 @@ final class AgentsModule: NotchModule {
     /// More than one tool has sessions: chips carry a small tool badge.
     var showsToolBadges: Bool { Set(snapshot.agents.map(\.provider)).count > 1 }
 
-    /// "C" for Claude Code, "Cx" for Codex.
-    static func badge(of provider: String) -> String {
+    /// The tool's short name on its pill: "Claude", "Codex".
+    static func toolLabel(of provider: String) -> String {
         switch provider {
-        case CodexProvider.id: "Cx"
-        case ClaudeCodeProvider.id: "C"
-        default: String(provider.prefix(2)).capitalized
+        case CodexProvider.id: "Codex"
+        case ClaudeCodeProvider.id: "Claude"
+        default: toolName(of: provider)
+        }
+    }
+
+    /// One tint per tool, the same on every pill (no company logos: they aren't ours to ship).
+    static func toolTint(of provider: String) -> Color {
+        switch provider {
+        case CodexProvider.id: Color(hex: 0x4FC3B5)
+        case ClaudeCodeProvider.id: Color(hex: 0xE0875F)
+        default: Theme.textSecondary
         }
     }
 
@@ -611,6 +620,9 @@ final class AgentsModule: NotchModule {
         return failedLoops.isEmpty ? 0 : 10
     }
 
+    /// Two columns (the session and the list beside it) need the full width.
+    var bodyWidth: CGFloat { NotchLayout.expandedWidth }
+
     var bodyHeight: CGFloat {
         if subagentID != nil { return 250 }
         if let id = detailID {
@@ -625,6 +637,7 @@ final class AgentsModule: NotchModule {
             return min(330, max(180, rows + 76))
         }
         if selectedLoop != nil { return 236 }
+        if snapshot.loops.isEmpty { return 270 }  // the explanation of how to get one
         if loopsAsTimeline { return CGFloat(snapshot.loops.count) * 28 + 74 }
         return min(330, CGFloat(snapshot.loops.count) * 40 + 56)
     }
@@ -1186,17 +1199,19 @@ private struct SideCard: View {
     }
 }
 
-/// "C" or "Cx": which tool runs a session, shown once more than one tool has sessions.
+/// "Claude" or "Codex" in the tool's tint: which tool runs a session, shown once more than one
+/// tool has sessions, and in the header's plan limits.
 struct ToolBadge: View {
     let provider: String
 
     var body: some View {
-        Text(AgentsModule.badge(of: provider))
-            .font(Theme.font(9, .bold))
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, 4)
-            .frame(height: 14)
-            .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        let tint = AgentsModule.toolTint(of: provider)
+        Text(AgentsModule.toolLabel(of: provider))
+            .font(Theme.font(9.5, .bold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5)
+            .frame(height: 15)
+            .background(tint.opacity(0.16), in: Capsule())
             .fixedSize()
             .help(AgentsModule.toolName(of: provider))
             .accessibilityLabel(AgentsModule.toolName(of: provider))

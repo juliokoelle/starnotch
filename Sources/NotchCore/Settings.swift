@@ -117,6 +117,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public var disabledProviders: [String]
     /// Apple Reminders due today show in Today.
     public var remindersInToday: Bool
+    /// Tab order, set by dragging a tab in the island (`ModuleOrder`); empty = the built-in order.
+    public var moduleOrder: [ModuleKind]
 
     public init(
         slots: [SlotApp?] = Array(repeating: nil, count: slotCount),
@@ -140,7 +142,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         watchAutomatic: Bool = true,
         watchTimer: WatchTimer = .twoHours,
         disabledProviders: [String] = [],
-        remindersInToday: Bool = false
+        remindersInToday: Bool = false,
+        moduleOrder: [ModuleKind] = []
     ) {
         self.slots = Self.normalized(slots)
         self.modules = Self.normalized(modules)
@@ -164,6 +167,7 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         self.watchTimer = watchTimer
         self.disabledProviders = disabledProviders
         self.remindersInToday = remindersInToday
+        self.moduleOrder = moduleOrder
     }
 
     /// The app in a slot. Assigning an app replaces the slot's module.
@@ -248,7 +252,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             watchAutomatic: (try? c.decodeIfPresent(Bool.self, forKey: .watchAutomatic)) ?? true,
             watchTimer: (try? c.decodeIfPresent(WatchTimer.self, forKey: .watchTimer)) ?? .twoHours,
             disabledProviders: (try? c.decodeIfPresent([String].self, forKey: .disabledProviders)) ?? [],
-            remindersInToday: (try? c.decodeIfPresent(Bool.self, forKey: .remindersInToday)) ?? false
+            remindersInToday: (try? c.decodeIfPresent(Bool.self, forKey: .remindersInToday)) ?? false,
+            moduleOrder: (try? c.decodeIfPresent([ModuleKind].self, forKey: .moduleOrder)) ?? []
         )
     }
 }

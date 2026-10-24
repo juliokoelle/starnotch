@@ -14,6 +14,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Watch mode: is it on, and the toggle.
     var watching: () -> Bool = { false }
     var onToggleWatch: () -> Void = {}
+    private let inboxItem = NSMenuItem(title: "Open Inbox", action: nil, keyEquivalent: "i")
+    private let meetingNotesItem = NSMenuItem(title: "Open Meeting Notes", action: nil, keyEquivalent: "")
+    /// What the meeting agent showed, in full (written by agent/feed.py).
+    static var meetingNotesFile: URL { Brand.supportFolder.appending(path: "Meeting-Agent.md") }
     private let awakeItem = NSMenuItem(title: "Keep awake", action: nil, keyEquivalent: "")
     var keepingAwake: () -> Bool = { false }
     var onToggleKeepAwake: () -> Void = {}
@@ -52,6 +56,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         notch.target = self
         menu.addItem(notch)
 
+        inboxItem.action = #selector(openInbox)
+        inboxItem.keyEquivalentModifierMask = [.control, .option]
+        inboxItem.target = self
+        menu.addItem(inboxItem)
+
+        meetingNotesItem.action = #selector(openMeetingNotes)
+        meetingNotesItem.target = self
+        menu.addItem(meetingNotesItem)
+
         let wheel = NSMenuItem(title: "Open Wheel", action: #selector(openWheel), keyEquivalent: "")
         wheel.target = self
         menu.addItem(wheel)
@@ -84,10 +97,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleAwake() { onToggleKeepAwake() }
     @objc private func openSetup() { onOpenSetup() }
     @objc private func checkUpdates() { updater?.checkForUpdates() }
+    @objc private func openInbox() { if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) } }
+    @objc private func openMeetingNotes() { NSWorkspace.shared.open(Self.meetingNotesFile) }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         watchItem.state = watching() ? .on : .off
         awakeItem.state = keepingAwake() ? .on : .off
+        inboxItem.isHidden = CaptureInbox.markdownFile == nil
+        meetingNotesItem.isHidden = !FileManager.default.fileExists(atPath: Self.meetingNotesFile.path)
         state.refreshRunningApps()
         if let slot = state.activeSlot, let app = state.settings[slot] {
             activeItem.title = "Active: \(app.name)"

@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var joinHotKey: HotKey?
     private var api: LocalAPIServer?
     private var captureHotKey: HotKey?
+    private var inboxHotKey: HotKey?
     private var watchHotKey: HotKey?
     private let watchMode = WatchMode()
     private var previewDirector: PreviewDirector?
@@ -26,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Every module built, shown or not; `NotchModel.modules` holds the shown ones.
     private var allModules: [NotchModule] = []
     private var system: SystemModule?
+    private var meeting: MeetingModule?
+    private var companion: MeetingCompanion?
     private let battery = BatteryMonitor()
     private let keepAwake = KeepAwake()
     private var shell: ShellMonitor?
@@ -61,13 +64,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let today = agendaPreview?.today ?? todayProvider.map { TodayModule(provider: $0, agenda: agenda) }
         let system = SystemModule()
         self.system = system
-        allModules = [agents, agenda, music, system, dictation]
+        let meeting = MeetingModule()
+        self.meeting = meeting
+        allModules = [agents, agenda, music, system, dictation, meeting]
         if let today { allModules.insert(today, at: 1) }
         notchModel = NotchModel(modules: shownModules(sample: sample))
         // --preview: mock data for screenshots and recordings; the features themselves are live.
         notchModel.previewFeatures = preview
         agents.music = music
         notchModel.cast = cast
+        notchModel.onReorder = { [weak self] visible in
+            guard let self else { return }
+            self.state.settings.moduleOrder = ModuleOrder.saved(visible: visible, previous: self.state.settings.moduleOrder)
+        }
         notch = NotchController(model: notchModel, display: { [weak self] in self?.state.settings.islandDisplay ?? .automatic })
         today?.onOpenCalendar = { [weak self] in
             guard let self else { return }
@@ -141,6 +150,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               key: "meeting.\(meeting.id)", urgent: true)
         }
         calendar.start()
+        meeting.nextEvent = { [weak calendar] in calendar?.next.map { ($0.title, $0.attendees) } }
+        let companion = MeetingCompanion(cast: cast)
+        self.companion = companion
+        companion.onOpenCard = { [weak self] id in
+            if let url = URL(string: "\(Brand.urlScheme)://meeting?card=\(id)") { self?.showMeetingCard(url) }
+        }
+        meeting.onPopOut = { [weak self] in
+            companion.open()
+            self?.notch.collapse()
+        }
+        meeting.onListening = { companion.listening = $0 }
+        meeting.onCard = { [weak self] entry in
+            // Popped out, the bubble beside the character takes the sneak's place.
+            if companion.isOpen {
+                companion.show(entry)
+                return
+            }
+            // A click on the line opens the panel at that card (handled in `application(_:open:)`).
+            self?.notch.sneak(Sneak(visual: .symbol(MeetingStyle.symbol(entry.card.kind), tint: MeetingStyle.sneakTint(entry.card.kind)),
+                                    title: entry.card.kind == .prep ? "Prep for \(entry.card.detail ?? "the meeting")" : entry.card.detail ?? entry.card.title,
+                                    duration: 6,
+                                    url: URL(string: "\(Brand.urlScheme)://meeting?card=\(entry.id)")),
+                              key: "meeting.\(entry.id)", onlyAtRest: true, urgent: entry.card.kind == .contradiction)
+        }
 
         wheel = WheelController(state: state, switcher: AppSwitcher())
         wheel.onTapNotch = { [weak self] in self?.notch.tapNotch() }
@@ -244,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         notchModel.requestCapture = { [weak self] in self?.notch.openCapture() }
         captureHotKey = HotKey.controlOptionN { [weak self] in self?.notch.openCapture() }
+        inboxHotKey = HotKey.controlOptionI { if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) } }
         notch.inbox.loadPeople(from: people)
         music.onTrackChange = { [weak self] track in
             self?.notch.sneak(Sneak(visual: .cover(track.cover), title: track.title, detail: track.artist),
@@ -284,12 +318,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The modules to show: available on this Mac and not switched off (all of them with
     /// sample data). At least one stays, so the island always has something to open.
     private func shownModules(sample: Bool) -> [NotchModule] {
-        let shown = sample ? allModules : allModules.filter { ModuleAvailability.isShown($0.kind, settings: state.settings) }
+        let available = sample ? allModules : allModules.filter { ModuleAvailability.isShown($0.kind, settings: state.settings) }
+        let order = ModuleOrder.sorted(available.map(\.kind), by: state.settings.moduleOrder)
+        let shown = order.compactMap { kind in available.first { $0.kind == kind } }
         return shown.isEmpty ? allModules.filter { $0.kind == .calendar } : shown
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         approvals?.stop()
+        meeting?.shutdown()
     }
 
     /// Reopening the app from Finder or Spotlight shows the settings.
@@ -381,12 +418,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `<scheme>://status?title=…&detail=…&tint=ok` (`Brand.urlScheme`)
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == Brand.urlScheme {
+            if url.host == "meeting" {
+                showMeetingCard(url)
+                continue
+            }
             guard url.host == "status", let status = try? StatusPayload.make(url: url) else {
                 Log.app.error("Ignored status link without a title")
                 continue
             }
             show(status)
         }
+    }
+
+    /// `<scheme>://meeting?card=3`: the Meeting panel, scrolled to that card.
+    private func showMeetingCard(_ url: URL) {
+        let card = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .first { $0.name == "card" }?.value.flatMap(Int.init)
+        meeting?.focused = card
+        notch.expand(.meeting, pinned: true)
     }
 
     /// A loop finished: one line with its silver face, a click opens what it delivered.

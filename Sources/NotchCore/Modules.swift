@@ -6,6 +6,8 @@ public enum ModuleKind: String, Codable, CaseIterable, Sendable {
     case nowPlaying
     /// CPU, GPU, memory and the apps behind them.
     case system
+    /// The meeting agent (agent/): live contradictions, questions, commitments and prep cards.
+    case meeting
 
     public var title: String {
         switch self {
@@ -15,6 +17,7 @@ public enum ModuleKind: String, Codable, CaseIterable, Sendable {
         case .calendar: "Next"
         case .nowPlaying: "Now playing"
         case .system: "System"
+        case .meeting: "Meeting"
         }
     }
 
@@ -28,4 +31,23 @@ public enum ModuleKind: String, Codable, CaseIterable, Sendable {
 public enum SlotItem: Equatable, Sendable {
     case module(ModuleKind)
     case app(SlotApp)
+}
+
+/// The user's tab order (Settings and the island's tab strip share it).
+public enum ModuleOrder {
+    /// `kinds` in `order`'s sequence (first mention wins); kinds `order` doesn't name follow in
+    /// their own sequence.
+    public static func sorted(_ kinds: [ModuleKind], by order: [ModuleKind]) -> [ModuleKind] {
+        var rank: [ModuleKind: Int] = [:]
+        for (index, kind) in order.enumerated() where rank[kind] == nil { rank[kind] = index }
+        return kinds.enumerated()
+            .sorted { (rank[$0.element] ?? order.count + $0.offset, $0.offset) < (rank[$1.element] ?? order.count + $1.offset, $1.offset) }
+            .map(\.element)
+    }
+
+    /// The full order to save after the visible tabs were rearranged to `visible`: hidden
+    /// modules keep their place relative to each other, after the visible ones.
+    public static func saved(visible: [ModuleKind], previous: [ModuleKind]) -> [ModuleKind] {
+        sorted(ModuleKind.allCases, by: visible + sorted(ModuleKind.allCases, by: previous))
+    }
 }

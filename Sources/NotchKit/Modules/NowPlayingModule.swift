@@ -250,14 +250,15 @@ private struct NowPlayingBody: View {
     }
 
     private func player(_ track: NowPlayingModule.Track) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            HStack(alignment: .center, spacing: 18) {
+        ZStack(alignment: .topTrailing) {
+            // Sized for the narrow panel: cover, text and controls fit without clipping.
+            HStack(alignment: .center, spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
                         .fill(track.color.opacity(0.55))
-                        .frame(width: 104, height: 104)
-                        .blur(radius: 26)
-                    CoverView(track: track, size: 104, badge: true)
+                        .frame(width: 80, height: 80)
+                        .blur(radius: 22)
+                    CoverView(track: track, size: 80, badge: true)
                         .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
                 }
                 .id(track.id)
@@ -274,6 +275,8 @@ private struct NowPlayingBody: View {
                             .padding(.top, 2)
                     }
                     .lineLimit(1)
+                    // Room for the character in the corner: long titles end in … before it.
+                    .padding(.trailing, 58)
                     .id(track.id)
                     .transition(.blurSlide(x: 24 * module.direction))
 
@@ -297,14 +300,17 @@ private struct NowPlayingBody: View {
                 .frame(maxWidth: 300, alignment: .leading)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 22)
+            .padding(.leading, 16)
+            .padding(.trailing, 12)
             .frame(maxHeight: .infinity)
 
-            // The main character listens along with headphones, leaning on the card edge.
-            AvatarView(character: module.cast.main, mood: .music, height: 96,
+            // The main character listens along with headphones, in the top corner beside the
+            // title, so it never covers the controls in the narrow panel.
+            AvatarView(character: module.cast.main, mood: .music, height: 54,
                        colorway: module.cast.colorway, emergeOnAppear: false)
-                .frame(width: 120, alignment: .bottom)
-                .padding(.trailing, 14)
+                .frame(width: 62, alignment: .top)
+                .padding(.top, 12)
+                .padding(.trailing, 10)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -317,7 +323,7 @@ private struct NowPlayingBody: View {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
-                .frame(width: 34, height: 30)
+                .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressScale())

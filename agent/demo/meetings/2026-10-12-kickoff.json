@@ -1,0 +1,23 @@
+{
+  "id": "2026-10-12-kickoff",
+  "title": "Kickoff Lumen-Abo",
+  "date": "2026-10-12",
+  "participants": ["Max", "Lisa", "Jonas"],
+  "transcript": [
+    {"speaker": "Jonas", "t": 4, "text": "Willkommen zum Kickoff für das Lumen-Abo. Heute wollen wir den Preis festlegen."},
+    {"speaker": "Max", "t": 21, "text": "Ich hätte 25 Euro im Monat vorgeschlagen, damit wir schnell Nutzer gewinnen."},
+    {"speaker": "Lisa", "t": 38, "text": "Mit 25 Euro tragen wir die Supportkosten nicht. Ich bin für 30 Euro."},
+    {"speaker": "Jonas", "t": 55, "text": "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat."},
+    {"speaker": "Max", "t": 61, "text": "Einverstanden, 30 Euro. Ich schicke euch die Zahlen zur Marge bis Freitag."},
+    {"speaker": "Lisa", "t": 74, "text": "Ich buche den Raum für den Launch-Workshop."},
+    {"speaker": "Jonas", "t": 88, "text": "Super. Nächste Woche gleiche Zeit, dann schauen wir auf den Stand."}
+  ],
+  "summary": "Preis für das Lumen-Abo festgelegt: 30 Euro im Monat (25 Euro wurde verworfen, weil die Supportkosten nicht gedeckt wären). Max liefert Margenzahlen, Lisa bucht den Workshop-Raum.",
+  "decisions": [
+    {"text": "Das Lumen-Abo kostet 30 Euro im Monat (25 Euro verworfen).", "quote": "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.", "speaker": "Jonas", "t": 55}
+  ],
+  "commitments": [
+    {"who": "Max", "what": "Zahlen zur Marge an das Team schicken", "due": "2026-10-16", "quote": "Ich schicke euch die Zahlen zur Marge bis Freitag.", "status": "open"},
+    {"who": "Lisa", "what": "Raum für den Launch-Workshop buchen", "due": null, "quote": "Ich buche den Raum für den Launch-Workshop.", "status": "done"}
+  ]
+}

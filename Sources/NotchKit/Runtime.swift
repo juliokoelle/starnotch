@@ -75,8 +75,19 @@ enum Runtime {
     /// Port of the local status API.
     static var apiPort: UInt16 { UInt16(clamping: config["api"].int("port", default: 47789)) }
 
-    /// Quick capture without an inbox connector appends here as Markdown tasks, if set.
-    static var captureMarkdownFile: URL? { config["capture"].path("markdown_file") }
+    /// Quick capture without an inbox connector appends here as Markdown tasks: `Inbox.md` in the
+    /// app's folder unless config.toml names another file; `""` keeps only the local queue.
+    static var captureMarkdownFile: URL? {
+        let section = config["capture"]
+        guard let raw = section.string("markdown_file") else { return Brand.supportFolder.appending(path: "Inbox.md") }
+        return raw.trimmingCharacters(in: .whitespaces).isEmpty ? nil : section.path("markdown_file")
+    }
+
+    /// The meeting agent's folder (`agent/` of this repo), where `uv run` starts its programs.
+    static var meetingAgentDir: URL {
+        config["meeting"].path("agent_dir")
+            ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "starnotch-jamie/agent")
+    }
 
     /// `en`, `de` or `system`.
     static var language: String { config["general"].string("language", default: "system") }
@@ -122,8 +133,13 @@ enum ConfigTemplate {
     # port = 47789
 
     [capture]
-    # Without an inbox connector, quick capture appends Markdown tasks here ("" = only the local queue).
+    # Without an inbox connector, quick capture appends Markdown tasks here (default: Inbox.md in this folder;
+    # "" = only the local queue). The Inbox button in quick capture opens it.
     # markdown_file = ""
+
+    [meeting]
+    # The meeting agent's folder (agent/ of the Starnotch repo); its programs run there with uv.
+    # agent_dir = "~/starnotch-jamie/agent"
 
     [connectors]
     # Connector ids to run; leave out to run every connector linked into this build.

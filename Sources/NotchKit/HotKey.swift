@@ -29,6 +29,11 @@ final class HotKey {
         HotKey(keyCode: UInt32(kVK_ANSI_W), modifiers: UInt32(controlKey | optionKey), id: 4, action: action)
     }
 
+    /// Control + Option + I: open the quick-capture inbox.
+    static func controlOptionI(action: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_ANSI_I), modifiers: UInt32(controlKey | optionKey), id: 5, action: action)
+    }
+
     private let id: UInt32
 
     init(keyCode: UInt32, modifiers: UInt32, id: UInt32, action: @escaping () -> Void) {

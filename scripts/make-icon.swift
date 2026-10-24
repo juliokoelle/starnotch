@@ -1,4 +1,5 @@
-// Renders Resources/AppIcon.icns: a dark rounded square with a notch and a four-slot wheel.
+// The original icon: a dark rounded square with a notch and a four-slot wheel (Resources/AppIcon.icns). Superseded by
+// scripts/make-tara-icon.py (Tara on a night sky); running this script brings the old icon back.
 // Usage: swift scripts/make-icon.swift   (needs only the Command Line Tools)
 import AppKit
 

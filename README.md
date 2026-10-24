@@ -17,7 +17,8 @@ Meet Tara, a little star that lives in your MacBook's notch. Starnotch turns the
 | **Now playing** | Cover, controls, volume and output device for Spotify or Music. | Spotify or Music |
 | **Dictate** | Starts Wispr Flow hands-free from the notch. | Wispr Flow |
 | **Today** | Tasks, follow-ups and a short brief from a connector. | A connector |
-| **Quick capture** | ⌃⌥N: one line out of the notch, dates and people recognised as you type (English and German). | Nothing |
+| **Meeting** | Listens along and remembers your past meetings: flags when something said contradicts an earlier decision, nudges about open promises, writes down new ones, answers questions with the quote they come from. | An Anthropic API key; Reson8 for live audio, Jamie for past meetings |
+| **Quick capture** | ⌃⌥N: one line out of the notch, dates and people recognised as you type (English and German). Everything lands in `Inbox.md`, ⌃⌥I opens it. | Nothing |
 
 Modules whose source isn't on your Mac hide themselves. You can switch any module off in Settings.
 
@@ -63,7 +64,7 @@ On first launch a setup page lists what it found (Claude Code, Codex, calendars,
 
 ## Privacy
 
-Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to.
+Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API, and the Jamie import reads from your Jamie account.
 
 ## Plan limits and context
 
@@ -106,6 +107,21 @@ integrations/claude-code/starnotch-approvals/codex/install-hook.sh --remove
 ```
 
 Then open `/hooks` in Codex once to trust the new hook. Codex can't take a rule for the whole session, so its card offers **Allow once** and **Deny** only.
+
+## Other notch apps
+
+Starnotch plays well with other notch apps, so you can try them side by side. Hold the notch and flick toward one of the four slots of the wheel. A slot holds a Starnotch module or another app, such as NotchNook, Boring Notch, Alcove or DynamicLake; choosing an app quits the apps in the other slots and opens it, so only one owns the notch at a time. Settings › Slots decides what sits where; the menu bar's "Open Wheel" opens the wheel without the gesture.
+
+## Meeting agent
+
+The Meeting module runs a small Python sidecar in [`agent/`](agent/README.md): Reson8 transcribes live, Claude compares what is said with your meeting memory, and the notch shows what matters, each card with its source. Past meetings come from Jamie or from meetings you saved. **Demo** plays a made-up meeting, no microphone or Reson8 needed.
+
+```sh
+cd agent && uv sync
+export ANTHROPIC_API_KEY=…   # and RESON8_API_KEY for live audio
+```
+
+Keys stay in your environment; nothing is stored in the repository.
 
 ## Configuration
 

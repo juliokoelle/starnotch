@@ -17,8 +17,8 @@ if [ -z "$support" ]; then
     base="$HOME/Library/Application Support"
     brand=$(sed -n 's/^ *public static let name = "\(.*\)"$/\1/p' "$(dirname "$0")/../Sources/NotchCore/Brand.swift" 2>/dev/null)
     support="$base/${brand:-Starnotch}"
-    # Builds from before the rename keep their folder.
-    [ -d "$base/NotchSwitcher" ] && support="$base/NotchSwitcher"
+    # Builds from before the rename keep their folder, unless the renamed app's folder exists.
+    [ -d "$base/NotchSwitcher" ] && [ ! -d "$support" ] && support="$base/NotchSwitcher"
 fi
 dir="$support/status"
 id=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-]\{1,80\}\)".*/\1/p' | head -n 1)

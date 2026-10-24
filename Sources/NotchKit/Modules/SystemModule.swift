@@ -373,16 +373,24 @@ private struct MemoryMeter: View {
                     }
                 }
                 if let memory {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(ByteText.short(memory.used)).font(Theme.font(22, .semibold).monospacedDigit())
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("of \(ByteText.short(memory.total))").font(Theme.font(11.5)).foregroundStyle(Theme.textTertiary)
+                    // The number stays whole; "of 24 GB" goes first when the card is narrow.
+                    let used = Text(ByteText.short(memory.used)).font(Theme.font(22, .semibold).monospacedDigit())
+                        .foregroundStyle(Theme.textPrimary)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            used
+                            Text("of \(ByteText.short(memory.total))").font(Theme.font(11.5)).foregroundStyle(Theme.textTertiary)
+                        }
+                        used
                     }
                     .lineLimit(1)
                     Sparkline(values: history, tint: memory.pressure == .normal ? Theme.textBody : memory.pressure.color)
                         .frame(maxHeight: .infinity)
-                    Text(memory.swapUsed > 0 ? "Swap \(ByteText.short(memory.swapUsed)) · compressed \(ByteText.short(memory.compressed))"
-                                             : "Compressed \(ByteText.short(memory.compressed))")
+                    ViewThatFits(in: .horizontal) {
+                        Text(memory.swapUsed > 0 ? "Swap \(ByteText.short(memory.swapUsed)) · compressed \(ByteText.short(memory.compressed))"
+                                                 : "Compressed \(ByteText.short(memory.compressed))")
+                        Text(memory.swapUsed > 0 ? "Swap \(ByteText.short(memory.swapUsed))" : "Compressed \(ByteText.short(memory.compressed))")
+                    }
                         .font(Theme.font(10.5)).foregroundStyle(Theme.textTertiary).lineLimit(1)
                         .help("App \(ByteText.short(memory.app)) · wired \(ByteText.short(memory.wired)) · compressed \(ByteText.short(memory.compressed)) · swap \(ByteText.short(memory.swapUsed))")
                 }

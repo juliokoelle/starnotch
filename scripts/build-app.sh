@@ -96,6 +96,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSAppleEventsUsageDescription</key><string>Shows what Spotify or Music is playing in the notch and lets you pause or skip, and brings an agent's own Terminal or iTerm2 tab to the front when you click it.</string>
     <key>NSCalendarsFullAccessUsageDescription</key><string>Shows your next meeting in the notch with a countdown and a Join button.</string>
     <key>NSCalendarsWriteOnlyAccessUsageDescription</key><string>Adds the event you type in quick capture to your calendar.</string>
+    <key>NSMicrophoneUsageDescription</key><string>The meeting agent transcribes your meeting from the microphone while you have started it in the notch.</string>
     <key>NSRemindersFullAccessUsageDescription</key><string>Shows your reminders due today in Today, when you switch this on.</string>
     <key>NSHumanReadableCopyright</key><string>$COPYRIGHT</string>
 $( [[ -n "${SPARKLE_FEED_URL:-}" ]] && printf '    <key>SUFeedURL</key><string>%s</string>\n' "$SPARKLE_FEED_URL" )

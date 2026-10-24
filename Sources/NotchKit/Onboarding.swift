@@ -41,6 +41,10 @@ enum ModuleAvailability {
             return Status(available: found, detail: found ? "Wispr Flow hands-free" : "Wispr Flow isn't installed")
         case .system:
             return Status(available: true, detail: "CPU, GPU, memory and the apps behind them")
+        case .meeting:
+            let found = FileManager.default.fileExists(atPath: Runtime.meetingAgentDir.appending(path: "agent.py").path)
+            return Status(available: found, detail: found ? "Meeting agent: contradictions, questions, commitments"
+                                                          : "Set [meeting] agent_dir in config.toml")
         }
     }
 
@@ -50,7 +54,7 @@ enum ModuleAvailability {
     }
 
     /// Order in Settings and onboarding.
-    static let order: [ModuleKind] = [.agents, .calendar, .nowPlaying, .system, .dictation, .today]
+    static let order: [ModuleKind] = [.agents, .calendar, .meeting, .nowPlaying, .system, .dictation, .today]
 }
 
 /// One switch per module with what it needs; used by onboarding and Settings.
@@ -58,7 +62,7 @@ struct ModuleSwitches: View {
     @Bindable var state: AppState
 
     var body: some View {
-        ForEach(ModuleAvailability.order, id: \.self) { kind in
+        ForEach(ModuleOrder.sorted(ModuleAvailability.order, by: state.settings.moduleOrder), id: \.self) { kind in
             let status = ModuleAvailability.status(kind, settings: state.settings)
             Toggle(isOn: Binding(
                 get: { status.available && !state.settings.disabledModules.contains(kind) },

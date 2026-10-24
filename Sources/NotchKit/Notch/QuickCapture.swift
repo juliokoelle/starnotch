@@ -36,6 +36,8 @@ final class QuickCapture {
     /// Wispr Flow is installed (the mic button shows).
     var canDictate = NSWorkspace.shared.urlForApplication(withBundleIdentifier: DictationModule.bundleID) != nil
     var outcome: CaptureInbox.Outcome?
+    /// Where captures land, for the Inbox button and the confirmation (nil: a connector takes them).
+    let inboxFile = CaptureInbox.markdownFile
     /// The text named a day and a time and the user added it to the calendar: when.
     var eventAdded: String?
 
@@ -89,7 +91,7 @@ struct CaptureView: View {
                 }
                 .frame(maxWidth: .infinity)
                 Color.clear.frame(width: notch.width)
-                Text(capture.phase == .sent ? "" : "↵ file   esc")
+                Text(capture.phase == .sent ? "" : "↵ file  esc  ⌃⌥I inbox")
                     .font(Theme.font(11.5))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity)
@@ -180,6 +182,21 @@ struct CaptureView: View {
                     }
                     .buttonStyle(PressScale())
                 }
+                // Where the captures are: one click opens the file.
+                if let file = capture.inboxFile {
+                    Button { CaptureInbox.openMarkdown(file) } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "tray.full").font(.system(size: 10.5, weight: .semibold))
+                            Text(file.deletingPathExtension().lastPathComponent).font(Theme.font(12))
+                        }
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.horizontal, 8)
+                        .frame(height: 24)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScale())
+                    .help("Open \(file.path), where tasks, questions and notes land (⌃⌥I from anywhere)")
+                }
                 Spacer(minLength: 8)
                 // What the text says, as chips (Todoist-style): date in the accent, people neutral.
                 HStack(spacing: 6) {
@@ -260,6 +277,9 @@ extension CaptureView {
         if let when = capture.eventAdded { return when }
         if case .queued(let reason) = capture.outcome {
             return "as \(capture.route.rawValue.lowercased()) · kept on this Mac (\(reason))"
+        }
+        if let file = capture.inboxFile {
+            return "as \(capture.route.rawValue.lowercased()) · in \(file.lastPathComponent)"
         }
         return "as \(capture.route.rawValue.lowercased()) · \(capture.text)"
     }

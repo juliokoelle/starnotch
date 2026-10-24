@@ -125,15 +125,25 @@ struct NotchRootView: View {
                     // Fixed halves beside the notch: what doesn't fit shortens (never pushes the
                     // panel wider, which used to shift and clip the whole body).
                     let side = max(0, (layout.innerWidth - notch.width) / 2)
+                    // Tabs that don't fit left of the notch continue right of it, before the status.
+                    let fit = TabStrip.fitting(in: side - 10)
+                    let split = model.modules.count > fit
                     HStack(spacing: 0) {
-                        TabStrip(model: model)
+                        TabStrip(model: model, range: split ? 0..<fit : nil)
                             .padding(.leading, 10)
                             .frame(width: side, alignment: .leading)
                         Color.clear.frame(width: notch.width)
-                        StatusStrip(model: model)
-                            .padding(.trailing, 12)
-                            .padding(.leading, 8)
-                            .frame(width: side, alignment: .trailing)
+                        HStack(spacing: 0) {
+                            if split {
+                                TabStrip(model: model, range: fit..<model.modules.count)
+                                    .padding(.leading, 8)
+                            }
+                            Spacer(minLength: 4)
+                            StatusStrip(model: model)
+                                .padding(.trailing, 12)
+                                .padding(.leading, split ? 0 : 8)
+                        }
+                        .frame(width: side)
                     }
                     .frame(height: notch.height)
 
@@ -167,10 +177,39 @@ struct NotchRootView: View {
 /// Compact module switcher in the left ear: small icons, a gliding highlight, live counts.
 private struct TabStrip: View {
     let model: NotchModel
+    /// Only these tabs (by position); `nil` = all, with the "+" and the moon when they fit.
+    var range: Range<Int>?
     @Namespace private var tabs
+    /// Press and hold a tab, then drag it sideways: it swaps places as it passes its neighbours.
+    @State private var dragging: ModuleKind?
+    /// Drag distance already spent on swaps; the rest is the tab's offset under the pointer.
+    @State private var spent: CGFloat = 0
+    @State private var offset: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// One tab's width, measured: dragging this far moves a tab by one place.
+    @State private var step: CGFloat = 28
+
+    /// Width of one tab in a split strip (icon, padding 5, spacing); a count adds a little.
+    static let splitTab: CGFloat = 28
+
+    /// How many tabs fit in `width` when the strip is split around the notch.
+    static func fitting(in width: CGFloat) -> Int { max(1, Int((width - 14) / splitTab)) }
+
+    private var shown: [NotchModule] {
+        guard let range else { return model.modules }
+        return range.clamped(to: model.modules.indices).map { model.modules[$0] }
+    }
 
     /// The full strip if it fits; else without "+" and tighter; else without the counts.
     var body: some View {
+        if range != nil {
+            strip(counts: true, plus: false, padding: 5)
+        } else {
+            full
+        }
+    }
+
+    private var full: some View {
         ViewThatFits(in: .horizontal) {
             strip(counts: true, plus: true, padding: 8)
             strip(counts: true, plus: false, padding: 6)
@@ -181,7 +220,7 @@ private struct TabStrip: View {
 
     private func strip(counts: Bool, plus showsPlus: Bool, padding: CGFloat) -> some View {
         HStack(spacing: 2) {
-            ForEach(model.modules, id: \.kind) { module in
+            ForEach(shown, id: \.kind) { module in
                 let selected = module.kind == model.module
                 Button {
                     select(module.kind)
@@ -208,6 +247,13 @@ private struct TabStrip: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(PressScale())
+                .offset(x: dragging == module.kind ? offset : 0)
+                .zIndex(dragging == module.kind ? 1 : 0)
+                .scaleEffect(dragging == module.kind && !reduceMotion ? 1.08 : 1)
+                .simultaneousGesture(reorderGesture(module.kind))
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                    if module.kind == model.module { step = width + 2 }
+                }
                 .help(module.kind.title)
                 .accessibilityLabel(module.kind.title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
@@ -243,6 +289,45 @@ private struct TabStrip: View {
         }
     }
 
+    private func reorderGesture(_ kind: ModuleKind) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.35)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+            .onChanged { value in
+                guard case .second(true, let drag) = value else { return }
+                if dragging == nil {
+                    dragging = kind
+                    spent = 0
+                    Haptics.tick()
+                }
+                guard let drag else { return }
+                var rest = drag.translation.width - spent
+                if abs(rest) > step * 0.6, move(kind, by: rest > 0 ? 1 : -1) {
+                    spent += rest > 0 ? step : -step
+                    rest = drag.translation.width - spent
+                }
+                offset = rest
+            }
+            .onEnded { _ in
+                guard dragging != nil else { return }
+                withAnimation(reduceMotion ? nil : Theme.snappy) {
+                    dragging = nil
+                    offset = 0
+                }
+                spent = 0
+                model.onReorder?(model.modules.map(\.kind))
+            }
+    }
+
+    /// Moves the dragged tab one place; `false` at either end.
+    private func move(_ kind: ModuleKind, by step: Int) -> Bool {
+        guard let from = model.modules.firstIndex(where: { $0.kind == kind }) else { return false }
+        let to = from + step
+        guard model.modules.indices.contains(to) else { return false }
+        withAnimation(reduceMotion ? nil : Theme.snappy) { model.modules.swapAt(from, to) }
+        Haptics.tick()
+        return true
+    }
+
     private func select(_ kind: ModuleKind) {
         guard kind != model.module else { return }
         let from = model.modules.firstIndex { $0.kind == model.module } ?? 0
@@ -265,7 +350,7 @@ private struct StatusStrip: View {
             if model.module == .agents, let agents = model.module(.agents) as? AgentsModule {
                 PlanBadge(module: agents)
                     .transition(.blurSlide(y: -4))
-            } else if let agents = model.module(.agents) as? AgentsModule {
+            } else if let agents = model.module(.agents) as? AgentsModule, !agents.snapshot.loops.isEmpty {
                 let failed = agents.failedLoops.count
                 let late = agents.snapshot.loops.filter { $0.isLate || $0.last?.status == .degraded }.count
                 let full = failed > 0 ? "\(failed) loop failed" : late > 0 ? late == 1 ? "1 loop needs a look" : "\(late) loops need a look" : "Loops ok"

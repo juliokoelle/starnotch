@@ -98,6 +98,13 @@ struct LoopStrip: View {
                     }
                 }
             }
+            if module.loops.isEmpty {
+                // "Loops ›" opens the overview, which explains how to get one.
+                Text("none yet · how to add one")
+                    .font(Theme.font(12))
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize()
+            }
             Spacer(minLength: 4)
             if showsNext, let next = module.loops.compactMap(\.nextRun).min() {
                 Text("next \(TimeText.clock(next))")
@@ -108,6 +115,63 @@ struct LoopStrip: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
+    }
+}
+
+/// The loops overview without loops: what a loop is and the two steps to get one.
+private struct LoopsEmpty: View {
+    static let guide = URL(string: "https://github.com/juliokoelle/starnotch/blob/main/docs/SDK.md#connectors")
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("No loops yet")
+                    .font(Theme.font(14, .semibold)).foregroundStyle(Theme.textPrimary)
+                Text("A loop is a job that runs on its own on a schedule: a nightly backup, a morning briefing, a sync. Each one shows here as a small star: running, done, needs a look, failed.")
+                    .font(Theme.font(12.5)).foregroundStyle(Theme.textBody)
+                    .fixedSize(horizontal: false, vertical: true)
+                step(1, "A connector lists your jobs", "A small Swift package with a JobsProvider: name, schedule, the last runs.")
+                step(2, "Each run reports live", "From the job itself, through the status API:")
+                Text(#"open -g "starnotch://status?loop=backup&state=ok""#)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(Theme.textBody)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.leading, 26)
+                if let guide = Self.guide {
+                    HoverRow(cornerRadius: 8, restOpacity: 0.07, hoverOpacity: 0.13, help: guide.absoluteString) {
+                        NSWorkspace.shared.open(guide)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("Open the guide")
+                            Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
+                        }
+                        .font(Theme.font(12, .medium)).foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 10).frame(height: 26)
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollIndicators(.never)
+    }
+
+    private func step(_ number: Int, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number)")
+                .font(Theme.font(11, .bold)).foregroundStyle(Theme.accent)
+                .frame(width: 18, height: 18)
+                .background(Theme.accent.opacity(0.16), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Theme.font(12.5, .semibold)).foregroundStyle(Theme.textPrimary)
+                Text(detail).font(Theme.font(12)).foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -196,14 +260,18 @@ struct LoopsCard: View {
                     }
                     .buttonStyle(PressScale())
                     Spacer()
-                    HStack(spacing: 2) {
-                        option("List", selected: !module.loopsAsTimeline) { module.loopsAsTimeline = false }
-                        option("Today", selected: module.loopsAsTimeline) { module.loopsAsTimeline = true }
+                    if !module.loops.isEmpty {
+                        HStack(spacing: 2) {
+                            option("List", selected: !module.loopsAsTimeline) { module.loopsAsTimeline = false }
+                            option("Today", selected: module.loopsAsTimeline) { module.loopsAsTimeline = true }
+                        }
                     }
                 }
                 .padding(.horizontal, 4)
                 ZStack {
-                    if module.loopsAsTimeline {
+                    if module.loops.isEmpty {
+                        LoopsEmpty().transition(.opacity)
+                    } else if module.loopsAsTimeline {
                         LoopTimelineView(module: module).transition(.blurSlide(x: 14))
                     } else {
                         // Scrolls inside the card; a soft fade says there is more below.
@@ -484,16 +552,28 @@ private struct PulsingDot: View {
 /// red from 90 %. Before the bridge is set up: a link to the setup note.
 struct PlanBadge: View {
     let module: AgentsModule
+    @State private var showsLimits = false
+    @State private var lockToken: Int?
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let usages = module.usages.map { $0.current(now: context.date) }
             if usages.contains(where: { $0.provider != ClaudeCodeProvider.id }) {
-                // Several tools: one ring per tool, the one closest to its limit first.
+                // Several tools side by side; Claude without numbers says how to get them.
+                let missing = !usages.contains { $0.provider == ClaudeCodeProvider.id }
+                let pills = { (style: UsagePill.Style) in
+                    HStack(spacing: style == .named ? 10 : 6) {
+                        ForEach(usages, id: \.provider) { UsagePill(usage: $0, style: style, now: context.date, module: module) }
+                    }
+                    .fixedSize()
+                }
+                // Claude's hint shortens first; the numbers go last.
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 10) { ForEach(usages, id: \.provider) { UsagePill(usage: $0, style: .named, now: context.date, module: module) } }.fixedSize()
-                    HStack(spacing: 8) { ForEach(usages, id: \.provider) { UsagePill(usage: $0, style: .badge, now: context.date, module: module) } }.fixedSize()
-                    HStack(spacing: 6) { ForEach(usages, id: \.provider) { UsagePill(usage: $0, style: .ring, now: context.date, module: module) } }.fixedSize()
+                    HStack(spacing: 10) { if missing { claudeMissing("set up limits") }; limitsButton(pills(.named), usages: usages, now: context.date) }.fixedSize()
+                    HStack(spacing: 10) { if missing { claudeMissing("set up") }; limitsButton(pills(.named), usages: usages, now: context.date) }.fixedSize()
+                    HStack(spacing: 8) { if missing { claudeMissing(nil) }; limitsButton(pills(.named), usages: usages, now: context.date) }.fixedSize()
+                    HStack(spacing: 8) { if missing { claudeMissing(nil) }; limitsButton(pills(.short), usages: usages, now: context.date) }.fixedSize()
+                    HStack(spacing: 8) { if missing { claudeMissing(nil) }; limitsButton(pills(.ring), usages: usages, now: context.date) }.fixedSize()
                 }
             } else if let plan = module.plan, let five = plan.fiveHour {
                 let level = QuotaEstimator.level(five.usedPercentage / 100)
@@ -554,6 +634,52 @@ struct PlanBadge: View {
         }
     }
 
+    /// The tools' numbers; a click shows every window in a popover.
+    private func limitsButton(_ pills: some View, usages: [AgentUsage], now: Date) -> some View {
+        Button { setShowsLimits(!showsLimits) } label: { pills.contentShape(Rectangle()) }
+            .buttonStyle(PressScale())
+            .popover(isPresented: Binding(get: { showsLimits }, set: { setShowsLimits($0) }), arrowEdge: .bottom) {
+                LimitsPopover(usages: usages, now: now, module: module)
+            }
+    }
+
+    /// "Claude: set up limits" (opens the setup page), or a wait for the first numbers.
+    /// `text` nil: the pill and the arrow only.
+    @ViewBuilder private func claudeMissing(_ text: String?) -> some View {
+        if module.statusBridgeInstalled {
+            HStack(spacing: 5) {
+                ToolBadge(provider: ClaudeCodeProvider.id)
+                Text(text == nil ? "…" : "after next reply").fixedSize()
+            }
+            .font(Theme.font(12)).foregroundStyle(Theme.textTertiary)
+            .help("Claude Code reports its 5-hour and weekly limits after the first answer in a session.")
+        } else {
+            Button {
+                if let url = StatusFiles.setupGuide { NSWorkspace.shared.open(url) }
+            } label: {
+                HStack(spacing: 5) {
+                    ToolBadge(provider: ClaudeCodeProvider.id)
+                    if let text { Text(text).fixedSize() }
+                    Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
+                }
+                .font(Theme.font(12, .medium)).foregroundStyle(Theme.accent)
+            }
+            .buttonStyle(PressScale())
+            .help("Show Claude's plan limits: one line in Claude Code's settings")
+        }
+    }
+
+    /// The popover holds the island open while it shows.
+    private func setShowsLimits(_ show: Bool) {
+        showsLimits = show
+        if show, lockToken == nil {
+            lockToken = IslandLock.shared.acquire("limits") { setShowsLimits(false) }
+        } else if !show, let token = lockToken {
+            lockToken = nil
+            IslandLock.shared.release(token)
+        }
+    }
+
     private func help(_ plan: StatusSnapshot, now: Date) -> String {
         var lines: [String] = []
         if let five = plan.fiveHour {
@@ -570,10 +696,49 @@ struct PlanBadge: View {
     }
 }
 
+/// Every tool's 5-hour and weekly windows with their resets, from a click on the header.
+private struct LimitsPopover: View {
+    let usages: [AgentUsage]
+    let now: Date
+    let module: AgentsModule
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(usages, id: \.provider) { usage in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        ToolBadge(provider: usage.provider)
+                        if let plan = usage.plan { Text(plan).font(Theme.font(11)).foregroundStyle(.secondary) }
+                    }
+                    ForEach([usage.primary, usage.secondary].compactMap { $0 }, id: \.label) { window in
+                        HStack {
+                            Text(window.label == "week" ? "Week" : window.label.isEmpty ? "Window" : window.label)
+                                .frame(width: 44, alignment: .leading)
+                            Text("\(Int(window.usedPercent.rounded())) %").monospacedDigit().frame(width: 44, alignment: .trailing)
+                            if let reset = window.resetsAt {
+                                Text(window.label == "week" ? UsageText.resetDay(reset, now: now, calendar: .current)
+                                                            : UsageText.left(until: reset, now: now))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .font(Theme.font(12))
+                        if let pace = module.forecast(usage.provider, window, now: now) {
+                            Text(pace).font(Theme.font(11)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(minWidth: 220, alignment: .leading)
+    }
+}
+
 /// One tool's plan limits in the header: ring and percentage of its fuller window, both windows
 /// and their resets in the tooltip.
 struct UsagePill: View {
-    enum Style { case named, badge, ring }
+    /// `short`: the pill and the percentage without the window's name.
+    enum Style { case named, short, ring }
     let usage: AgentUsage
     let style: Style
     let now: Date
@@ -601,8 +766,12 @@ struct UsagePill: View {
         HStack(spacing: 5) {
             ring
             switch style {
-            case .named: Text("\(usage.displayName) \(percent)\(suffix)")
-            case .badge: Text("\(AgentsModule.badge(of: usage.provider)) \(percent)")
+            case .named:
+                ToolBadge(provider: usage.provider)
+                Text("\(percent)\(suffix)")
+            case .short:
+                ToolBadge(provider: usage.provider)
+                Text(percent)
             case .ring: EmptyView()
             }
         }

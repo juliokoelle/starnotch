@@ -85,7 +85,10 @@ final class NotchController {
         let root = NotchRootView(
             model: model,
             onTapIsland: { [weak self] in
-                if let url = self?.model.sneak?.url {
+                if let url = self?.model.sneak?.url, url.scheme == Brand.urlScheme {
+                    // Our own links stay in this app, even when another copy is registered for the scheme.
+                    NSApp.delegate?.application?(NSApp, open: [url])
+                } else if let url = self?.model.sneak?.url {
                     NSWorkspace.shared.open(url)
                 } else {
                     self?.expand()
@@ -345,6 +348,12 @@ final class NotchController {
         pinned = false
         guard model.interaction != .rest else { return }
         set(.rest, animation: Theme.close)
+        // Closed, the island goes back to the first tab, so it opens there next time.
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard let self, self.model.interaction == .rest, let first = self.model.modules.first?.kind else { return }
+            self.model.module = first
+        }
         if model.capture != nil {
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(400))

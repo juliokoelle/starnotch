@@ -35,6 +35,8 @@ final class NotchModel {
     @ObservationIgnored var toggleWatch: (() -> Void)?
     /// The "+" in the panel opens quick capture (preview).
     @ObservationIgnored var requestCapture: (() -> Void)?
+    /// A tab was dragged to a new place: the visible modules in their new order, to save.
+    @ObservationIgnored var onReorder: (([ModuleKind]) -> Void)?
 
     /// The modules shown, in tab order (hidden ones are left out; see `ModuleAvailability`).
     var modules: [NotchModule]
@@ -67,6 +69,9 @@ final class NotchModel {
     /// The module whose ears show; at rest by default only one that needs the user.
     var ambient: NotchModule? {
         let pool = interaction == .rest && earsMode != .always ? active.filter(\.needsAttention) : active
+        // At rest the first tab is the one in focus: it shows whenever it has something, even
+        // when another module calls louder.
+        if interaction == .rest, !pool.isEmpty, let first = modules.first, first.ambientPriority > 0 { return first }
         return pool.max { $0.ambientPriority < $1.ambientPriority }
     }
 

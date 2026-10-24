@@ -1,0 +1,64 @@
+import AppKit
+import Carbon.HIToolbox
+
+/// A system-wide keyboard shortcut via Carbon's `RegisterEventHotKey`.
+/// Works without Accessibility permission, unlike a global key event monitor.
+@MainActor
+final class HotKey {
+    private var hotKeyRef: EventHotKeyRef?
+    private var handlerRef: EventHandlerRef?
+    private let action: () -> Void
+
+    /// Control + Option + Space.
+    static func controlOptionSpace(action: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey), id: 1, action: action)
+    }
+
+    /// Control + Option + J: join the next meeting.
+    static func controlOptionJ(action: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_ANSI_J), modifiers: UInt32(controlKey | optionKey), id: 2, action: action)
+    }
+
+    /// Control + Option + N: quick capture (design preview).
+    static func controlOptionN(action: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_ANSI_N), modifiers: UInt32(controlKey | optionKey), id: 3, action: action)
+    }
+
+    /// Control + Option + W: Watch mode on or off.
+    static func controlOptionW(action: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_ANSI_W), modifiers: UInt32(controlKey | optionKey), id: 4, action: action)
+    }
+
+    private let id: UInt32
+
+    init(keyCode: UInt32, modifiers: UInt32, id: UInt32, action: @escaping () -> Void) {
+        self.action = action
+        self.id = id
+
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
+            guard let context else { return noErr }
+            let hotKey = Unmanaged<HotKey>.fromOpaque(context).takeUnretainedValue()
+            // Every handler sees every hot key of the app; act only on our own id.
+            var pressed = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                              nil, MemoryLayout<EventHotKeyID>.size, nil, &pressed)
+            guard pressed.id == hotKey.id else { return OSStatus(eventNotHandledErr) }
+            // Carbon delivers hot key events on the main thread.
+            MainActor.assumeIsolated { hotKey.action() }
+            return noErr
+        }, 1, &eventType, context, &handlerRef)
+
+        let hotKeyID = EventHotKeyID(signature: OSType(0x4E_53_57_54), id: id)  // "NSWT"
+        let registered = RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
+        if status != noErr || registered != noErr {
+            Log.app.error("Hot key registration failed (\(status), \(registered))")
+        }
+    }
+
+    isolated deinit {
+        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
+        if let handlerRef { RemoveEventHandler(handlerRef) }
+    }
+}

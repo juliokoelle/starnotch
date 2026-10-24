@@ -1,0 +1,9 @@
+{
+  "name": "starnotch-approvals",
+  "displayName": "Starnotch approvals",
+  "version": "0.1.0",
+  "description": "Answer Claude Code permission prompts from the Starnotch island: allow once, allow for this session, or deny. Falls back to the normal prompt whenever Starnotch isn't there.",
+  "author": { "name": "Starnotch authors" },
+  "license": "Apache-2.0",
+  "keywords": ["permissions", "notch", "macos"]
+}

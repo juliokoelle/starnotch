@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.codex/hooks/starnotch-ask-notch.sh\" codex",
+            "timeout": 75,
+            "statusMessage": "Asking in the notch"
+          }
+        ]
+      }
+    ]
+  }
+}

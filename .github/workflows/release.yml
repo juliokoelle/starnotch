@@ -1,0 +1,84 @@
+name: Release
+
+# Builds, signs, notarizes and publishes a release when a version tag is pushed (v0.2.0).
+# Needs these repository secrets (see RELEASING.md):
+#   DEVELOPER_ID_P12          base64 of the Developer ID Application certificate (.p12)
+#   DEVELOPER_ID_P12_PASSWORD its password
+#   DEVELOPER_ID              "Developer ID Application: Name (TEAMID)"
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD   for notarytool (app-specific password)
+#   SPARKLE_PRIVATE_KEY       the EdDSA private key from generate_keys (exported)
+#   SPARKLE_PUBLIC_KEY        its public key (also in Info.plist)
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      STARNOTCH_SPARKLE: "1"
+      SPARKLE_FEED_URL: https://github.com/juliokoelle/starnotch/releases/latest/download/appcast.xml
+      SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+      DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
+      NOTARY_PROFILE: starnotch-notary
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Test
+        run: swift test
+      - name: Signing keychain
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          PASS="$(uuidgen)"
+          security create-keychain -p "$PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASS" "$KEYCHAIN"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$PASS" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+      - name: Notary credentials
+        run: |
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+            --apple-id "${{ secrets.APPLE_ID }}" --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_APP_PASSWORD }}" --keychain "$RUNNER_TEMP/release.keychain-db"
+      - name: Build
+        run: ./scripts/build-app.sh
+      - name: Sign and notarize
+        run: ./scripts/release/sign-and-notarize.sh build/Starnotch.app
+      - name: Disk image
+        run: |
+          mkdir -p build/releases
+          ./scripts/release/make-dmg.sh build/Starnotch.app "$VERSION"
+          mv build/starnotch-"$VERSION".dmg build/releases/
+      - name: Appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          SPARKLE_DIR="$RUNNER_TEMP/sparkle"
+          mkdir -p "$SPARKLE_DIR"
+          curl -fsSL -o "$SPARKLE_DIR/sparkle.tar.xz" https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz
+          tar -xf "$SPARKLE_DIR/sparkle.tar.xz" -C "$SPARKLE_DIR"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/ed.key"
+          SPARKLE_BIN="$SPARKLE_DIR/bin" SPARKLE_KEY_FILE="$RUNNER_TEMP/ed.key" \
+            DOWNLOAD_URL_PREFIX="https://github.com/juliokoelle/starnotch/releases/download/$GITHUB_REF_NAME/" \
+            ./scripts/release/appcast.sh build/releases
+          rm "$RUNNER_TEMP/ed.key"
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/releases/starnotch-"$VERSION".dmg build/releases/appcast.xml \
+            --title "Starnotch $VERSION" --generate-notes
+      - name: Clean up the keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true

@@ -1,0 +1,19 @@
+name: Idea
+description: Something the notch should do.
+labels: [idea]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to see or do in the notch?
+      description: The situation, not the solution first.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could it work?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you use today instead?

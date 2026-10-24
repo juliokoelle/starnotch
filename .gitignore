@@ -1,0 +1,8 @@
+.build/
+build/
+.swiftpm/
+*.xcodeproj
+.DS_Store
+art/astra/renders/
+art/astra/*.blend
+art/astra/*.blend1

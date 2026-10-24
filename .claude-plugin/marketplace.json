@@ -1,0 +1,12 @@
+{
+  "name": "starnotch",
+  "description": "Starnotch integrations for Claude Code.",
+  "owner": { "name": "Starnotch authors" },
+  "plugins": [
+    {
+      "name": "starnotch-approvals",
+      "source": "./integrations/claude-code/starnotch-approvals",
+      "description": "Answer Claude Code permission prompts from the Starnotch island."
+    }
+  ]
+}

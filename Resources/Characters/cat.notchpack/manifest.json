@@ -1,0 +1,211 @@
+{
+  "format": 1,
+  "id": "cat",
+  "name": "Cat",
+  "version": "1.0",
+  "license": "Apache-2.0",
+  "author": "The Starnotch authors",
+  "note": "Effort levels change the eyes while the cat works; expressions bring their own eyes.",
+  "characters": [
+    {
+      "id": "cat",
+      "name": "Cat",
+      "tint": "#B08A7E",
+      "tintable": false,
+      "portrait": {
+        "file": "cat/level-high.png",
+        "sourceHeight": 240
+      },
+      "states": {
+        "idle": {
+          "file": "cat/level-high.png",
+          "sourceHeight": 240
+        },
+        "focus_working": {
+          "file": "cat/focused.png",
+          "sourceHeight": 240
+        },
+        "working": {
+          "file": "cat/focused.png",
+          "sourceHeight": 240
+        },
+        "thinking": {
+          "file": "cat/level-high.png",
+          "sourceHeight": 240
+        },
+        "reply_typing": {
+          "file": "cat/level-high.png",
+          "sourceHeight": 240
+        },
+        "curious": {
+          "file": "cat/surprised.png",
+          "sourceHeight": 240
+        },
+        "surprised": {
+          "file": "cat/surprised.png",
+          "sourceHeight": 240
+        },
+        "celebrating": {
+          "file": "cat/happy.png",
+          "sourceHeight": 240
+        },
+        "happy": {
+          "file": "cat/happy.png",
+          "sourceHeight": 240
+        },
+        "sad": {
+          "file": "cat/grumpy.png",
+          "sourceHeight": 240
+        },
+        "error_problem": {
+          "file": "cat/grumpy.png",
+          "sourceHeight": 240
+        },
+        "sleepy": {
+          "file": "cat/sleepy.png",
+          "sourceHeight": 240
+        },
+        "sleeping": {
+          "file": "cat/asleep.png",
+          "sourceHeight": 240
+        },
+        "peek": {
+          "file": "cat/level-high.png",
+          "sourceHeight": 240
+        }
+      },
+      "levels": {
+        "low": {
+          "name": "Low eyes",
+          "states": {
+            "focus_working": {
+              "file": "cat/level-low.png",
+              "sourceHeight": 240
+            },
+            "working": {
+              "file": "cat/level-low.png",
+              "sourceHeight": 240
+            },
+            "thinking": {
+              "file": "cat/level-low.png",
+              "sourceHeight": 240
+            },
+            "reply_typing": {
+              "file": "cat/level-low.png",
+              "sourceHeight": 240
+            }
+          }
+        },
+        "medium": {
+          "name": "Medium eyes",
+          "states": {
+            "focus_working": {
+              "file": "cat/level-medium.png",
+              "sourceHeight": 240
+            },
+            "working": {
+              "file": "cat/level-medium.png",
+              "sourceHeight": 240
+            },
+            "thinking": {
+              "file": "cat/level-medium.png",
+              "sourceHeight": 240
+            },
+            "reply_typing": {
+              "file": "cat/level-medium.png",
+              "sourceHeight": 240
+            }
+          }
+        },
+        "high": {
+          "name": "High eyes",
+          "states": {
+            "focus_working": {
+              "file": "cat/level-high.png",
+              "sourceHeight": 240
+            },
+            "working": {
+              "file": "cat/level-high.png",
+              "sourceHeight": 240
+            },
+            "thinking": {
+              "file": "cat/level-high.png",
+              "sourceHeight": 240
+            },
+            "reply_typing": {
+              "file": "cat/level-high.png",
+              "sourceHeight": 240
+            }
+          }
+        },
+        "xhigh": {
+          "name": "Extra eyes",
+          "states": {
+            "focus_working": {
+              "file": "cat/level-xhigh.png",
+              "sourceHeight": 240
+            },
+            "working": {
+              "file": "cat/level-xhigh.png",
+              "sourceHeight": 240
+            },
+            "thinking": {
+              "file": "cat/level-xhigh.png",
+              "sourceHeight": 240
+            },
+            "reply_typing": {
+              "file": "cat/level-xhigh.png",
+              "sourceHeight": 240
+            }
+          }
+        },
+        "max": {
+          "name": "Max eyes",
+          "states": {
+            "focus_working": {
+              "file": "cat/level-max.png",
+              "sourceHeight": 240
+            },
+            "working": {
+              "file": "cat/level-max.png",
+              "sourceHeight": 240
+            },
+            "thinking": {
+              "file": "cat/level-max.png",
+              "sourceHeight": 240
+            },
+            "reply_typing": {
+              "file": "cat/level-max.png",
+              "sourceHeight": 240
+            },
+            "peek": {
+              "file": "cat/peek-max.png",
+              "sourceHeight": 149
+            }
+          }
+        },
+        "ultra": {
+          "name": "Ultra eyes",
+          "states": {
+            "focus_working": {
+              "file": "cat/level-ultra.png",
+              "sourceHeight": 240
+            },
+            "working": {
+              "file": "cat/level-ultra.png",
+              "sourceHeight": 240
+            },
+            "thinking": {
+              "file": "cat/level-ultra.png",
+              "sourceHeight": 240
+            },
+            "reply_typing": {
+              "file": "cat/level-ultra.png",
+              "sourceHeight": 240
+            }
+          }
+        }
+      }
+    }
+  ]
+}

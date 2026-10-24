@@ -1,0 +1,43 @@
+import Testing
+import TestSupport
+@testable import NotchCore
+
+@Suite struct QuietTests {
+    @Test func earsAtRest() {
+        // Default: agents merely working don't show; something that needs you does.
+        #expect(!Quiet.showsEars(.activity, mode: .attention, watching: false))
+        #expect(Quiet.showsEars(.attention, mode: .attention, watching: false))
+        #expect(!Quiet.showsEars(.none, mode: .attention, watching: false))
+        #expect(Quiet.showsEars(.activity, mode: .always, watching: false))
+        #expect(!Quiet.showsEars(.attention, mode: .never, watching: false))
+        // Watching: never.
+        #expect(!Quiet.showsEars(.attention, mode: .always, watching: true))
+    }
+
+    @Test func sneaksWhileWatching() {
+        #expect(Quiet.letsThrough(urgent: false, watching: false))
+        #expect(!Quiet.letsThrough(urgent: false, watching: true))
+        #expect(Quiet.letsThrough(urgent: true, watching: true))
+        #expect(Quiet.summary(0) == nil)
+        #expect(Quiet.summary(1) == "1 update while you watched")
+        #expect(Quiet.summary(3) == "3 updates while you watched")
+    }
+
+    @Test func whenToWatch() {
+        let now = UTC.date("2026-10-22 20:00")
+        #expect(Quiet.watching(manualUntil: nil, manualOn: false, automatic: true, fullscreen: true, videoPlaying: false, now: now))
+        #expect(Quiet.watching(manualUntil: nil, manualOn: false, automatic: true, fullscreen: false, videoPlaying: true, now: now))
+        #expect(!Quiet.watching(manualUntil: nil, manualOn: false, automatic: false, fullscreen: true, videoPlaying: true, now: now))
+        #expect(Quiet.watching(manualUntil: UTC.date("2026-10-22 21:00"), manualOn: true, automatic: false,
+                               fullscreen: false, videoPlaying: false, now: now))
+        #expect(!Quiet.watching(manualUntil: UTC.date("2026-10-22 19:00"), manualOn: true, automatic: false,
+                                fullscreen: false, videoPlaying: false, now: now))
+        #expect(Quiet.watching(manualUntil: nil, manualOn: true, automatic: false, fullscreen: false, videoPlaying: false, now: now))
+    }
+
+    @Test func fullscreenWindow() {
+        let screen = Bytes.rect(0, 0, 1512, 982)
+        #expect(Quiet.fills(window: Bytes.rect(0, 0, 1512, 982), screen: screen))
+        #expect(!Quiet.fills(window: Bytes.rect(0, 33, 1512, 949), screen: screen))  // a maximised window below the menu bar
+    }
+}

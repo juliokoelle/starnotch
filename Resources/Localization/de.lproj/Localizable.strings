@@ -1,0 +1,49 @@
+/* German interface strings. Keys are the English text as written in the code.
+   Missing keys fall back to English. */
+
+/* Onboarding */
+"Welcome to %@" = "Willkommen bei %@";
+"The notch becomes a small island: hover to peek, click to open, ⌃⌥Space from the keyboard. Choose what it shows." = "Die Notch wird zur kleinen Insel: darüberfahren für einen Blick, klicken zum Öffnen, ⌃⌥Leertaste per Tastatur. Wähle, was sie zeigt.";
+"Modules" = "Module";
+"Permissions" = "Berechtigungen";
+"Calendar access" = "Kalenderzugriff";
+"Allow…" = "Erlauben…";
+"Open Settings" = "Einstellungen öffnen";
+"Allowed" = "Erlaubt";
+"For your next meeting, its countdown and Join" = "Für dein nächstes Meeting, den Countdown und Beitreten";
+"Off. Turn it on in System Settings › Privacy & Security › Calendars." = "Aus. In den Systemeinstellungen unter Datenschutz & Sicherheit › Kalender einschalten.";
+"Nothing leaves this Mac. No telemetry; connectors you add decide what they talk to." = "Nichts verlässt diesen Mac. Keine Telemetrie; Connectoren, die du hinzufügst, bestimmen selbst, womit sie sprechen.";
+"Change this anytime in Settings." = "Das lässt sich jederzeit in den Einstellungen ändern.";
+"Done" = "Fertig";
+
+/* Modules */
+"Agents" = "Agenten";
+"Today" = "Heute";
+"Dictate" = "Diktieren";
+"Next" = "Termine";
+"Now playing" = "Musik";
+"Claude Code sessions on this Mac" = "Claude-Code-Sitzungen auf diesem Mac";
+"Claude Code isn't set up on this Mac" = "Claude Code ist auf diesem Mac nicht eingerichtet";
+"Needs a connector (see docs/SDK.md)" = "Braucht einen Connector (siehe docs/SDK.md)";
+"Your calendars, next meeting and Join" = "Deine Kalender, das nächste Meeting und Beitreten";
+"Asks for calendar access when you open it" = "Fragt beim ersten Öffnen nach Kalenderzugriff";
+"Calendar access is off in System Settings" = "Kalenderzugriff ist in den Systemeinstellungen aus";
+"Spotify or Music" = "Spotify oder Musik";
+"Spotify or Music isn't installed" = "Spotify oder Musik ist nicht installiert";
+"Wispr Flow hands-free" = "Wispr Flow freihändig";
+"Wispr Flow isn't installed" = "Wispr Flow ist nicht installiert";
+
+/* Settings */
+"Projects" = "Projekte";
+"Colour scale" = "Farbskala";
+"Slots" = "Plätze";
+"Activation" = "Aktivierung";
+"Behavior" = "Verhalten";
+"Display" = "Bildschirm";
+"Island on" = "Insel auf";
+"Notch" = "Notch";
+"Main display" = "Hauptbildschirm";
+"With pointer" = "Mit Mauszeiger";
+"Modules hide themselves when what they need isn't on this Mac." = "Module blenden sich aus, wenn auf diesem Mac fehlt, was sie brauchen.";
+"On a display without a notch, the island is a small pill at the top center." = "Auf einem Bildschirm ohne Notch ist die Insel eine kleine Pille oben in der Mitte.";
+"Quit" = "Beenden";

@@ -1,0 +1,31 @@
+name: Connector
+description: Propose or share a connector (a data source for Today, loops, people or quick capture).
+labels: [connector]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Data source
+      placeholder: "Things 3, Linear, a Markdown folder, …"
+    validations:
+      required: true
+  - type: checkboxes
+    id: capabilities
+    attributes:
+      label: Capabilities
+      options:
+        - label: TodayProvider (Today list)
+        - label: JobsProvider (loops)
+        - label: PeopleProvider (meeting prep, names in capture)
+        - label: InboxSink (quick capture)
+  - type: textarea
+    id: access
+    attributes:
+      label: How does it read and write?
+      description: Local files, an API with a token, AppleScript. Which permissions does it need? Does anything leave the Mac?
+    validations:
+      required: true
+  - type: input
+    id: repo
+    attributes:
+      label: Link, if it exists already

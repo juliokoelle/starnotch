@@ -1,0 +1,8 @@
+{"ts":"2027-01-01T00:00:00Z","kind":"thread.open","data":{"id":"x"}}
+{"ts":"2027-01-01T00:00:01Z","kind":"thread.turn","data":{}}
+{"ts":"2027-01-01T00:00:02Z","kind":"thread.turn","data":{}}
+{"ts":"2027-01-01T00:00:03Z","kind":"thread.turn","data":{}}
+{"ts":"2027-01-01T00:00:04Z","kind":"thread.turn","data":{}}
+{"ts":"2027-01-01T00:00:05Z","kind":"thread.turn","data":{}}
+{"ts":"2027-01-01T00:00:06Z","kind":"thread.turn","data":{}}
+{"ts":"2027-01-01T00:00:07Z","kind":"thread.close","data":{}}

@@ -1,0 +1,41 @@
+name: Bug
+description: Something doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you saw. A screenshot helps (start the app with `--capturable` so the island shows up in screenshots).
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.4"
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model
+      placeholder: "MacBook Pro 14-inch, M3"
+    validations:
+      required: true
+  - type: textarea
+    id: displays
+    attributes:
+      label: Displays
+      description: Built-in display with a notch, external displays, which one has the menu bar, the "Island on" setting.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Settings, bottom line.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Optional: `log stream --info --predicate 'subsystem == \"app.starnotch.mac\"'` while it happens."
+      render: text

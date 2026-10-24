@@ -1,0 +1,426 @@
+{
+  "author" : "The Starnotch authors",
+  "characters" : [
+    {
+      "id" : "astra",
+      "levels" : {
+        "high" : {
+          "name" : "Aurora",
+          "states" : {
+            "angry" : {
+              "file" : "astra\/aurora\/angry.png",
+              "sourceHeight" : 240
+            },
+            "celebrating" : {
+              "file" : "astra\/aurora\/joyful.png",
+              "sourceHeight" : 240
+            },
+            "error_problem" : {
+              "file" : "astra\/aurora\/confused.png",
+              "sourceHeight" : 240
+            },
+            "excited" : {
+              "file" : "astra\/aurora\/excited.png",
+              "sourceHeight" : 240
+            },
+            "happy" : {
+              "file" : "astra\/aurora\/happy.png",
+              "sourceHeight" : 240
+            },
+            "idle" : {
+              "file" : "astra\/aurora\/neutral.png",
+              "sourceHeight" : 240
+            },
+            "love" : {
+              "file" : "astra\/aurora\/love.png",
+              "sourceHeight" : 240
+            },
+            "peek" : {
+              "file" : "astra\/aurora\/peek.png",
+              "sourceHeight" : 153
+            },
+            "sleeping" : {
+              "file" : "astra\/aurora\/sleep.png",
+              "sourceHeight" : 240
+            },
+            "sleepy" : {
+              "file" : "astra\/aurora\/sleepy.png",
+              "sourceHeight" : 240
+            },
+            "surprised" : {
+              "file" : "astra\/aurora\/surprised.png",
+              "sourceHeight" : 240
+            },
+            "thinking" : {
+              "file" : "astra\/aurora\/thinking.png",
+              "sourceHeight" : 240
+            },
+            "voice_listening" : {
+              "file" : "astra\/aurora\/happy.png",
+              "sourceHeight" : 240
+            },
+            "working" : {
+              "file" : "astra\/aurora\/determined.png",
+              "sourceHeight" : 240
+            }
+          },
+          "tint" : "#E46BE0"
+        },
+        "low" : {
+          "name" : "Mint",
+          "states" : {
+            "angry" : {
+              "file" : "astra\/mint\/angry.png",
+              "sourceHeight" : 240
+            },
+            "celebrating" : {
+              "file" : "astra\/mint\/joyful.png",
+              "sourceHeight" : 240
+            },
+            "error_problem" : {
+              "file" : "astra\/mint\/confused.png",
+              "sourceHeight" : 240
+            },
+            "excited" : {
+              "file" : "astra\/mint\/excited.png",
+              "sourceHeight" : 240
+            },
+            "happy" : {
+              "file" : "astra\/mint\/happy.png",
+              "sourceHeight" : 240
+            },
+            "idle" : {
+              "file" : "astra\/mint\/neutral.png",
+              "sourceHeight" : 240
+            },
+            "love" : {
+              "file" : "astra\/mint\/love.png",
+              "sourceHeight" : 240
+            },
+            "peek" : {
+              "file" : "astra\/mint\/peek.png",
+              "sourceHeight" : 153
+            },
+            "sleeping" : {
+              "file" : "astra\/mint\/sleep.png",
+              "sourceHeight" : 240
+            },
+            "sleepy" : {
+              "file" : "astra\/mint\/sleepy.png",
+              "sourceHeight" : 240
+            },
+            "surprised" : {
+              "file" : "astra\/mint\/surprised.png",
+              "sourceHeight" : 240
+            },
+            "thinking" : {
+              "file" : "astra\/mint\/thinking.png",
+              "sourceHeight" : 240
+            },
+            "voice_listening" : {
+              "file" : "astra\/mint\/happy.png",
+              "sourceHeight" : 240
+            },
+            "working" : {
+              "file" : "astra\/mint\/determined.png",
+              "sourceHeight" : 240
+            }
+          },
+          "tint" : "#3ED6A0"
+        },
+        "max" : {
+          "name" : "Sol",
+          "states" : {
+            "angry" : {
+              "file" : "astra\/sol\/angry.png",
+              "sourceHeight" : 240
+            },
+            "celebrating" : {
+              "file" : "astra\/sol\/joyful.png",
+              "sourceHeight" : 240
+            },
+            "error_problem" : {
+              "file" : "astra\/sol\/confused.png",
+              "sourceHeight" : 240
+            },
+            "excited" : {
+              "file" : "astra\/sol\/excited.png",
+              "sourceHeight" : 240
+            },
+            "happy" : {
+              "file" : "astra\/sol\/happy.png",
+              "sourceHeight" : 240
+            },
+            "idle" : {
+              "file" : "astra\/sol\/neutral.png",
+              "sourceHeight" : 240
+            },
+            "love" : {
+              "file" : "astra\/sol\/love.png",
+              "sourceHeight" : 240
+            },
+            "peek" : {
+              "file" : "astra\/sol\/peek.png",
+              "sourceHeight" : 153
+            },
+            "sleeping" : {
+              "file" : "astra\/sol\/sleep.png",
+              "sourceHeight" : 240
+            },
+            "sleepy" : {
+              "file" : "astra\/sol\/sleepy.png",
+              "sourceHeight" : 240
+            },
+            "surprised" : {
+              "file" : "astra\/sol\/surprised.png",
+              "sourceHeight" : 240
+            },
+            "thinking" : {
+              "file" : "astra\/sol\/thinking.png",
+              "sourceHeight" : 240
+            },
+            "voice_listening" : {
+              "file" : "astra\/sol\/happy.png",
+              "sourceHeight" : 240
+            },
+            "working" : {
+              "file" : "astra\/sol\/determined.png",
+              "sourceHeight" : 240
+            }
+          },
+          "tint" : "#FF9A3C"
+        },
+        "medium" : {
+          "name" : "Nova",
+          "tint" : "#6E7BFF"
+        },
+        "ultra" : {
+          "name" : "Rosé",
+          "states" : {
+            "angry" : {
+              "file" : "astra\/rose\/angry.png",
+              "sourceHeight" : 240
+            },
+            "celebrating" : {
+              "file" : "astra\/rose\/joyful.png",
+              "sourceHeight" : 240
+            },
+            "error_problem" : {
+              "file" : "astra\/rose\/confused.png",
+              "sourceHeight" : 240
+            },
+            "excited" : {
+              "file" : "astra\/rose\/excited.png",
+              "sourceHeight" : 240
+            },
+            "happy" : {
+              "file" : "astra\/rose\/happy.png",
+              "sourceHeight" : 240
+            },
+            "idle" : {
+              "file" : "astra\/rose\/neutral.png",
+              "sourceHeight" : 240
+            },
+            "love" : {
+              "file" : "astra\/rose\/love.png",
+              "sourceHeight" : 240
+            },
+            "peek" : {
+              "file" : "astra\/rose\/peek.png",
+              "sourceHeight" : 153
+            },
+            "sleeping" : {
+              "file" : "astra\/rose\/sleep.png",
+              "sourceHeight" : 240
+            },
+            "sleepy" : {
+              "file" : "astra\/rose\/sleepy.png",
+              "sourceHeight" : 240
+            },
+            "surprised" : {
+              "file" : "astra\/rose\/surprised.png",
+              "sourceHeight" : 240
+            },
+            "thinking" : {
+              "file" : "astra\/rose\/thinking.png",
+              "sourceHeight" : 240
+            },
+            "voice_listening" : {
+              "file" : "astra\/rose\/happy.png",
+              "sourceHeight" : 240
+            },
+            "working" : {
+              "file" : "astra\/rose\/determined.png",
+              "sourceHeight" : 240
+            }
+          },
+          "tint" : "#FF6FA8"
+        },
+        "xhigh" : {
+          "name" : "Cosmo",
+          "states" : {
+            "angry" : {
+              "file" : "astra\/cosmo\/angry.png",
+              "sourceHeight" : 240
+            },
+            "celebrating" : {
+              "file" : "astra\/cosmo\/joyful.png",
+              "sourceHeight" : 240
+            },
+            "error_problem" : {
+              "file" : "astra\/cosmo\/confused.png",
+              "sourceHeight" : 240
+            },
+            "excited" : {
+              "file" : "astra\/cosmo\/excited.png",
+              "sourceHeight" : 240
+            },
+            "happy" : {
+              "file" : "astra\/cosmo\/happy.png",
+              "sourceHeight" : 240
+            },
+            "idle" : {
+              "file" : "astra\/cosmo\/neutral.png",
+              "sourceHeight" : 240
+            },
+            "love" : {
+              "file" : "astra\/cosmo\/love.png",
+              "sourceHeight" : 240
+            },
+            "peek" : {
+              "file" : "astra\/cosmo\/peek.png",
+              "sourceHeight" : 153
+            },
+            "sleeping" : {
+              "file" : "astra\/cosmo\/sleep.png",
+              "sourceHeight" : 240
+            },
+            "sleepy" : {
+              "file" : "astra\/cosmo\/sleepy.png",
+              "sourceHeight" : 240
+            },
+            "surprised" : {
+              "file" : "astra\/cosmo\/surprised.png",
+              "sourceHeight" : 240
+            },
+            "thinking" : {
+              "file" : "astra\/cosmo\/thinking.png",
+              "sourceHeight" : 240
+            },
+            "voice_listening" : {
+              "file" : "astra\/cosmo\/happy.png",
+              "sourceHeight" : 240
+            },
+            "working" : {
+              "file" : "astra\/cosmo\/determined.png",
+              "sourceHeight" : 240
+            }
+          },
+          "tint" : "#6A4FC8"
+        }
+      },
+      "name" : "Astra",
+      "portrait" : {
+        "file" : "astra\/nova\/neutral.png",
+        "sourceHeight" : 240
+      },
+      "states" : {
+        "angry" : {
+          "file" : "astra\/nova\/angry.png",
+          "sourceHeight" : 240
+        },
+        "celebrating" : {
+          "file" : "astra\/nova\/joyful.png",
+          "sourceHeight" : 240
+        },
+        "error_problem" : {
+          "file" : "astra\/nova\/confused.png",
+          "sourceHeight" : 240
+        },
+        "excited" : {
+          "file" : "astra\/nova\/excited.png",
+          "sourceHeight" : 240
+        },
+        "happy" : {
+          "file" : "astra\/nova\/happy.png",
+          "sourceHeight" : 240
+        },
+        "idle" : {
+          "file" : "astra\/nova\/neutral.png",
+          "sourceHeight" : 240
+        },
+        "love" : {
+          "file" : "astra\/nova\/love.png",
+          "sourceHeight" : 240
+        },
+        "peek" : {
+          "file" : "astra\/nova\/peek.png",
+          "sourceHeight" : 153
+        },
+        "sleeping" : {
+          "file" : "astra\/nova\/sleep.png",
+          "sourceHeight" : 240
+        },
+        "sleepy" : {
+          "file" : "astra\/nova\/sleepy.png",
+          "sourceHeight" : 240
+        },
+        "surprised" : {
+          "file" : "astra\/nova\/surprised.png",
+          "sourceHeight" : 240
+        },
+        "thinking" : {
+          "file" : "astra\/nova\/thinking.png",
+          "sourceHeight" : 240
+        },
+        "voice_listening" : {
+          "file" : "astra\/nova\/happy.png",
+          "sourceHeight" : 240
+        },
+        "working" : {
+          "file" : "astra\/nova\/determined.png",
+          "sourceHeight" : 240
+        }
+      },
+      "tint" : "#6E7BFF"
+    }
+  ],
+  "format" : 1,
+  "id" : "astra",
+  "license" : "Apache-2.0",
+  "name" : "Astra",
+  "recipes" : [
+    {
+      "key" : "astra_mint",
+      "name" : "Mint (tint)",
+      "tint" : "#3ED6A0",
+      "tintAmount" : 0.75
+    },
+    {
+      "key" : "astra_aurora",
+      "name" : "Aurora (tint)",
+      "tint" : "#E46BE0",
+      "tintAmount" : 0.55000000000000004
+    },
+    {
+      "key" : "astra_cosmo",
+      "name" : "Cosmo (tint)",
+      "shade" : 0.40000000000000002,
+      "tint" : "#6A4FC8",
+      "tintAmount" : 0.59999999999999998
+    },
+    {
+      "key" : "astra_sol",
+      "name" : "Sol (tint)",
+      "tint" : "#FF9A3C",
+      "tintAmount" : 0.80000000000000004
+    },
+    {
+      "key" : "astra_rose",
+      "name" : "Rosé (tint)",
+      "tint" : "#FF6FA8",
+      "tintAmount" : 0.75
+    }
+  ],
+  "version" : "1.0"
+}

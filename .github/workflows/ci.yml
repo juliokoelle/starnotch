@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: App bundle
+        run: ./scripts/build-app.sh
+      - name: No private assets in the bundle
+        run: |
+          ls build/*.app/Contents/Resources/Characters
+          test "$(ls build/*.app/Contents/Resources/Characters | tr '\n' ' ')" = "astra.notchpack cat.notchpack pebbles.notchpack "

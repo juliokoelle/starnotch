@@ -1,0 +1,24 @@
+{
+  "sessionId": "local_0000aaaa-0000-4000-8000-000000000001",
+  "cliSessionId": "5e550000-0000-4000-8000-000000000001",
+  "cwd": "/Users/ada/projects/harbor",
+  "originCwd": "/Users/ada/projects/harbor",
+  "lastFocusedAt": 1792490500000,
+  "createdAt": 1792483200000,
+  "lastActivityAt": 1792490400000,
+  "lastTurnEdgeAt": 1792490400000,
+  "model": "claude-opus-5-5",
+  "effort": "high",
+  "isArchived": false,
+  "title": "Report page: faster loading",
+  "titleSource": "auto",
+  "permissionMode": "auto",
+  "completedTurns": 4,
+  "titleTurn": 0,
+  "postTurnSummary": {
+    "status_category": "blocked",
+    "status_detail": "Faster report page ready; waiting for a yes to merge",
+    "needs_action": "Yes to merge the faster report page",
+    "summarizes_uuid": "00000000-0000-4000-8000-0000000000ff"
+  }
+}

@@ -1,0 +1,265 @@
+{
+  "author" : "The Starnotch authors",
+  "characters" : [
+    {
+      "id" : "pebble",
+      "name" : "Pebble",
+      "portrait" : {
+        "file" : "pebble\/portrait.png",
+        "sourceHeight" : 240
+      },
+      "states" : {
+        "celebrating" : {
+          "file" : "pebble\/celebrating.png",
+          "sourceHeight" : 240
+        },
+        "curious" : {
+          "file" : "pebble\/curious.png",
+          "sourceHeight" : 240
+        },
+        "idle" : {
+          "file" : "pebble\/idle.png",
+          "sourceHeight" : 240
+        },
+        "music" : {
+          "file" : "pebble\/music.png",
+          "sourceHeight" : 240
+        },
+        "reply_typing" : {
+          "file" : "pebble\/reply_typing.png",
+          "sourceHeight" : 240
+        },
+        "sad" : {
+          "file" : "pebble\/sad.png",
+          "sourceHeight" : 240
+        },
+        "sleepy" : {
+          "file" : "pebble\/sleepy.png",
+          "sourceHeight" : 240
+        },
+        "thinking" : {
+          "file" : "pebble\/thinking.png",
+          "sourceHeight" : 240
+        },
+        "voice_listening" : {
+          "file" : "pebble\/voice_listening.png",
+          "sourceHeight" : 240
+        },
+        "working" : {
+          "file" : "pebble\/working.png",
+          "sourceHeight" : 240
+        }
+      },
+      "tint" : "#7FA8FF"
+    },
+    {
+      "id" : "moss",
+      "name" : "Moss",
+      "portrait" : {
+        "file" : "moss\/portrait.png",
+        "sourceHeight" : 240
+      },
+      "states" : {
+        "celebrating" : {
+          "file" : "moss\/celebrating.png",
+          "sourceHeight" : 240
+        },
+        "curious" : {
+          "file" : "moss\/curious.png",
+          "sourceHeight" : 240
+        },
+        "idle" : {
+          "file" : "moss\/idle.png",
+          "sourceHeight" : 240
+        },
+        "music" : {
+          "file" : "moss\/music.png",
+          "sourceHeight" : 240
+        },
+        "reply_typing" : {
+          "file" : "moss\/reply_typing.png",
+          "sourceHeight" : 240
+        },
+        "sad" : {
+          "file" : "moss\/sad.png",
+          "sourceHeight" : 240
+        },
+        "sleepy" : {
+          "file" : "moss\/sleepy.png",
+          "sourceHeight" : 240
+        },
+        "thinking" : {
+          "file" : "moss\/thinking.png",
+          "sourceHeight" : 240
+        },
+        "voice_listening" : {
+          "file" : "moss\/voice_listening.png",
+          "sourceHeight" : 240
+        },
+        "working" : {
+          "file" : "moss\/working.png",
+          "sourceHeight" : 240
+        }
+      },
+      "tint" : "#7CCC99"
+    },
+    {
+      "id" : "ember",
+      "name" : "Ember",
+      "portrait" : {
+        "file" : "ember\/portrait.png",
+        "sourceHeight" : 240
+      },
+      "states" : {
+        "celebrating" : {
+          "file" : "ember\/celebrating.png",
+          "sourceHeight" : 240
+        },
+        "curious" : {
+          "file" : "ember\/curious.png",
+          "sourceHeight" : 240
+        },
+        "idle" : {
+          "file" : "ember\/idle.png",
+          "sourceHeight" : 240
+        },
+        "music" : {
+          "file" : "ember\/music.png",
+          "sourceHeight" : 240
+        },
+        "reply_typing" : {
+          "file" : "ember\/reply_typing.png",
+          "sourceHeight" : 240
+        },
+        "sad" : {
+          "file" : "ember\/sad.png",
+          "sourceHeight" : 240
+        },
+        "sleepy" : {
+          "file" : "ember\/sleepy.png",
+          "sourceHeight" : 240
+        },
+        "thinking" : {
+          "file" : "ember\/thinking.png",
+          "sourceHeight" : 240
+        },
+        "voice_listening" : {
+          "file" : "ember\/voice_listening.png",
+          "sourceHeight" : 240
+        },
+        "working" : {
+          "file" : "ember\/working.png",
+          "sourceHeight" : 240
+        }
+      },
+      "tint" : "#F2A566"
+    },
+    {
+      "id" : "plum",
+      "name" : "Plum",
+      "portrait" : {
+        "file" : "plum\/portrait.png",
+        "sourceHeight" : 240
+      },
+      "states" : {
+        "celebrating" : {
+          "file" : "plum\/celebrating.png",
+          "sourceHeight" : 240
+        },
+        "curious" : {
+          "file" : "plum\/curious.png",
+          "sourceHeight" : 240
+        },
+        "idle" : {
+          "file" : "plum\/idle.png",
+          "sourceHeight" : 240
+        },
+        "music" : {
+          "file" : "plum\/music.png",
+          "sourceHeight" : 240
+        },
+        "reply_typing" : {
+          "file" : "plum\/reply_typing.png",
+          "sourceHeight" : 240
+        },
+        "sad" : {
+          "file" : "plum\/sad.png",
+          "sourceHeight" : 240
+        },
+        "sleepy" : {
+          "file" : "plum\/sleepy.png",
+          "sourceHeight" : 240
+        },
+        "thinking" : {
+          "file" : "plum\/thinking.png",
+          "sourceHeight" : 240
+        },
+        "voice_listening" : {
+          "file" : "plum\/voice_listening.png",
+          "sourceHeight" : 240
+        },
+        "working" : {
+          "file" : "plum\/working.png",
+          "sourceHeight" : 240
+        }
+      },
+      "tint" : "#AF8CEF"
+    },
+    {
+      "id" : "slate",
+      "name" : "Slate",
+      "portrait" : {
+        "file" : "slate\/portrait.png",
+        "sourceHeight" : 240
+      },
+      "states" : {
+        "celebrating" : {
+          "file" : "slate\/celebrating.png",
+          "sourceHeight" : 240
+        },
+        "curious" : {
+          "file" : "slate\/curious.png",
+          "sourceHeight" : 240
+        },
+        "idle" : {
+          "file" : "slate\/idle.png",
+          "sourceHeight" : 240
+        },
+        "music" : {
+          "file" : "slate\/music.png",
+          "sourceHeight" : 240
+        },
+        "reply_typing" : {
+          "file" : "slate\/reply_typing.png",
+          "sourceHeight" : 240
+        },
+        "sad" : {
+          "file" : "slate\/sad.png",
+          "sourceHeight" : 240
+        },
+        "sleepy" : {
+          "file" : "slate\/sleepy.png",
+          "sourceHeight" : 240
+        },
+        "thinking" : {
+          "file" : "slate\/thinking.png",
+          "sourceHeight" : 240
+        },
+        "voice_listening" : {
+          "file" : "slate\/voice_listening.png",
+          "sourceHeight" : 240
+        },
+        "working" : {
+          "file" : "slate\/working.png",
+          "sourceHeight" : 240
+        }
+      },
+      "tint" : "#A8B5C6"
+    }
+  ],
+  "format" : 1,
+  "id" : "pebbles",
+  "license" : "Apache-2.0",
+  "name" : "Pebbles",
+  "version" : "1.0"
+}

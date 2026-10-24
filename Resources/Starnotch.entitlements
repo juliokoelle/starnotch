@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened runtime, not sandboxed: what the app needs and nothing else. -->
+<plist version="1.0">
+<dict>
+    <!-- Spotify and Music controls, the jump to Terminal and iTerm2 tabs. -->
+    <key>com.apple.security.automation.apple-events</key><true/>
+    <!-- Next meeting, quick capture events, Reminders in Today. -->
+    <key>com.apple.security.personal-information.calendars</key><true/>
+</dict>
+</plist>

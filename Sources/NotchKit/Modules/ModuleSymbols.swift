@@ -11,6 +11,7 @@ enum ModuleSymbols {
         case .nowPlaying: "music.note"
         case .system: "gauge.with.dots.needle.50percent"
         case .meeting: "person.2.wave.2"
+        case .tools: "square.on.square"
         }
     }
 }

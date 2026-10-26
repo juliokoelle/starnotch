@@ -41,6 +41,8 @@ enum ModuleAvailability {
             return Status(available: found, detail: found ? "Wispr Flow hands-free" : "Wispr Flow isn't installed")
         case .system:
             return Status(available: true, detail: "CPU, GPU, memory and the apps behind them")
+        case .tools:
+            return Status(available: true, detail: "Clipboard history, focus timer, file shelf")
         case .meeting:
             let found = FileManager.default.fileExists(atPath: Runtime.meetingAgentDir.appending(path: "agent.py").path)
             let missing = MeetingAgentSetup.missing(agentFound: found)
@@ -55,7 +57,7 @@ enum ModuleAvailability {
     }
 
     /// Order in Settings and onboarding.
-    static let order: [ModuleKind] = [.agents, .calendar, .meeting, .nowPlaying, .system, .dictation, .today]
+    static let order: [ModuleKind] = [.agents, .calendar, .meeting, .tools, .nowPlaying, .system, .dictation, .today]
 }
 
 /// One switch per module with what it needs; used by onboarding and Settings.

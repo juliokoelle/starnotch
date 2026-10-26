@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var allModules: [NotchModule] = []
     private var system: SystemModule?
     private var meeting: MeetingModule?
+    private var tools: ToolsModule?
     private var companion: MeetingCompanion?
     private let battery = BatteryMonitor()
     private let keepAwake = KeepAwake()
@@ -66,7 +67,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.system = system
         let meeting = MeetingModule()
         self.meeting = meeting
-        allModules = [agents, agenda, music, system, dictation, meeting]
+        let tools = ToolsModule()
+        self.tools = tools
+        allModules = [agents, agenda, music, system, dictation, meeting, tools]
         if let today { allModules.insert(today, at: 1) }
         notchModel = NotchModel(modules: shownModules(sample: sample))
         // --preview: mock data for screenshots and recordings; the features themselves are live.
@@ -308,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             music.startLive()
             system.start()
             startExtras(system)
+            startTools(tools)
         }
         if options.tour {
             Task { [weak self] in await self?.playTour() }
@@ -392,6 +396,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         shell.start()
         self.shell = shell
+    }
+
+    /// The clipboard watcher (only while the module is on) and a line when a focus or break ends.
+    private func startTools(_ tools: ToolsModule) {
+        tools.isEnabled = { [weak self] in
+            guard let self else { return false }
+            return ModuleAvailability.isShown(.tools, settings: self.state.settings)
+        }
+        tools.onPhaseEnd = { [weak self, weak tools] ended, next in
+            let focusDone = ended == .focus
+            self?.notch.sneak(Sneak(visual: .symbol(focusDone ? "cup.and.saucer.fill" : "timer", tint: focusDone ? .ok : .accent),
+                                    title: focusDone ? "Focus done" : "Back to focus",
+                                    detail: "\(next.title), \(Int((tools?.timer.length(of: next) ?? 0) / 60)) min",
+                                    duration: 3.4),
+                              key: "focus", urgent: true)
+        }
+        tools.start()
     }
 
     /// The consent page: what this Mac has and what can be set up, one click for all of it.

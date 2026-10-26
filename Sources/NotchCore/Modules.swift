@@ -8,6 +8,8 @@ public enum ModuleKind: String, Codable, CaseIterable, Sendable {
     case system
     /// The meeting agent (agent/): live contradictions, questions, commitments and prep cards.
     case meeting
+    /// Clipboard history, focus timer, file shelf.
+    case tools
 
     public var title: String {
         switch self {
@@ -18,6 +20,7 @@ public enum ModuleKind: String, Codable, CaseIterable, Sendable {
         case .nowPlaying: "Now playing"
         case .system: "System"
         case .meeting: "Meeting"
+        case .tools: "Tools"
         }
     }
 

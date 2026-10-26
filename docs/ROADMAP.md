@@ -49,6 +49,7 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 | ✅ | Meeting agent: contradictions, questions, commitments, prep, ask the memory | |
 | ⬜ | Starnotch MCP server | Tools `notify`, `ask` (options or free text) and `approve`, answered in the notch. One install makes every MCP client a Starnotch client: Claude Code, Codex, Cursor, Gemini CLI, VS Code, Claude Desktop and Cowork |
 | ⬜ | `ask` in the local API | Blocking question with options, returns the answer; the MCP server and the SDKs build on it |
+| ⬜ | Cloud sessions | Claude Code sessions running in the cloud (claude.ai/code, desktop app) in the same list, marked with a cloud badge (the star on a cloud) and the label "Cloud". Source to verify on a Mac: the desktop app's session files, else the sessions API with the user's login |
 | ⬜ | Codex provider | Sessions, limits, approvals through its `PermissionRequest` hook |
 
 ### Distribution

@@ -70,6 +70,20 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 - Command palette across all modules.
 - Licensing: Free and Pro in the app, Stripe checkout, license key.
 
+## Utilities: parity with Vorssaint and Notchy (Wave 2)
+
+Feature level only: Vorssaint is GPL-3.0, so none of its code comes into Starnotch (rule since 22.10: no GPL code). Built ourselves:
+
+- Per-app volume mixer (boost past 100 %, favourites), without an audio driver
+- App switcher with window previews; Dock hover previews; quit an app when its last window closes
+- Mouse and keyboard: natural scrolling per device, mouse button shortcuts, trackpad middle click
+- Quick toggles: dark mode, hide desktop icons, keep awake, do not disturb, hidden files
+- Permissions page: the status of every permission the app uses, with buttons to revoke or uninstall cleanly
+- System: network up and down next to CPU, GPU and memory
+- Music: synced lyrics and the play queue
+- Agents: OpenCode and GitHub Copilot next to Claude Code and Codex, with plan limits, tokens and the API value of a session
+- Settings organised like a menu of tools: each one switched on only when used
+
 ## Wave 3: after YC
 
 - Windows build (pill at the top center; agents, approvals, meeting agent). The agent core, the protocol and the MCP server are already platform neutral.

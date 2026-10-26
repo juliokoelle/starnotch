@@ -122,3 +122,11 @@ import TestSupport
         #expect(!ended && timer.shown(at: t0 + 90) == 90 && timer.progress(at: t0 + 90) == 0.5)
     }
 }
+
+@Suite struct DeviceNameTests {
+    @Test func outputAndDeviceNamesMatchLoosely() {
+        #expect(DeviceBattery.sameDevice("Max's AirPods Pro", "AirPods Pro"))
+        #expect(DeviceBattery.sameDevice("Magic Mouse", nil))
+        #expect(!DeviceBattery.sameDevice("Magic Mouse", "AirPods Pro"))
+    }
+}

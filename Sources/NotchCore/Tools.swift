@@ -268,6 +268,14 @@ public struct DeviceBattery: Equatable, Sendable {
         return parts.joined(separator: " · ")
     }
 
+    /// The audio output's name and the Bluetooth device's name belong together ("AirPods Pro" and
+    /// "Max's AirPods Pro"); without an output name any device will do.
+    public static func sameDevice(_ device: String, _ output: String?) -> Bool {
+        guard let output, !output.isEmpty else { return true }
+        let a = device.lowercased(), b = output.lowercased()
+        return a == b || a.contains(b) || b.contains(a)
+    }
+
     /// The connected device with a battery whose name matches `name` (the audio output's), else
     /// the first connected one with a battery.
     public static func parse(_ data: Data, preferring name: String?) -> DeviceBattery? {
@@ -289,7 +297,7 @@ public struct DeviceBattery: Equatable, Sendable {
                 }
             }
         }
-        return found.first { $0.name == name } ?? found.first
+        return found.first { $0.name == name } ?? found.first { sameDevice($0.name, name) } ?? found.first
     }
 }
 

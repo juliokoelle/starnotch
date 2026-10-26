@@ -14,6 +14,8 @@ final class AgentsModule: NotchModule {
     let symbol = ModuleSymbols.symbol(.agents)
 
     private(set) var snapshot = AgentSnapshot()
+    /// Claude Code sessions of the last days that ended, for "Resume" (read when the panel opens).
+    private(set) var recent: [RecentSession] = []
     /// The agent shown big; `nil` follows the most recent working one.
     var selectedID: String?
     var showsLoops = false
@@ -428,10 +430,42 @@ final class AgentsModule: NotchModule {
 
     func setExpanded(_ expanded: Bool) {
         isExpanded = expanded
-        if expanded { Task { await refresh() } } else {
+        if expanded {
+            Task { await refresh() }
+            loadRecent()
+        } else {
             showsLoops = false
             selectedLoop = nil
             detailID = nil
+        }
+    }
+
+    // MARK: Recent sessions
+
+    func loadRecent() {
+        let live = Set(snapshot.agents.map(\.id))
+        Task { [weak self] in
+            let found = await Task.detached(priority: .utility) {
+                RecentSessions.scan(root: ClaudeCodeProvider.defaultRoot, excluding: live, now: Date())
+            }.value
+            self?.recent = found
+        }
+    }
+
+    /// Opens Terminal in the session's folder with `claude --resume <id>` (a .command file, so no
+    /// Automation permission is needed).
+    func resume(_ session: RecentSession) {
+        guard let script = RecentSessions.resumeScript(session) else { return }
+        let folder = Brand.supportFolder.appending(path: "resume")
+        let file = folder.appending(path: "\(session.id).command")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try script.write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+            Haptics.confirm()
+            NSWorkspace.shared.open(file)
+        } catch {
+            Log.app.error("Resume: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -1030,6 +1064,38 @@ private struct StepList: View {
 }
 
 /// The other sessions and the main session's subagents as two-line chips; the loops below.
+/// Sessions that ended in the last days: a click opens Terminal with `claude --resume`.
+private struct RecentList: View {
+    let module: AgentsModule
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Recent · click to resume")
+                .font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.textSecondary)
+                .padding(.leading, 6).frame(height: 18)
+            ForEach(Array(module.recent.prefix(4))) { session in
+                HoverRow(cornerRadius: 8, help: "claude --resume in \(session.cwd)") {
+                    module.resume(session)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                            .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.textTertiary)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(session.title).font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody)
+                            Text("\(session.project) · \(session.modified.formatted(.relative(presentation: .named)))")
+                                .font(Theme.font(10.5)).foregroundStyle(Theme.textTertiary)
+                        }
+                        .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 6)
+                    .frame(height: 32)
+                }
+            }
+        }
+    }
+}
+
 private struct SideCard: View {
     let module: AgentsModule
 
@@ -1116,7 +1182,9 @@ private struct SideCard: View {
         let rows = rows
         NotchCard(padding: 10) {
             VStack(alignment: .leading, spacing: 8) {
-                if rows.isEmpty {
+                if rows.isEmpty, !module.recent.isEmpty {
+                    RecentList(module: module)
+                } else if rows.isEmpty {
                     LoopRows(module: module, limit: 3)
                 } else {
                     ScrollView(.vertical) {

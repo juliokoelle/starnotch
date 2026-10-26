@@ -164,7 +164,12 @@ final class NotchController {
         let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: moves.union(.leftMouseDown), handler: { [weak self] event in
             MainActor.assumeIsolated {
-                if event.type == .leftMouseDown { self?.clickedOutside() } else { self?.pointerMoved() }
+                if event.type == .leftMouseDown {
+                    self?.dragBaseline = NSPasteboard(name: .drag).changeCount
+                    self?.clickedOutside()
+                } else {
+                    self?.pointerMoved(dragging: event.type == .leftMouseDragged)
+                }
             }
         }) { monitors.append(global) }
         // Clicks inside the panel: a short hold against collapsing right after.
@@ -183,7 +188,18 @@ final class NotchController {
         }) { monitors.append(scroll) }
     }
 
-    private func pointerMoved() {
+    /// The drag pasteboard's count at the last mouse down: a higher one means a drag started since.
+    private var dragBaseline = NSPasteboard(name: .drag).changeCount
+    /// Files dragged onto the closed notch: the app opens the shelf.
+    var onFileDrag: (() -> Void)?
+
+    /// A file drag is under way (from Finder, the desktop, a browser download …).
+    private func isFileDrag() -> Bool {
+        let board = NSPasteboard(name: .drag)
+        return board.changeCount != dragBaseline && board.types?.contains(.fileURL) == true
+    }
+
+    private func pointerMoved(dragging: Bool = false) {
         guard !wheelOpen, !isLocked, var screen else { return }
         let location = NSEvent.mouseLocation
         // "With pointer": at rest, the island follows the pointer to another display.
@@ -207,6 +223,13 @@ final class NotchController {
         panel.ignoresMouseEvents = !island.insetBy(dx: -4, dy: -4).contains(location)
             && !(model.interaction == .rest && inside)
 
+        if inside, dragging, model.interaction != .expanded, model.modules.contains(where: { $0.kind == .tools }), isFileDrag() {
+            // A file over the notch: straight to the shelf, held open until the drop.
+            pointerInside = true
+            onFileDrag?()
+            expand(.tools, pinned: true)
+            return
+        }
         if inside {
             if !pointerInside, model.interaction == .rest, Date() > suppressUntil {
                 Haptics.tick()  // immediate feedback; the peek itself waits for the dwell

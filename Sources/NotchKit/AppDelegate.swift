@@ -421,6 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               key: "headphones")
         }
         headphones.start()
+        notch.onFileDrag = { [weak tools] in tools?.tab = .shelf }
     }
 
     /// The consent page: what this Mac has and what can be set up, one click for all of it.

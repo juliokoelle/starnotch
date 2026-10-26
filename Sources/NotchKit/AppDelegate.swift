@@ -220,6 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watchMode.automatic = { [weak self] in (self?.state.settings.watchAutomatic ?? true) && !preview }
         watchMode.timer = { [weak self] in self?.state.settings.watchTimer ?? .twoHours }
         watchMode.onChange = { [weak self] on in self?.notch.setWatching(on) }
+        watchMode.screen = { [weak self] in self?.notch.islandScreen }
         notchModel.toggleWatch = { [weak self] in self?.watchMode.toggle() }
         watchHotKey = HotKey.controlOptionW { [weak self] in self?.watchMode.toggle() }
         statusItem.watching = { [weak self] in self?.watchMode.isOn ?? false }

@@ -37,6 +37,8 @@ final class NotchController {
     let model: NotchModel
     private let panel = NotchPanel()
     private var screen: NSScreen?
+    /// The display the island is on (Watch mode looks for fullscreen there).
+    var islandScreen: NSScreen? { screen }
     private var monitors: [Any] = []
     private var hoverTask: Task<Void, Never>?
     private var leaveTask: Task<Void, Never>?

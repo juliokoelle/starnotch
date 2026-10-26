@@ -37,6 +37,9 @@ struct NotchRootView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Watch mode at rest: nothing at all, also no pill over a fullscreen video on a display
+        // without a notch. A hover or an urgent line brings the island back.
+        .opacity(model.watching && model.interaction == .rest && model.sneak == nil ? 0 : 1)
         // Ears come and go softly when attention or Watch mode changes.
         .animation(.easeInOut(duration: 0.2), value: model.presentation)
         .environment(\.colorScheme, .dark)

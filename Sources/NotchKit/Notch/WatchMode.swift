@@ -21,6 +21,8 @@ final class WatchMode {
 
     @ObservationIgnored var automatic: () -> Bool = { true }
     @ObservationIgnored var timer: () -> WatchTimer = { .twoHours }
+    /// The display the island is on; fullscreen there is what counts.
+    @ObservationIgnored var screen: () -> NSScreen? = { nil }
     @ObservationIgnored var onChange: ((Bool) -> Void)?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var poll: Task<Void, Never>?
@@ -63,7 +65,7 @@ final class WatchMode {
         let automatic = automatic()
         if automatic {
             let front = NSWorkspace.shared.frontmostApplication
-            fullscreen = Self.fullscreenApp(front)
+            fullscreen = Self.fullscreenApp(front, on: screen())
             videoPlaying = front.map { Self.keepsDisplayAwake(pid: $0.processIdentifier) } ?? false
         } else {
             fullscreen = false
@@ -87,9 +89,9 @@ final class WatchMode {
     /// below the notch band, so the window alone looks like a maximised one; what tells them apart
     /// is the Space: a normal one has the Dock's full-screen backstop window on screen, a
     /// fullscreen Space doesn't (measured on macOS 27).
-    static func fullscreenApp(_ app: NSRunningApplication?) -> Bool {
+    static func fullscreenApp(_ app: NSRunningApplication?, on island: NSScreen? = nil) -> Bool {
         guard let app, app.bundleIdentifier != Bundle.main.bundleIdentifier,
-              let screen = NSScreen.screens.first(where: { $0.notch.hasNotch }) ?? NSScreen.main,
+              let screen = island ?? NSScreen.screens.first(where: { $0.notch.hasNotch }) ?? NSScreen.main,
               let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]] else { return false }
         // CG window bounds have their origin at the top left of the main display.

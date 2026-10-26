@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import TestSupport
 @testable import NotchCore
@@ -65,6 +66,23 @@ import TestSupport
         defer { Fixtures.remove(offline.home) }
         let local = try SetupActions.installClaudePlugin(offline)
         #expect(local.previous?.hasSuffix("integrations/claude-code") == true)
+    }
+
+    @Test func mcpServerAddsAndRemovesWithAbsolutePaths() throws {
+        let paths = SetupSandbox.make()
+        defer { Fixtures.remove(paths.home) }
+        #expect(throws: SetupError.self) { try SetupActions.installMCPServer(paths) }  // no uv yet
+        let uv = paths.home.appending(path: ".local/bin/uv")
+        try "#!/bin/bash\n".write(to: uv, atomically: true, encoding: .utf8)
+        chmod(uv.path, 0o755)
+        try FileManager.default.createDirectory(at: paths.agentFolder, withIntermediateDirectories: true)
+        try "".write(to: paths.agentFolder.appending(path: "mcp_server.py"), atomically: true, encoding: .utf8)
+        let entry = try SetupActions.installMCPServer(paths)
+        #expect(entry.note?.hasPrefix("In Claude Code") == true)
+        let calls = SetupSandbox.read(paths.home.appending(path: "claude-calls.log"))
+        #expect(calls.contains("mcp add --scope user starnotch -- \(uv.path) run --directory \(paths.agentFolder.path) python mcp_server.py"))
+        try SetupActions.removeMCPServer(paths)
+        #expect(SetupSandbox.read(paths.home.appending(path: "claude-calls.log")).hasSuffix("mcp remove --scope user starnotch\n"))
     }
 
     @Test func codexHookInstallsAndRemoves() throws {

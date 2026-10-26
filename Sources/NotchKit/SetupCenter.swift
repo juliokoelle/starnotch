@@ -62,6 +62,7 @@ final class SetupCenter {
             switch item {
             case .claudePlugin, .statusLine: FileManager.default.fileExists(atPath: paths.home.appending(path: ".claude").path)
             case .codexHook: CodexProvider.detect()
+            case .mcpServer: FileManager.default.fileExists(atPath: paths.home.appending(path: ".claude").path) || CodexProvider.detect()
             case .shellHook: (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh").hasSuffix("zsh")
             case .launchAtLogin, .calendar: true
             case .musicAutomation: PlayerBridge.bundleIDs.values.contains { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
@@ -78,6 +79,9 @@ final class SetupCenter {
         case .claudePlugin: return paths.claudeBinary == nil ? "The claude command wasn't found." : nil
         case .codexHook: return paths.integrations == nil ? "This build has no Codex installer." : nil
         case .statusLine: return paths.bridgeScript.map { FileManager.default.fileExists(atPath: $0.path) } == true ? nil : "This build has no bridge script."
+        case .mcpServer:
+            if paths.claudeBinary == nil && paths.codexBinary == nil { return "The claude or codex command wasn't found." }
+            return paths.uvBinary == nil ? "Needs uv: Settings › Meeting agent › Install uv." : nil
         default: return nil
         }
     }
@@ -101,18 +105,21 @@ final class SetupCenter {
         }
         let order = offered.filter { items.contains($0) && !isSetUp($0) }
         for item in order { status[item] = .running }
+        // The MCP server runs from the agent's copy in the support folder.
+        if order.contains(.mcpServer) { _ = MeetingAgentSetup.ensureInstalled() }
         let paths = paths
         Task {
             for item in order {
                 let result: Status
                 switch item {
-                case .claudePlugin, .codexHook, .statusLine, .shellHook:
+                case .claudePlugin, .codexHook, .statusLine, .mcpServer, .shellHook:
                     let outcome = await Task.detached(priority: .userInitiated) { () -> Result<SetupLedger.Entry, Error> in
                         Result {
                             switch item {
                             case .claudePlugin: try SetupActions.installClaudePlugin(paths)
                             case .codexHook: try SetupActions.installCodexHook(paths)
                             case .statusLine: try SetupActions.installStatusLine(paths)
+                            case .mcpServer: try SetupActions.installMCPServer(paths)
                             default: try SetupActions.installShellHook(paths)
                             }
                         }
@@ -183,6 +190,7 @@ final class SetupCenter {
                         case .codexHook: try SetupActions.removeCodexHook(paths)
                         case .statusLine: try SetupActions.removeStatusLine(paths, entry: entry)
                         case .shellHook: try SetupActions.removeShellHook(paths)
+                        case .mcpServer: try SetupActions.removeMCPServer(paths)
                         default: break
                         }
                     }

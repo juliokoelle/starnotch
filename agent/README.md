@@ -72,3 +72,17 @@ uv run pytest
 
 Claude, Jamie and Reson8 are replaced by fakes: a fake Anthropic client, an in-process MCP server with Jamie's
 tool names, and a local WebSocket server.
+
+## MCP server: any agent reaches you in the notch
+
+`mcp_server.py` makes Starnotch an MCP server with two tools: `notify` (one line in the notch,
+optionally with a link) and `confirm` (a yes/no question as a card; returns `yes`, `no` or
+`no answer`). Settings › Setup › "Agents can reach you" adds it to Claude Code and Codex; by hand:
+
+```sh
+claude mcp add --scope user starnotch -- uv run --directory "$HOME/Library/Application Support/Starnotch/agent" python mcp_server.py
+```
+
+Other clients (Cursor, VS Code, Gemini CLI, Claude Desktop) take the same command in their MCP
+config. Questions travel over the app's approvals socket and queue with permission requests; only
+a click answers yes.

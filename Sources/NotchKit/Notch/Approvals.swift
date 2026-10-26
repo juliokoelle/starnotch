@@ -118,9 +118,13 @@ struct ApprovalCard: View {
         }
     }
 
+    /// A question from an agent through the MCP server (`mcp/`): its client asks, Yes or No.
+    private var isQuestion: Bool { pending.request.provider == ApprovalRequest.mcpProvider }
+
     var body: some View {
         let request = pending.request
         let title = agent?.displayTitle ?? request.cwd.map { ($0 as NSString).lastPathComponent } ?? "A session"
+        let headline = isQuestion ? "\(request.tool) asks" : "\(title) wants to \(verb)"
         NotchCard(padding: 14) {
             HStack(alignment: .top, spacing: 14) {
                 if let agent, let agents {
@@ -134,16 +138,16 @@ struct ApprovalCard: View {
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
-                        Text("\(title) wants to \(verb)")
+                        Text(headline)
                             .font(Theme.font(14, .semibold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
-                        if request.provider != ClaudeCodeProvider.id { ToolBadge(provider: request.provider) }
+                        if request.provider != ClaudeCodeProvider.id && !isQuestion { ToolBadge(provider: request.provider) }
                         Spacer(minLength: 6)
                         if center.queue.count > 1 {
                             Text("+\(center.queue.count - 1) waiting").font(Theme.font(11.5)).foregroundStyle(Theme.textTertiary)
                         }
                     }
                     Text(request.summary.isEmpty ? request.tool : request.summary)
-                        .font(.system(size: 12.5, design: .monospaced))
+                        .font(isQuestion ? Theme.font(13, .medium) : .system(size: 12.5, design: .monospaced))
                         .foregroundStyle(Theme.textBody)
                         .lineLimit(2)
                         .truncationMode(.middle)
@@ -153,14 +157,15 @@ struct ApprovalCard: View {
                         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .help(request.detail)
                     HStack(spacing: 8) {
-                        button("Allow once", key: "↵", style: .primary) { center.answer(.allowOnce) }
+                        button(isQuestion ? "Yes" : "Allow once", key: "↵", style: .primary) { center.answer(.allowOnce) }
                         if request.supportsSessionRules {
                             button("Allow for session", key: "⌘↵", style: .secondary) { center.answer(.allowSession) }
                         }
                         Spacer(minLength: 4)
-                        button("Deny", key: "esc", style: .quiet) { center.answer(.deny) }
+                        button(isQuestion ? "No" : "Deny", key: "esc", style: .quiet) { center.answer(.deny) }
                     }
-                    Text("Unanswered, \(request.provider == CodexProvider.id ? "Codex" : "the terminal") asks after \(Int(ApprovalCenter.timeout)) s.")
+                    Text(isQuestion ? "Unanswered, \(request.tool) hears no answer after \(Int(ApprovalCenter.timeout)) s."
+                         : "Unanswered, \(request.provider == CodexProvider.id ? "Codex" : "the terminal") asks after \(Int(ApprovalCenter.timeout)) s.")
                         .font(Theme.font(10.5)).foregroundStyle(Theme.textTertiary)
                 }
             }

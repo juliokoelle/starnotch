@@ -53,6 +53,10 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
         self.allowRules = allowRules
     }
 
+    /// Questions from any agent through Starnotch's MCP server (`mcp/`): `tool` names the asking
+    /// client, `summary` and `detail` carry the question; the answer is allow (yes) or deny (no).
+    public static let mcpProvider = "mcp"
+
     /// "Allow for session" adds a rule in Claude Code; Codex's hook can't carry one.
     public var supportsSessionRules: Bool { provider == "claude-code" }
 

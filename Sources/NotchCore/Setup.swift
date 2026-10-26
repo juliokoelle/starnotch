@@ -6,13 +6,14 @@ import Foundation
 
 /// What the consent page can set up.
 public enum SetupItem: String, CaseIterable, Codable, Sendable {
-    case claudePlugin, codexHook, statusLine, shellHook, launchAtLogin, calendar, musicAutomation
+    case claudePlugin, codexHook, statusLine, mcpServer, shellHook, launchAtLogin, calendar, musicAutomation
 
     public var title: String {
         switch self {
         case .claudePlugin: "Claude Code approvals"
         case .codexHook: "Codex approvals"
         case .statusLine: "Claude plan limits and context"
+        case .mcpServer: "Agents can reach you"
         case .shellHook: "Long terminal commands"
         case .launchAtLogin: "Open at login"
         case .calendar: "Calendar access"
@@ -29,6 +30,8 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
             "Adds one PermissionRequest hook to ~/.codex/hooks.json, with a backup. Codex asks you to trust it once in /hooks."
         case .statusLine:
             "Sets Claude Code's status line in ~/.claude/settings.json to a bridge that saves the limits, then runs your current status line unchanged. Backup first."
+        case .mcpServer:
+            "Adds the starnotch MCP server to Claude Code (claude mcp add) and Codex (codex mcp add): any agent can show a line or ask yes or no in the notch."
         case .shellHook:
             "Adds two lines to ~/.zshrc that load a small snippet: commands running longer than 30 s show in the notch. Backup first."
         case .launchAtLogin: "Starts \(Brand.displayName) when you log in (System Settings › General › Login Items)."
@@ -78,6 +81,20 @@ public struct SetupPaths: Sendable {
     }
 
     public var claudeBinary: String? { claudeCandidates.first { FileManager.default.isExecutableFile(atPath: $0) } }
+
+    public var codexBinary: String? {
+        [home.appending(path: ".local/bin/codex").path, "/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// `uv`, which runs the agent's Python programs (the MCP server among them).
+    public var uvBinary: String? {
+        [home.appending(path: ".local/bin/uv").path, "/opt/homebrew/bin/uv", "/usr/local/bin/uv", home.appending(path: ".cargo/bin/uv").path]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// The agent's copy in the support folder (the app installs it from its bundle).
+    public var agentFolder: URL { support.appending(path: "agent") }
 }
 
 /// What was set up, with what it needs to be undone exactly.
@@ -207,6 +224,47 @@ public enum SetupActions {
             throw SetupError.failed("Couldn't install the plugin: \(installed.output.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
         return SetupLedger.Entry(item: .claudePlugin, at: now, previous: source, note: "Marketplace: \(source). Restart running sessions.")
+    }
+
+    // MARK: MCP server
+
+    public static let mcpName = "starnotch"
+
+    /// The command an MCP client runs: uv with the agent folder, absolute paths only (clients
+    /// start servers without the user's shell PATH).
+    public static func mcpCommand(_ paths: SetupPaths) throws -> [String] {
+        guard let uv = paths.uvBinary else { throw SetupError.missing("uv (Settings › Meeting agent › Install uv)") }
+        guard FileManager.default.fileExists(atPath: paths.agentFolder.appending(path: "mcp_server.py").path) else {
+            throw SetupError.missing("The agent's MCP server")
+        }
+        return [uv, "run", "--directory", paths.agentFolder.path, "python", "mcp_server.py"]
+    }
+
+    /// `claude mcp add --scope user starnotch -- …`, and the same for Codex when it is installed.
+    public static func installMCPServer(_ paths: SetupPaths, run: SetupRunner = processRunner, now: Date = Date()) throws -> SetupLedger.Entry {
+        let command = try mcpCommand(paths)
+        let env = ["HOME": paths.home.path]
+        var added: [String] = []
+        if let claude = paths.claudeBinary {
+            _ = run(claude, ["mcp", "remove", "--scope", "user", mcpName], env)
+            let result = run(claude, ["mcp", "add", "--scope", "user", mcpName, "--"] + command, env)
+            guard result.status == 0 else {
+                throw SetupError.failed("claude mcp add: \(result.output.trimmingCharacters(in: .whitespacesAndNewlines))")
+            }
+            added.append("Claude Code")
+        }
+        if let codex = paths.codexBinary {
+            _ = run(codex, ["mcp", "remove", mcpName], env)
+            if run(codex, ["mcp", "add", mcpName, "--"] + command, env).status == 0 { added.append("Codex") }
+        }
+        guard !added.isEmpty else { throw SetupError.missing("The claude or codex command") }
+        return SetupLedger.Entry(item: .mcpServer, at: now, note: "In \(added.joined(separator: " and ")). Restart running sessions.")
+    }
+
+    public static func removeMCPServer(_ paths: SetupPaths, run: SetupRunner = processRunner) throws {
+        let env = ["HOME": paths.home.path]
+        if let claude = paths.claudeBinary { _ = run(claude, ["mcp", "remove", "--scope", "user", mcpName], env) }
+        if let codex = paths.codexBinary { _ = run(codex, ["mcp", "remove", mcpName], env) }
     }
 
     public static func removeClaudePlugin(_ paths: SetupPaths, run: SetupRunner = processRunner) throws {

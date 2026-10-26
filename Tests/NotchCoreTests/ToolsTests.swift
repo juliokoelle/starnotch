@@ -8,8 +8,9 @@ import TestSupport
 
     @Test func clipboardKeepsNewestOnceAndPinnedOnTop() {
         var history = ClipboardHistory()
-        #expect(history.add("first", at: t0))
-        #expect(!history.add("   \n", at: t0))
+        let added = history.add("first", at: t0)
+        let blank = history.add("   \n", at: t0)
+        #expect(added && !blank)
         history.add("second", at: t0 + 1)
         history.add("first", at: t0 + 2)
         #expect(history.list().map(\.text) == ["first", "second"])
@@ -44,16 +45,18 @@ import TestSupport
         var timer = FocusTimer()
         timer.start(at: t0)
         #expect(timer.phase == .focus && timer.remaining(at: t0) == 25 * 60)
-        #expect(timer.tick(at: t0 + 60) == nil)
-        #expect(timer.tick(at: t0 + 25 * 60) == .focus)
+        let early = timer.tick(at: t0 + 60)
+        let ended = timer.tick(at: t0 + 25 * 60)
+        #expect(early == nil && ended == .focus)
         #expect(timer.phase == .shortBreak && timer.doneToday == 1)
         // Three more rounds: the fourth focus is followed by the long break.
         var now = t0 + 25 * 60
         for _ in 0..<3 {
             now += 5 * 60
-            #expect(timer.tick(at: now) == .shortBreak)
+            let breakEnded = timer.tick(at: now)
             now += 25 * 60
-            #expect(timer.tick(at: now) == .focus)
+            let focusEnded = timer.tick(at: now)
+            #expect(breakEnded == .shortBreak && focusEnded == .focus)
         }
         #expect(timer.phase == .longBreak && timer.round == 4)
     }
@@ -65,7 +68,8 @@ import TestSupport
         #expect(timer.isPaused && timer.remaining(at: t0 + 5000) == 15 * 60)
         timer.start(at: t0 + 1000)
         #expect(timer.remaining(at: t0 + 1000) == 15 * 60)
-        #expect(timer.skip(at: t0 + 1100) == .focus)
+        let skipped = timer.skip(at: t0 + 1100)
+        #expect(skipped == .focus)
         #expect(timer.phase == .shortBreak && timer.doneToday == 0)  // skipped focus doesn't count
         timer.stop()
         #expect(timer.phase == .idle && !timer.isRunning)

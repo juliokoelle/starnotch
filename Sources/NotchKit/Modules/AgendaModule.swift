@@ -28,6 +28,11 @@ final class AgendaModule: NotchModule {
     private(set) var dayOffset = 0
     /// The events of that day when it isn't today.
     private var otherDay: [CalEvent] = []
+    /// Day, week or month on show.
+    enum Span: String, CaseIterable { case day = "Day", week = "Week", month = "Month" }
+    private(set) var span = Span.day
+    /// The week's or month's events.
+    private(set) var rangeEvents: [CalEvent] = []
 
     init(variant: Variant, people: (any PeopleProvider)?, source: CalendarModule? = nil) {
         self.variant = variant
@@ -58,6 +63,84 @@ final class AgendaModule: NotchModule {
     var events: [CalEvent] { dayOffset == 0 ? todayEvents : otherDay }
 
     var isToday: Bool { dayOffset == 0 }
+
+    /// The day on show as a date.
+    var shownDate: Date {
+        Calendar.current.date(byAdding: .day, value: dayOffset, to: Calendar.current.startOfDay(for: now)) ?? now
+    }
+
+    /// The days the week or month view shows: the week from Monday; the month's weeks, Monday first.
+    var spanDays: [Date] {
+        var calendar = Calendar.current
+        calendar.firstWeekday = 2
+        let anchor = shownDate
+        switch span {
+        case .day:
+            return [anchor]
+        case .week:
+            let start = calendar.dateInterval(of: .weekOfYear, for: anchor)?.start ?? anchor
+            return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+        case .month:
+            guard let month = calendar.dateInterval(of: .month, for: anchor),
+                  let first = calendar.dateInterval(of: .weekOfYear, for: month.start)?.start else { return [anchor] }
+            let lastDay = month.end.addingTimeInterval(-1)
+            let last = calendar.dateInterval(of: .weekOfYear, for: lastDay)?.end ?? month.end
+            var days: [Date] = []
+            var day = first
+            while day < last, days.count < 42 {
+                days.append(day)
+                day = calendar.date(byAdding: .day, value: 1, to: day) ?? last
+            }
+            return days
+        }
+    }
+
+    func events(on day: Date) -> [CalEvent] {
+        let start = Calendar.current.startOfDay(for: day)
+        let end = start.addingTimeInterval(86_400)
+        return rangeEvents.filter { $0.start >= start && $0.start < end }
+    }
+
+    /// Day, week or month; the range's events are read once per switch.
+    func setSpan(_ next: Span) {
+        guard next != span else { return }
+        Haptics.tick()
+        withAnimation(Theme.snappy) {
+            span = next
+            selectedID = nil
+            loadRange()
+        }
+    }
+
+    /// The arrows: a day, a week or a month back or ahead.
+    func step(by direction: Int) {
+        switch span {
+        case .day:
+            showDay(dayOffset + direction)
+        case .week:
+            showDay(dayOffset + 7 * direction)
+        case .month:
+            let target = Calendar.current.date(byAdding: .month, value: direction, to: shownDate) ?? shownDate
+            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: now), to: target).day ?? 0
+            showDay(days)
+        }
+        loadRange()
+    }
+
+    /// A day in the week or month view opens it as a day.
+    func open(day: Date) {
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: now),
+                                                   to: Calendar.current.startOfDay(for: day)).day ?? 0
+        withAnimation(Theme.snappy) { span = .day }
+        showDay(days)
+    }
+
+    private func loadRange() {
+        guard span != .day, let first = spanDays.first, let last = spanDays.last else { rangeEvents = []; return }
+        let end = last.addingTimeInterval(86_400)
+        rangeEvents = source?.meetings(from: first, to: end).map(CalEvent.init)
+            ?? mockEvents.filter { $0.start >= first && $0.start < end }
+    }
 
     /// Shows another day; 0 goes back to today.
     func showDay(_ offset: Int) {
@@ -188,13 +271,19 @@ final class AgendaModule: NotchModule {
     /// header, the band (one row per lane), and the agenda list or the briefing, whichever is taller.
     var bodyHeight: CGFloat {
         guard variant == .b else { return 400 }
+        switch span {
+        case .week: return 300
+        case .month: return min(NotchLayout.maxBodyHeight, 32 + 8 + 22 + CGFloat(spanDays.count / 7) * 40 + 24)
+        case .day: break
+        }
         let list = AgendaList.height(module: self, now: viewNow(now)) + 20
         let lower = showsDetail ? max(236, list) : list
         return min(NotchLayout.maxBodyHeight, 32 + 8 + DayBand.height(lanes: laneCount) + 16 + 8 + lower)
     }
 
     /// Compact (the agenda's width) until a detail opens; then the full panel.
-    var bodyWidth: CGFloat { showsDetail || variant == .a ? NotchLayout.expandedWidth : NotchLayout.minExpandedWidth }
+    /// The full width: the header carries the day, the arrows, Day/Week/Month and the week strip.
+    var bodyWidth: CGFloat { NotchLayout.expandedWidth }
 
     var holdsOpen: Bool { selectedID != nil }
 
@@ -213,6 +302,8 @@ final class AgendaModule: NotchModule {
             detailDismissed = false
             dayOffset = 0
             otherDay = []
+            span = .day
+            rangeEvents = []
         }
     }
 
@@ -318,14 +409,16 @@ final class AgendaModule: NotchModule {
         case .upArrow, .downArrow:
             return step(press.key == .downArrow ? 1 : -1)
         case .leftArrow where press.modifiers.contains(.command), .rightArrow where press.modifiers.contains(.command):
-            showDay(dayOffset + (press.key == .rightArrow ? 1 : -1))
+            step(by: press.key == .rightArrow ? 1 : -1)
             return true
         default:
-            if press.characters == "t", dayOffset != 0 {
-                showDay(0)
-                return true
+            switch press.characters {
+            case "t" where dayOffset != 0: showDay(0); loadRange(); return true
+            case "d": setSpan(.day); return true
+            case "w": setSpan(.week); return true
+            case "m": setSpan(.month); return true
+            default: return false
             }
-            return false
         }
     }
 
@@ -664,22 +757,35 @@ private struct AgendaBodyB: View {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 1) {
                         DayHeader(module: module, now: now)
-                        ViewThatFits(in: .horizontal) {
-                            Text(summary(now, short: false)).fixedSize()
-                            Text(summary(now, short: true))
+                        if module.span == .day {
+                            ViewThatFits(in: .horizontal) {
+                                Text(summary(now, short: false)).fixedSize()
+                                Text(summary(now, short: true))
+                            }
+                            .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
+                        } else {
+                            Text(module.rangeEvents.filter { $0.kind == .meeting }.count == 1 ? "1 meeting"
+                                 : "\(module.rangeEvents.filter { $0.kind == .meeting }.count) meetings")
+                                .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
                         }
-                        .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
                     }
                     .lineLimit(1)
                     Spacer(minLength: 8)
-                    WeekStrip(counts: module.weekCounts, today: module.todayIndex, notes: module.weekNotes, now: R5Clock.now(context.date),
-                              shown: module.shownIndex) { index in
-                        module.showDay(index - module.todayIndex)
+                    if module.span == .day {
+                        WeekStrip(counts: module.weekCounts, today: module.todayIndex, notes: module.weekNotes, now: R5Clock.now(context.date),
+                                  shown: module.shownIndex) { index in
+                            module.showDay(index - module.todayIndex)
+                        }
                     }
                 }
                 .padding(.horizontal, 6)
                 .frame(height: 32)
 
+                if module.span == .week {
+                    WeekView(module: module, now: R5Clock.now(context.date))
+                } else if module.span == .month {
+                    MonthView(module: module, now: R5Clock.now(context.date))
+                } else {
                 NotchCard(padding: 8) {
                     DayBand(module: module, now: now)
                 }
@@ -696,6 +802,7 @@ private struct AgendaBodyB: View {
                             .id(event.id)
                             .transition(.blurSlide(x: 10))
                     }
+                }
                 }
             }
         }
@@ -717,6 +824,126 @@ private struct AgendaBodyB: View {
     }
 }
 
+/// Day, Week, Month (also D, W, M).
+private struct SpanPicker: View {
+    let module: AgendaModule
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(AgendaModule.Span.allCases, id: \.self) { span in
+                let selected = module.span == span
+                Button { module.setSpan(span) } label: {
+                    Text(LocalizedStringKey(span.rawValue))
+                        .font(Theme.font(10.5, .semibold))
+                        .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
+                        .padding(.horizontal, 7)
+                        .frame(height: 18)
+                        .background(Color.white.opacity(selected ? 0.14 : 0), in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressScale())
+                .help("\(span.rawValue) (\(span.rawValue.prefix(1)))")
+            }
+        }
+        .padding(2)
+        .background(Color.white.opacity(0.05), in: Capsule())
+    }
+}
+
+/// Seven columns, Monday first: each day's events with their time; a click opens the day.
+private struct WeekView: View {
+    let module: AgendaModule
+    let now: Date
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            ForEach(module.spanDays, id: \.self) { day in
+                let isToday = Calendar.current.isDate(day, inSameDayAs: now)
+                let events = module.events(on: day)
+                Button { module.open(day: day) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Text(day.formatted(.dateTime.weekday(.abbreviated)))
+                                .font(Theme.font(10.5, .medium)).foregroundStyle(isToday ? Theme.accent : Theme.textTertiary)
+                            Text("\(Calendar.current.component(.day, from: day))")
+                                .font(Theme.font(12, .semibold).monospacedDigit())
+                                .foregroundStyle(isToday ? Color.white : Theme.textBody)
+                                .padding(.horizontal, isToday ? 5 : 0)
+                                .background { if isToday { Capsule().fill(Theme.accent) } }
+                        }
+                        ForEach(events.prefix(5)) { event in
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(TimeText.clock(event.start)).font(Theme.font(9.5).monospacedDigit()).foregroundStyle(Theme.textTertiary)
+                                Text(event.title).font(Theme.font(10.5, .medium)).foregroundStyle(Theme.textBody).lineLimit(2)
+                            }
+                            .padding(.leading, 5)
+                            .overlay(alignment: .leading) { Rectangle().fill(event.calendar.color).frame(width: 2) }
+                            .opacity(event.end <= now ? 0.5 : 1)
+                        }
+                        if events.count > 5 {
+                            Text("+\(events.count - 5)").font(Theme.font(10)).foregroundStyle(Theme.textTertiary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(Theme.card.opacity(isToday ? 1.6 : 1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+            }
+        }
+        .frame(height: 248)
+    }
+}
+
+/// The month as a grid, Monday first: a dot per meeting (up to three); a click opens the day.
+private struct MonthView: View {
+    let module: AgendaModule
+    let now: Date
+    private let letters = ["M", "T", "W", "T", "F", "S", "S"]
+
+    var body: some View {
+        let month = Calendar.current.component(.month, from: module.shownDate)
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(0..<7, id: \.self) { index in
+                    Text(letters[index]).font(Theme.font(10, .medium)).foregroundStyle(Theme.textTertiary).frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 18)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
+                ForEach(module.spanDays, id: \.self) { day in
+                    let isToday = Calendar.current.isDate(day, inSameDayAs: now)
+                    let inMonth = Calendar.current.component(.month, from: day) == month
+                    let events = module.events(on: day)
+                    Button { module.open(day: day) } label: {
+                        VStack(spacing: 3) {
+                            Text("\(Calendar.current.component(.day, from: day))")
+                                .font(Theme.font(11.5, isToday ? .semibold : .medium).monospacedDigit())
+                                .foregroundStyle(isToday ? Color.white : inMonth ? Theme.textBody : Theme.textTertiary)
+                                .frame(width: 22, height: 18)
+                                .background { if isToday { Capsule().fill(Theme.accent) } }
+                            HStack(spacing: 2) {
+                                ForEach(Array(events.prefix(3).enumerated()), id: \.offset) { _, event in
+                                    Circle().fill(event.calendar.color).frame(width: 4, height: 4)
+                                }
+                            }
+                            .frame(height: 4)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 36)
+                        .background(Theme.card.opacity(inMonth ? 1 : 0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScale())
+                    .help(events.isEmpty ? "" : events.prefix(4).map { "\(TimeText.clock($0.start)) \($0.title)" }.joined(separator: "\n"))
+                }
+            }
+        }
+    }
+}
+
 /// The day's name with arrows to the day before and after, "Today" to come back, and a way to
 /// the full view in Calendar.
 private struct DayHeader: View {
@@ -725,12 +952,14 @@ private struct DayHeader: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(R5Clock.longDay(now)).font(Theme.font(13.5, .semibold)).foregroundStyle(Theme.textPrimary)
+            Text(title).font(Theme.font(13.5, .semibold)).foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
                 .layoutPriority(1)
-            arrow("chevron.left", help: "Day before (⌘←)") { module.showDay(module.dayOffset - 1) }
-            arrow("chevron.right", help: "Day after (⌘→)") { module.showDay(module.dayOffset + 1) }
+            arrow("chevron.left", help: "Back (⌘←)") { module.step(by: -1) }
+            arrow("chevron.right", help: "Ahead (⌘→)") { module.step(by: 1) }
+            SpanPicker(module: module)
             if !module.isToday {
-                Button("Today") { module.showDay(0) }
+                Button("Today") { module.showDay(0); module.step(by: 0) }
                     .buttonStyle(PressScale())
                     .font(Theme.font(11, .semibold))
                     .foregroundStyle(Theme.accent)
@@ -739,6 +968,22 @@ private struct DayHeader: View {
             if let source = module.source {
                 arrow("arrow.up.forward.app", help: "Open Calendar") { source.openCalendarApp() }
             }
+        }
+    }
+
+    /// "Wednesday, 28 October", "Week 44 · 26 Oct – 1 Nov", "October 2026".
+    private var title: String {
+        switch module.span {
+        case .day:
+            return R5Clock.longDay(now)
+        case .week:
+            let days = module.spanDays
+            guard let first = days.first, let last = days.last else { return "" }
+            let week = Calendar.current.component(.weekOfYear, from: first)
+            let style = Date.FormatStyle().day().month(.abbreviated)
+            return "Week \(week) · \(first.formatted(style)) – \(last.formatted(style))"
+        case .month:
+            return module.shownDate.formatted(.dateTime.month(.wide).year())
         }
     }
 

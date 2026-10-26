@@ -138,6 +138,12 @@ final class CalendarModule: NotchModule {
         return events(from: start, to: Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400))
     }
 
+    /// The timed events in a range (week and month views). Empty without access.
+    func meetings(from start: Date, to end: Date) -> [Meeting] {
+        guard !mock, access == .granted else { return [] }
+        return events(from: start, to: end)
+    }
+
     /// Calendar.app, for the full view of a day.
     func openCalendarApp() {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))

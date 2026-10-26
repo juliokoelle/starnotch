@@ -261,6 +261,16 @@ struct SetupConsentView: View {
                     Text("Every change keeps a backup and can be removed in Settings › What's set up. Nothing leaves this Mac.")
                         .foregroundStyle(.secondary)
                 }
+                if MeetingAgentSetup.bundled != nil {
+                    Section {
+                        MeetingAgentSettings(compact: true)
+                    } header: {
+                        Text("Meeting agent (optional)")
+                    } footer: {
+                        Text("Contradictions, open questions and promises from your meetings, live in the notch. The key stays on this Mac; Reson8 and more in Settings › Meeting agent.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .formStyle(.grouped)
             .scrollDisabled(true)

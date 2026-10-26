@@ -203,8 +203,10 @@ struct SettingsView: View {
     }
 }
 
-/// The meeting agent's keys and its one dependency, without a terminal or config.toml.
-private struct MeetingAgentSettings: View {
+/// The meeting agent's keys and its one dependency, without a terminal or config.toml. Compact
+/// (the setup page): the Anthropic key and uv only.
+struct MeetingAgentSettings: View {
+    var compact = false
     @State private var anthropic = MeetingAgentSetup.keys()["ANTHROPIC_API_KEY"] ?? ""
     @State private var reson8 = MeetingAgentSetup.keys()["RESON8_API_KEY"] ?? ""
     @State private var uvFound = MeetingAgentSetup.uvPath != nil
@@ -213,8 +215,10 @@ private struct MeetingAgentSettings: View {
     var body: some View {
         SecureField("Anthropic API key", text: $anthropic, prompt: Text("sk-ant-…"))
             .onChange(of: anthropic) { _, value in MeetingAgentSetup.setKey("ANTHROPIC_API_KEY", value) }
-        SecureField("Reson8 API key", text: $reson8, prompt: Text("for live transcription"))
-            .onChange(of: reson8) { _, value in MeetingAgentSetup.setKey("RESON8_API_KEY", value) }
+        if !compact {
+            SecureField("Reson8 API key", text: $reson8, prompt: Text("for live transcription"))
+                .onChange(of: reson8) { _, value in MeetingAgentSetup.setKey("RESON8_API_KEY", value) }
+        }
         LabeledContent("uv") {
             if uvFound {
                 Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
@@ -229,7 +233,7 @@ private struct MeetingAgentSettings: View {
             }
         }
         .onAppear { uvFound = MeetingAgentSetup.uvPath != nil }
-        if let url = URL(string: "https://console.anthropic.com/settings/keys") {
+        if !compact, let url = URL(string: "https://console.anthropic.com/settings/keys") {
             Link("Get an Anthropic key", destination: url)
         }
     }

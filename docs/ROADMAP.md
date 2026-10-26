@@ -2,6 +2,8 @@
 
 Goal: the notch tool nobody beats on the basics, with the agentic layer on top. Ship in small waves, each one usable on its own, so feedback and traction start now.
 
+Principles: never overloaded. Calm, smooth and playful (the characters, the motion) beats a long feature list. A tool is off until the user switches it on; the notch shows only what matters now; Settings stay short (General, Tools, Agents, Privacy) with the rest one level down.
+
 Sources: Joel's test session (26.10.), the competitor matrix (23.10.), Notchy (the broadest notch app, now paid), Pushary (agent approvals on the lock screen, adapters for every agent framework).
 
 Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
@@ -82,7 +84,11 @@ Feature level only: Vorssaint is GPL-3.0, so none of its code comes into Starnot
 - System: network up and down next to CPU, GPU and memory
 - Music: synced lyrics and the play queue
 - Agents: OpenCode and GitHub Copilot next to Claude Code and Codex, with plan limits, tokens and the API value of a session
-- Settings organised like a menu of tools: each one switched on only when used
+- A Tools gallery in Settings: each tool with one line and a switch, off by default; the notch shows only the ones switched on
+
+## Console (later)
+
+A page where the user sees everything in depth: each agent's work and conversation, agent-to-agent messages, what happened in the background (mails drafted, meetings prepared, tasks handed on), and where to step in. It grows out of the meeting agent's full-text page (agent/feed.py); local first, served by the app, later also through the relay. Settings stay the place for setup.
 
 ## Wave 3: after YC
 

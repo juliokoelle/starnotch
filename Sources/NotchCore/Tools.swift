@@ -237,3 +237,58 @@ public enum Countdown {
         return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, rest) : String(format: "%d:%02d", minutes, rest)
     }
 }
+
+/// Battery levels of a Bluetooth device ("L 80 % · R 78 % · Case 52 %"), from
+/// `system_profiler SPBluetoothDataType -json` (no Bluetooth permission needed).
+public struct DeviceBattery: Equatable, Sendable {
+    public var name: String
+    public var left: Int?
+    public var right: Int?
+    public var caseLevel: Int?
+    public var main: Int?
+
+    public init(name: String, left: Int? = nil, right: Int? = nil, caseLevel: Int? = nil, main: Int? = nil) {
+        self.name = name
+        self.left = left
+        self.right = right
+        self.caseLevel = caseLevel
+        self.main = main
+    }
+
+    /// The lowest earbud or the device's own level, for the icon.
+    public var lowest: Int? { [left, right, main].compactMap { $0 }.min() }
+
+    /// "L 80 % · R 78 % · Case 52 %", or "64 %".
+    public var line: String {
+        var parts: [String] = []
+        if let left { parts.append("L \(left) %") }
+        if let right { parts.append("R \(right) %") }
+        if let main { parts.append("\(main) %") }
+        if let caseLevel { parts.append("Case \(caseLevel) %") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The connected device with a battery whose name matches `name` (the audio output's), else
+    /// the first connected one with a battery.
+    public static func parse(_ data: Data, preferring name: String?) -> DeviceBattery? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let controllers = root["SPBluetoothDataType"] as? [[String: Any]] else { return nil }
+        func level(_ value: Any?) -> Int? {
+            (value as? String).flatMap { Int($0.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)) }
+        }
+        var found: [DeviceBattery] = []
+        for controller in controllers {
+            for entry in controller["device_connected"] as? [[String: Any]] ?? [] {
+                for (deviceName, value) in entry {
+                    guard let info = value as? [String: Any] else { continue }
+                    let battery = DeviceBattery(name: deviceName, left: level(info["device_batteryLevelLeft"]),
+                                                right: level(info["device_batteryLevelRight"]),
+                                                caseLevel: level(info["device_batteryLevelCase"]),
+                                                main: level(info["device_batteryLevelMain"]))
+                    if !battery.line.isEmpty { found.append(battery) }
+                }
+            }
+        }
+        return found.first { $0.name == name } ?? found.first
+    }
+}

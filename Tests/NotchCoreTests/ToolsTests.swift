@@ -77,3 +77,20 @@ import TestSupport
         #expect(Countdown.text(3723) == "1:02:03")
     }
 }
+
+@Suite struct DeviceBatteryTests {
+    @Test func parsesAirPodsAndPrefersTheOutputsName() throws {
+        let json = """
+        {"SPBluetoothDataType":[{"controller_properties":{},"device_connected":[
+          {"Magic Mouse":{"device_batteryLevelMain":"64%"}},
+          {"AirPods Pro":{"device_batteryLevelLeft":"80%","device_batteryLevelRight":"78%","device_batteryLevelCase":"52%"}}
+        ],"device_not_connected":[{"Old Speaker":{"device_batteryLevelMain":"10%"}}]}]}
+        """
+        let pods = try #require(DeviceBattery.parse(Data(json.utf8), preferring: "AirPods Pro"))
+        #expect(pods.line == "L 80 % · R 78 % · Case 52 %")
+        #expect(pods.lowest == 78)
+        let any = try #require(DeviceBattery.parse(Data(json.utf8), preferring: "Speakers"))
+        #expect(any.name == "Magic Mouse" && any.line == "64 %")
+        #expect(DeviceBattery.parse(Data("{}".utf8), preferring: nil) == nil)
+    }
+}

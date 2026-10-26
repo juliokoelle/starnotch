@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var system: SystemModule?
     private var meeting: MeetingModule?
     private var tools: ToolsModule?
+    private let headphones = HeadphoneBattery()
     private var companion: MeetingCompanion?
     private let battery = BatteryMonitor()
     private let keepAwake = KeepAwake()
@@ -413,6 +414,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               key: "focus", urgent: true)
         }
         tools.start()
+        headphones.onBattery = { [weak self] battery in
+            let low = (battery.lowest ?? 100) <= 20
+            self?.notch.sneak(Sneak(visual: .symbol(battery.left != nil ? "airpodspro" : "headphones", tint: low ? .waiting : .ok),
+                                    title: battery.name, detail: battery.line, duration: 3.6),
+                              key: "headphones")
+        }
+        headphones.start()
     }
 
     /// The consent page: what this Mac has and what can be set up, one click for all of it.

@@ -101,7 +101,8 @@ public enum RunLog {
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---",
               let end = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "---" }) else { return [] }
         let front = lines[1..<end].joined(separator: "\n")
-        let field = #"[0-9*/,\-]+"#
+        // A field is a list of numbers, ranges, steps or *; a comma after the last field is prose.
+        let field = #"[0-9*/\-]+(?:,[0-9*/\-]+)*"#
         guard let regex = try? NSRegularExpression(pattern: "cron \(field) \(field) \(field) \(field) \(field)") else { return [] }
         let range = NSRange(front.startIndex..., in: front)
         return regex.matches(in: front, range: range).compactMap { match in

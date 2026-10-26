@@ -30,6 +30,11 @@ final class HotKey {
     }
 
     /// Control + Option + I: open the quick-capture inbox.
+    /// Control + Option + V: the clipboard history.
+    static func controlOptionV(action: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(controlKey | optionKey), id: 6, action: action)
+    }
+
     static func controlOptionI(action: @escaping () -> Void) -> HotKey {
         HotKey(keyCode: UInt32(kVK_ANSI_I), modifiers: UInt32(controlKey | optionKey), id: 5, action: action)
     }

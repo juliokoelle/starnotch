@@ -98,3 +98,27 @@ import TestSupport
         #expect(DeviceBattery.parse(Data("{}".utf8), preferring: nil) == nil)
     }
 }
+
+@Suite struct SimpleTimerTests {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func countdownPausesAndEnds() {
+        var timer = SimpleTimer()
+        timer.duration = 300
+        timer.start(at: t0)
+        timer.pause(at: t0 + 100)
+        #expect(timer.isActive && !timer.isRunning && timer.remaining(at: t0 + 999) == 200)
+        timer.start(at: t0 + 1000)
+        let early = timer.tick(at: t0 + 1100)
+        let done = timer.tick(at: t0 + 1200)
+        #expect(!early && done && !timer.isActive)
+    }
+
+    @Test func stopwatchCountsUp() {
+        var timer = SimpleTimer()
+        timer.mode = .stopwatch
+        timer.start(at: t0)
+        let ended = timer.tick(at: t0 + 10_000)
+        #expect(!ended && timer.shown(at: t0 + 90) == 90 && timer.progress(at: t0 + 90) == 0.5)
+    }
+}

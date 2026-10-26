@@ -42,7 +42,7 @@ enum ModuleAvailability {
         case .system:
             return Status(available: true, detail: "CPU, GPU, memory and the apps behind them")
         case .tools:
-            return Status(available: true, detail: "Clipboard history, focus timer, file shelf")
+            return Status(available: true, detail: "Clipboard history (⌃⌥V), timers, file shelf")
         case .meeting:
             let found = FileManager.default.fileExists(atPath: Runtime.meetingAgentDir.appending(path: "agent.py").path)
             let missing = MeetingAgentSetup.missing(agentFound: found)

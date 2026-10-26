@@ -11,7 +11,20 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class ToolsModule: NotchModule {
-    enum Tab: String, CaseIterable { case clipboard = "Clipboard", timer = "Timer", shelf = "Shelf" }
+    enum Tab: String, CaseIterable {
+        case clipboard = "Clipboard", timer = "Timer", shelf = "Shelf"
+
+        var symbol: String {
+            switch self {
+            case .clipboard: "doc.on.clipboard"
+            case .timer: "timer"
+            case .shelf: "tray.and.arrow.down"
+            }
+        }
+    }
+
+    /// The timer card's three kinds.
+    enum TimerKind: String, CaseIterable { case pomodoro = "Pomodoro", countdown = "Timer", stopwatch = "Stopwatch" }
 
     let kind = ModuleKind.tools
     let symbol = ModuleSymbols.symbol(.tools)
@@ -19,6 +32,9 @@ final class ToolsModule: NotchModule {
     var tab = Tab.clipboard
     private(set) var history = ClipboardHistory()
     private(set) var timer = FocusTimer()
+    /// Countdown and stopwatch.
+    private(set) var simple = SimpleTimer()
+    var timerKind = TimerKind.pomodoro
     private(set) var shelf: [URL] = []
     /// The row under the keyboard in the clipboard list.
     var selected: UUID?
@@ -27,6 +43,8 @@ final class ToolsModule: NotchModule {
 
     /// A focus or break ended: the app shows a sneak.
     @ObservationIgnored var onPhaseEnd: ((FocusTimer.Phase, FocusTimer.Phase) -> Void)?
+    /// A countdown reached zero.
+    @ObservationIgnored var onCountdownDone: ((TimeInterval) -> Void)?
     /// Watch the clipboard only while the module is switched on.
     @ObservationIgnored var isEnabled: () -> Bool = { true }
     @ObservationIgnored private var watcher: Task<Void, Never>?
@@ -87,8 +105,50 @@ final class ToolsModule: NotchModule {
     func startOrPause() {
         let now = Date()
         Haptics.tick()
-        if timer.isRunning { timer.pause(at: now) } else { timer.start(at: now) }
+        switch timerKind {
+        case .pomodoro:
+            if timer.isRunning { timer.pause(at: now) } else { timer.start(at: now) }
+        case .countdown, .stopwatch:
+            simple.mode = timerKind == .stopwatch ? .stopwatch : .countdown
+            if simple.isRunning { simple.pause(at: now) } else { simple.start(at: now) }
+        }
         runTicker()
+    }
+
+    /// Countdown length, while it isn't running.
+    func setCountdown(minutes: Double) {
+        guard !simple.isActive else { return }
+        Haptics.tick()
+        simple.duration = max(60, min(24 * 3600, minutes * 60))
+    }
+
+    /// Pomodoro lengths, while no round runs.
+    func setPomodoro(focus: Double? = nil, pause: Double? = nil) {
+        guard timer.phase == .idle else { return }
+        Haptics.tick()
+        if let focus { timer.focusMinutes = focus }
+        if let pause { timer.breakMinutes = pause }
+    }
+
+    func resetSimple() {
+        Haptics.tick()
+        simple.reset()
+        runTicker()
+    }
+
+    /// A timer of any kind is going (or paused): it sits beside the notch.
+    var timerActive: Bool { timer.isRunning || timer.isPaused || simple.isActive }
+
+    /// The running timer's face: kind, time shown, paused.
+    func face(at now: Date) -> (symbol: String, tint: Color, time: TimeInterval, paused: Bool)? {
+        if timer.isRunning || timer.isPaused {
+            let focus = timer.phase == .focus
+            return (focus ? "timer" : "cup.and.saucer.fill", focus ? Theme.accent : Theme.ok, timer.remaining(at: now), timer.isPaused)
+        }
+        if simple.isActive {
+            return (simple.mode == .stopwatch ? "stopwatch" : "hourglass", Theme.waiting, simple.shown(at: now), !simple.isRunning)
+        }
+        return nil
     }
 
     func skipPhase() {
@@ -107,13 +167,16 @@ final class ToolsModule: NotchModule {
     /// Once a second while a phase runs; nothing while idle or paused.
     private func runTicker() {
         ticker?.cancel()
-        guard timer.isRunning else { ticker = nil; return }
+        guard timer.isRunning || (simple.isRunning && simple.mode == .countdown) else { ticker = nil; return }
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard let self else { return }
-                if let ended = self.timer.tick(at: Date()) { self.onPhaseEnd?(ended, self.timer.phase) }
-                if !self.timer.isRunning { return }
+                let now = Date()
+                if let ended = self.timer.tick(at: now) { self.onPhaseEnd?(ended, self.timer.phase) }
+                let length = self.simple.duration
+                if self.simple.tick(at: now) { self.onCountdownDone?(length) }
+                if !self.timer.isRunning && !(self.simple.isRunning && self.simple.mode == .countdown) { return }
             }
         }
     }
@@ -166,30 +229,31 @@ final class ToolsModule: NotchModule {
 
     // MARK: NotchModule
 
-    var count: Int? { timer.isRunning || timer.isPaused ? nil : (shelf.isEmpty ? nil : shelf.count) }
+    var count: Int? { timerActive ? nil : (shelf.isEmpty ? nil : shelf.count) }
 
-    /// A running timer sits beside the notch.
-    var ambientPriority: Int { timer.isRunning ? 25 : 0 }
+    /// A running timer sits beside the notch, also at rest: the user started it to see it.
+    var ambientPriority: Int { timerActive ? 25 : 0 }
+    var needsAttention: Bool { timerActive }
 
-    var bodyHeight: CGFloat { 300 }
+    var bodyHeight: CGFloat { 310 }
     var bodyWidth: CGFloat { NotchLayout.minExpandedWidth }
 
     func leadingEar(peek: Bool) -> AnyView {
-        AnyView(Group {
-            if timer.isRunning || timer.isPaused {
-                Image(systemName: timer.phase == .focus ? "timer" : "cup.and.saucer.fill")
+        AnyView(TimelineView(.periodic(from: .now, by: 1)) { context in
+            if let face = self.face(at: context.date) {
+                Image(systemName: face.symbol)
                     .font(.system(size: peek ? 12 : 11, weight: .semibold))
-                    .foregroundStyle(timer.phase == .focus ? Theme.accent : Theme.ok)
+                    .foregroundStyle(face.tint)
             }
         })
     }
 
     func trailingEar(peek: Bool) -> AnyView {
         AnyView(TimelineView(.periodic(from: .now, by: 1)) { context in
-            if self.timer.isRunning || self.timer.isPaused {
-                Text(Countdown.text(self.timer.remaining(at: context.date)))
+            if let face = self.face(at: context.date) {
+                Text(Countdown.text(face.time))
                     .font(Theme.font(peek ? 12.5 : 11, .semibold).monospacedDigit())
-                    .foregroundStyle(self.timer.isPaused ? Theme.textSecondary : Theme.textBody)
+                    .foregroundStyle(face.paused ? Theme.textSecondary : Theme.textBody)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .fixedSize()
@@ -200,9 +264,11 @@ final class ToolsModule: NotchModule {
     func peekLine() -> AnyView {
         AnyView(TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 8) {
-                if self.timer.isRunning || self.timer.isPaused {
-                    Text(self.timer.phase.title).font(Theme.font(13, .semibold)).foregroundStyle(Theme.textPrimary)
-                    Text(Countdown.text(self.timer.remaining(at: context.date)) + (self.timer.isPaused ? " · paused" : ""))
+                if let face = self.face(at: context.date) {
+                    Text(self.timer.isRunning || self.timer.isPaused ? self.timer.phase.title
+                         : self.simple.mode == .stopwatch ? "Stopwatch" : "Timer")
+                        .font(Theme.font(13, .semibold)).foregroundStyle(Theme.textPrimary)
+                    Text(Countdown.text(face.time) + (face.paused ? " · paused" : ""))
                         .font(Theme.font(12.5).monospacedDigit()).foregroundStyle(Theme.textSecondary)
                 } else if let last = self.history.list().first {
                     Image(systemName: "doc.on.clipboard").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.textSecondary)
@@ -317,7 +383,7 @@ private struct ToolsBody: View {
                         Haptics.tick()
                         withAnimation(Theme.snappy) { module.tab = tab }
                     } label: {
-                        Text(LocalizedStringKey(tab.rawValue))
+                        Label(LocalizedStringKey(tab.rawValue), systemImage: tab.symbol)
                             .font(Theme.font(12, .semibold))
                             .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
                             .padding(.horizontal, 10)
@@ -434,55 +500,164 @@ private struct TimerCard: View {
     let module: ToolsModule
 
     var body: some View {
-        NotchCard(padding: 16) {
+        NotchCard(padding: 14) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                let timer = module.timer
-                let tint = timer.phase == .focus || timer.phase == .idle ? Theme.accent : Theme.ok
-                HStack(spacing: 22) {
-                    ZStack {
-                        Circle().stroke(Color.white.opacity(0.08), lineWidth: 7)
-                        Circle()
-                            .trim(from: 0, to: timer.phase == .idle ? 0 : timer.progress(at: context.date))
-                            .stroke(tint, style: StrokeStyle(lineWidth: 7, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .shadow(color: tint.opacity(0.6), radius: 5)
-                        VStack(spacing: 2) {
-                            Text(Countdown.text(timer.remaining(at: context.date)))
-                                .font(Theme.font(26, .semibold).monospacedDigit())
-                                .foregroundStyle(Theme.textPrimary)
-                                .contentTransition(.numericText())
-                            Text(LocalizedStringKey(timer.phase.title))
-                                .font(Theme.font(11.5, .medium)).foregroundStyle(tint)
+                let now = context.date
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 4) {
+                        ForEach(ToolsModule.TimerKind.allCases, id: \.self) { kind in
+                            let selected = module.timerKind == kind
+                            Button {
+                                Haptics.tick()
+                                withAnimation(Theme.snappy) { module.timerKind = kind }
+                            } label: {
+                                Text(LocalizedStringKey(kind.rawValue))
+                                    .font(Theme.font(11.5, .semibold))
+                                    .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
+                                    .padding(.horizontal, 9)
+                                    .frame(height: 22)
+                                    .background(Color.white.opacity(selected ? 0.12 : 0), in: Capsule())
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(PressScale())
                         }
                     }
-                    .frame(width: 150, height: 150)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(timer.isPaused ? "Paused" : timer.isRunning ? "Round \(timer.round + (timer.phase == .focus ? 1 : 0))" : "25 min focus, 5 min break")
-                            .font(Theme.font(13, .semibold)).foregroundStyle(Theme.textPrimary)
-                        HStack(spacing: 4) {
-                            ForEach(0..<max(4, timer.doneToday), id: \.self) { index in
-                                Circle().fill(index < timer.doneToday ? Theme.accent : Color.white.opacity(0.12))
-                                    .frame(width: 7, height: 7)
+                    HStack(spacing: 20) {
+                        ring(now: now).frame(width: 128, height: 128)
+                        VStack(alignment: .leading, spacing: 10) {
+                            switch module.timerKind {
+                            case .pomodoro: pomodoroControls
+                            case .countdown: countdownControls
+                            case .stopwatch: EmptyView()
                             }
+                            buttons
                         }
-                        .help("\(timer.doneToday) focus rounds today")
-                        HStack(spacing: 8) {
-                            pill(timer.isRunning ? "Pause" : timer.isPaused ? "Resume" : "Start", symbol: timer.isRunning ? "pause.fill" : "play.fill", primary: true) {
-                                module.startOrPause()
-                            }
-                            if timer.phase != .idle {
-                                pill("Skip", symbol: "forward.end.fill") { module.skipPhase() }
-                                pill("Stop", symbol: "stop.fill") { module.stopTimer() }
-                            }
-                        }
-                        Text("Space starts and pauses. The time stays beside the notch.")
-                            .font(Theme.font(10.5)).foregroundStyle(Theme.textTertiary)
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
                 }
             }
         }
+    }
+
+    /// The ring and the time for the kind on show.
+    @ViewBuilder private func ring(now: Date) -> some View {
+        let pomodoro = module.timerKind == .pomodoro
+        let timer = module.timer, simple = module.simple
+        let tint = pomodoro ? (timer.phase == .focus || timer.phase == .idle ? Theme.accent : Theme.ok) : Theme.waiting
+        let progress = pomodoro ? (timer.phase == .idle ? 0 : timer.progress(at: now))
+            : (simple.isActive || module.timerKind == .stopwatch ? simple.progress(at: now) : 0)
+        let time = pomodoro ? timer.remaining(at: now)
+            : module.timerKind == .stopwatch ? (simple.mode == .stopwatch ? simple.elapsed(at: now) : 0)
+            : (simple.mode == .countdown ? simple.remaining(at: now) : simple.duration)
+        let label = pomodoro ? timer.phase.title : module.timerKind == .stopwatch ? "Stopwatch" : "Timer"
+        ZStack {
+            Circle().stroke(Color.white.opacity(0.08), lineWidth: 7)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(tint, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: tint.opacity(0.6), radius: 5)
+            VStack(spacing: 2) {
+                Text(Countdown.text(time))
+                    .font(Theme.font(24, .semibold).monospacedDigit())
+                    .foregroundStyle(Theme.textPrimary)
+                    .contentTransition(.numericText())
+                Text(LocalizedStringKey(label)).font(Theme.font(11, .medium)).foregroundStyle(tint)
+            }
+        }
+    }
+
+    /// Focus and break lengths (while no round runs), and today's rounds.
+    @ViewBuilder private var pomodoroControls: some View {
+        let timer = module.timer
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text("Focus").font(Theme.font(11)).foregroundStyle(Theme.textTertiary).frame(width: 40, alignment: .leading)
+                ForEach([15.0, 25, 45, 60], id: \.self) { minutes in
+                    chip("\(Int(minutes))", selected: timer.focusMinutes == minutes, enabled: timer.phase == .idle) {
+                        module.setPomodoro(focus: minutes)
+                    }
+                }
+            }
+            HStack(spacing: 4) {
+                Text("Break").font(Theme.font(11)).foregroundStyle(Theme.textTertiary).frame(width: 40, alignment: .leading)
+                ForEach([5.0, 10, 15], id: \.self) { minutes in
+                    chip("\(Int(minutes))", selected: timer.breakMinutes == minutes, enabled: timer.phase == .idle) {
+                        module.setPomodoro(pause: minutes)
+                    }
+                }
+            }
+            HStack(spacing: 4) {
+                ForEach(0..<max(4, timer.doneToday), id: \.self) { index in
+                    Circle().fill(index < timer.doneToday ? Theme.accent : Color.white.opacity(0.12)).frame(width: 6, height: 6)
+                }
+            }
+            .help("\(timer.doneToday) focus rounds today")
+        }
+    }
+
+    /// Presets and ± a minute, while the countdown isn't running.
+    @ViewBuilder private var countdownControls: some View {
+        let simple = module.simple
+        let minutes = simple.duration / 60
+        let idle = !simple.isActive
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                ForEach([1.0, 3, 5, 10], id: \.self) { value in
+                    chip("\(Int(value))", selected: minutes == value, enabled: idle) { module.setCountdown(minutes: value) }
+                }
+            }
+            HStack(spacing: 4) {
+                ForEach([15.0, 30, 45, 60], id: \.self) { value in
+                    chip("\(Int(value))", selected: minutes == value, enabled: idle) { module.setCountdown(minutes: value) }
+                }
+            }
+            HStack(spacing: 6) {
+                chip("−1", selected: false, enabled: idle && minutes > 1) { module.setCountdown(minutes: minutes - 1) }
+                Text("\(Int(minutes)) min").font(Theme.font(11.5).monospacedDigit()).foregroundStyle(Theme.textSecondary)
+                chip("+1", selected: false, enabled: idle) { module.setCountdown(minutes: minutes + 1) }
+            }
+        }
+    }
+
+    @ViewBuilder private var buttons: some View {
+        let timer = module.timer, simple = module.simple
+        HStack(spacing: 8) {
+            if module.timerKind == .pomodoro {
+                pill(timer.isRunning ? "Pause" : timer.isPaused ? "Resume" : "Start", symbol: timer.isRunning ? "pause.fill" : "play.fill", primary: true) {
+                    module.startOrPause()
+                }
+                if timer.phase != .idle {
+                    pill("Skip", symbol: "forward.end.fill") { module.skipPhase() }
+                    pill("Stop", symbol: "stop.fill") { module.stopTimer() }
+                }
+            } else {
+                let mine = simple.mode == (module.timerKind == .stopwatch ? .stopwatch : .countdown)
+                let running = mine && simple.isRunning
+                pill(running ? "Pause" : mine && simple.isActive ? "Resume" : "Start", symbol: running ? "pause.fill" : "play.fill", primary: true) {
+                    if simple.isActive && !mine { module.resetSimple() }
+                    module.startOrPause()
+                }
+                if mine && simple.isActive {
+                    pill("Reset", symbol: "arrow.counterclockwise") { module.resetSimple() }
+                }
+            }
+        }
+    }
+
+    private func chip(_ title: String, selected: Bool, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.font(11.5, .semibold).monospacedDigit())
+                .foregroundStyle(selected ? Color.white : Theme.textBody)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 28)
+                .frame(height: 22)
+                .background(selected ? Theme.accent : Color.white.opacity(0.08), in: Capsule())
+        }
+        .buttonStyle(PressScale())
+        .disabled(!enabled)
+        .opacity(enabled || selected ? 1 : 0.45)
     }
 
     private func pill(_ title: String, symbol: String, primary: Bool = false, action: @escaping () -> Void) -> some View {

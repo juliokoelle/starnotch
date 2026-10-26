@@ -292,3 +292,59 @@ public struct DeviceBattery: Equatable, Sendable {
         return found.first { $0.name == name } ?? found.first
     }
 }
+
+/// A plain timer: counts down from a chosen time, or up like a stopwatch. Pausing keeps the time.
+public struct SimpleTimer: Equatable, Sendable {
+    public enum Mode: String, Sendable, CaseIterable { case countdown, stopwatch }
+
+    public var mode: Mode = .countdown
+    /// The countdown's length.
+    public var duration: TimeInterval = 10 * 60
+    public private(set) var startedAt: Date?
+    /// Time run before the last start.
+    public private(set) var accumulated: TimeInterval = 0
+
+    public init() {}
+
+    public var isRunning: Bool { startedAt != nil }
+    /// Running, or paused with time on it.
+    public var isActive: Bool { isRunning || accumulated > 0 }
+
+    public func elapsed(at now: Date) -> TimeInterval {
+        accumulated + (startedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0)
+    }
+
+    public func remaining(at now: Date) -> TimeInterval { max(0, duration - elapsed(at: now)) }
+
+    /// What the face shows: the time left (countdown) or the time gone (stopwatch).
+    public func shown(at now: Date) -> TimeInterval { mode == .countdown ? remaining(at: now) : elapsed(at: now) }
+
+    /// 0 to 1 through the countdown; the stopwatch goes round once a minute.
+    public func progress(at now: Date) -> Double {
+        mode == .countdown ? (duration > 0 ? min(1, elapsed(at: now) / duration) : 0)
+            : elapsed(at: now).truncatingRemainder(dividingBy: 60) / 60
+    }
+
+    public mutating func start(at now: Date) {
+        guard startedAt == nil else { return }
+        startedAt = now
+    }
+
+    public mutating func pause(at now: Date) {
+        guard startedAt != nil else { return }
+        accumulated = elapsed(at: now)
+        startedAt = nil
+    }
+
+    public mutating func reset() {
+        startedAt = nil
+        accumulated = 0
+    }
+
+    /// Call every second: true once when a countdown reaches zero (it resets).
+    public mutating func tick(at now: Date) -> Bool {
+        guard mode == .countdown, isRunning, remaining(at: now) <= 0 else { return false }
+        reset()
+        return true
+    }
+}

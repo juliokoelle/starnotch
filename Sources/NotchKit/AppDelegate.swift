@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var captureHotKey: HotKey?
     private var inboxHotKey: HotKey?
     private var watchHotKey: HotKey?
+    private var clipboardHotKey: HotKey?
     private let watchMode = WatchMode()
     private var previewDirector: PreviewDirector?
     private var agendaPreview: AgendaPreview?
@@ -422,6 +423,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         headphones.start()
         notch.onFileDrag = { [weak tools] in tools?.tab = .shelf }
+        tools.onCountdownDone = { [weak self] length in
+            NSSound(named: "Glass")?.play()
+            self?.notch.sneak(Sneak(visual: .symbol("hourglass", tint: .waiting), title: "Time's up",
+                                    detail: "\(Int(length / 60)) min timer", duration: 4),
+                              key: "countdown", urgent: true)
+        }
+        clipboardHotKey = HotKey.controlOptionV { [weak self, weak tools] in
+            tools?.tab = .clipboard
+            self?.notch.expand(.tools, pinned: true)
+        }
     }
 
     /// The consent page: what this Mac has and what can be set up, one click for all of it.

@@ -26,7 +26,7 @@ Everything is prepared except your Apple Developer credentials. These steps are 
    ./bin/generate_keys            # prints the public key
    ./bin/generate_keys -x sparkle-private.key   # export, only for the CI secret; then delete the file
    ```
-3. The public key goes into release builds through `SPARKLE_PUBLIC_KEY`. The feed URL is `https://github.com/juliokoelle/starnotch/releases/latest/download/appcast.xml`.
+3. The public key goes into release builds through `SPARKLE_PUBLIC_KEY`. The feed URL is `https://starnotch.app/appcast.xml`: downloads and feed live in the public site repository (`juliokoelle/starnotch-site`), so updates keep working while this repository is private.
 
 No key is in this repository.
 
@@ -35,7 +35,7 @@ No key is in this repository.
 ```sh
 export VERSION=0.2.0
 export STARNOTCH_SPARKLE=1
-export SPARKLE_FEED_URL=https://github.com/juliokoelle/starnotch/releases/latest/download/appcast.xml
+export SPARKLE_FEED_URL=https://starnotch.app/appcast.xml
 export SPARKLE_PUBLIC_KEY=<public key from generate_keys>
 export DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
 export NOTARY_PROFILE=starnotch-notary
@@ -62,6 +62,9 @@ gh release create v$VERSION build/releases/starnotch-$VERSION.dmg build/releases
 | `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | for notarytool |
 | `SPARKLE_PRIVATE_KEY` | contents of `sparkle-private.key` |
 | `SPARKLE_PUBLIC_KEY` | the public key |
+| `SITE_TOKEN` | a fine-grained personal access token for `juliokoelle/starnotch-site` with Contents: read and write (github.com › Settings › Developer settings › Fine-grained tokens) |
+
+The workflow puts the DMG into a release of the site repository (also as `Starnotch.dmg`, so `https://github.com/juliokoelle/starnotch-site/releases/latest/download/Starnotch.dmg` always is the newest) and commits `appcast.xml` to the site.
 
 Then:
 

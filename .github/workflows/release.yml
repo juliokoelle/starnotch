@@ -8,6 +8,11 @@ name: Release
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD   for notarytool (app-specific password)
 #   SPARKLE_PRIVATE_KEY       the EdDSA private key from generate_keys (exported)
 #   SPARKLE_PUBLIC_KEY        its public key (also in Info.plist)
+#   SITE_TOKEN                a fine-grained token with Contents: read and write on juliokoelle/starnotch-site
+#
+# The app's downloads and its update feed live in the public site repository, so they keep working
+# while this repository is private: the DMG as a release there (also as Starnotch.dmg, the stable
+# "latest" link for the website), the appcast at https://starnotch.app/appcast.xml.
 on:
   push:
     tags: ["v*"]
@@ -17,11 +22,12 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       STARNOTCH_SPARKLE: "1"
-      SPARKLE_FEED_URL: https://github.com/juliokoelle/starnotch/releases/latest/download/appcast.xml
+      SPARKLE_FEED_URL: https://starnotch.app/appcast.xml
+      SITE_REPO: juliokoelle/starnotch-site
       SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
       DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
       NOTARY_PROFILE: starnotch-notary
@@ -70,10 +76,30 @@ jobs:
           tar -xf "$SPARKLE_DIR/sparkle.tar.xz" -C "$SPARKLE_DIR"
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/ed.key"
           SPARKLE_BIN="$SPARKLE_DIR/bin" SPARKLE_KEY_FILE="$RUNNER_TEMP/ed.key" \
-            DOWNLOAD_URL_PREFIX="https://github.com/juliokoelle/starnotch/releases/download/$GITHUB_REF_NAME/" \
+            DOWNLOAD_URL_PREFIX="https://github.com/$SITE_REPO/releases/download/$GITHUB_REF_NAME/" \
             ./scripts/release/appcast.sh build/releases
           rm "$RUNNER_TEMP/ed.key"
-      - name: GitHub release
+      - name: Release in the site repository (public downloads)
+        env:
+          GH_TOKEN: ${{ secrets.SITE_TOKEN }}
+        run: |
+          cp build/releases/starnotch-"$VERSION".dmg build/releases/Starnotch.dmg
+          gh release create "$GITHUB_REF_NAME" --repo "$SITE_REPO" --title "Starnotch $VERSION" \
+            --notes "Starnotch $VERSION for macOS 14 or later." \
+            build/releases/starnotch-"$VERSION".dmg build/releases/Starnotch.dmg
+      - name: Update feed on starnotch.app
+        env:
+          GH_TOKEN: ${{ secrets.SITE_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/$SITE_REPO.git" "$RUNNER_TEMP/site"
+          cp build/releases/appcast.xml "$RUNNER_TEMP/site/appcast.xml"
+          cd "$RUNNER_TEMP/site"
+          git config user.name "starnotch-release"
+          git config user.email "release@starnotch.app"
+          git add appcast.xml
+          git commit -m "Update feed: Starnotch $VERSION"
+          git push
+      - name: Release record here
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

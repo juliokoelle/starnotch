@@ -103,10 +103,22 @@ public enum RunLog {
         let front = lines[1..<end].joined(separator: "\n")
         // A field is a list of numbers, ranges, steps or *; a comma after the last field is prose.
         let field = #"[0-9*/\-]+(?:,[0-9*/\-]+)*"#
-        guard let regex = try? NSRegularExpression(pattern: "cron \(field) \(field) \(field) \(field) \(field)") else { return [] }
+        let five = "\(field) \(field) \(field) \(field) \(field)"
         let range = NSRange(front.startIndex..., in: front)
-        return regex.matches(in: front, range: range).compactMap { match in
-            Range(match.range, in: front).flatMap { CronSchedule(String(front[$0].dropFirst(5))) }
+        func captures(_ pattern: String) -> [[String]] {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+            return regex.matches(in: front, range: range).map { match in
+                (1..<match.numberOfRanges).compactMap { Range(match.range(at: $0), in: front).map { String(front[$0]) } }
+            }
+        }
+        // "cron 30 4,12,20 * * *", then "(0 5 * * 0)", then "täglich 03:30 UTC" / "daily 03:30 UTC".
+        for pattern in ["cron (\(five))", "\\((\(five))\\)"] {
+            let found = captures(pattern).compactMap { $0.first.flatMap(CronSchedule.init) }
+            if !found.isEmpty { return found }
+        }
+        return captures(#"(?:täglich|daily)\s+(\d{1,2}):(\d{2})\s*UTC"#).prefix(1).compactMap { parts in
+            guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]) else { return nil }
+            return CronSchedule("\(minute) \(hour) * * *")
         }
     }
 

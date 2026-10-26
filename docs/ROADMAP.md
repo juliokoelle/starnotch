@@ -49,7 +49,7 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 | ✅ | Meeting agent: contradictions, questions, commitments, prep, ask the memory | |
 | ✅ | Starnotch MCP server | Tools `notify` and `confirm` (yes/no card); `ask` with options or free text next. One install makes every MCP client a Starnotch client: Claude Code, Codex, Cursor, Gemini CLI, VS Code, Claude Desktop and Cowork |
 | ⬜ | `ask` in the local API | Blocking question with options, returns the answer; the MCP server and the SDKs build on it |
-| ⬜ | Cloud sessions | Claude Code sessions running in the cloud (claude.ai/code, desktop app) in the same list, marked with a cloud badge (the star on a cloud) and the label "Cloud". Source to verify on a Mac: the desktop app's session files, else the sessions API with the user's login |
+| ⬜ | Cloud sessions | Not on disk: the Claude app keeps no local list of cloud sessions (checked 26.10.: only `local_*.json`, ids and presets). Comes with the relay in Wave 2: a hook in the cloud environment reports to the relay, the notch shows the session with the star on a cloud |
 | ✅ | Codex provider | Sessions, limits, approvals through its `PermissionRequest` hook |
 
 ### Distribution
@@ -64,7 +64,7 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 
 - SDKs (Python, TypeScript) and adapters for agent frameworks: Claude Agent SDK, OpenAI Agents SDK, LangGraph, Mastra, Vercel AI SDK, CrewAI, n8n. Each one routes "the agent needs a human" to the notch.
 - More coding agents: Cursor, Copilot CLI, Gemini CLI, opencode, Amp.
-- Approvals on the phone (Pro): a relay with end-to-end encryption, opt-in, so a question reaches you away from the Mac.
+- Relay (Pro): end-to-end encrypted, opt-in. Carries approvals to the phone, and cloud sessions (claude.ai/code) into the notch.
 - Daily briefing in the notch: calendar, open commitments, overdue captures, agent results overnight.
 - Orchestrator: one agent that hands work to the others and reports in the notch.
 - Command palette across all modules.

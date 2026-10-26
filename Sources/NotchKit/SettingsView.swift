@@ -145,6 +145,15 @@ struct SettingsView: View {
             }
 
             Section {
+                LoopsLogSettings()
+            } header: {
+                Text("Loops")
+            } footer: {
+                Text("Recurring agents and jobs that write one line per run (2026-10-26 · morning-brief · ok · note) show as loops in the Agents panel, with their schedule when a <loop>.md next to the log has a cron in its front matter.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 MeetingAgentSettings()
             } header: {
                 Text("Meeting agent")
@@ -236,6 +245,40 @@ struct MeetingAgentSettings: View {
         if !compact, let url = URL(string: "https://console.anthropic.com/settings/keys") {
             Link("Get an Anthropic key", destination: url)
         }
+    }
+}
+
+/// The run log behind the loops (RunLogConnector): picked here unless config.toml names one.
+private struct LoopsLogSettings: View {
+    @State private var path = UserDefaults.standard.string(forKey: RunLogConnector.defaultsKey)
+
+    var body: some View {
+        LabeledContent("Run log") {
+            HStack(spacing: 8) {
+                Text(path.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "None")
+                    .foregroundStyle(path == nil ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Button(path == nil ? "Choose…" : "Change…") { choose() }
+                if path != nil {
+                    Button("Remove") {
+                        UserDefaults.standard.removeObject(forKey: RunLogConnector.defaultsKey)
+                        path = nil
+                    }
+                }
+            }
+        }
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "The log your loops write to, one line per run"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        UserDefaults.standard.set(url.path, forKey: RunLogConnector.defaultsKey)
+        path = url.path
     }
 }
 

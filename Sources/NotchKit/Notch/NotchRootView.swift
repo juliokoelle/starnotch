@@ -200,10 +200,12 @@ private struct TabStrip: View {
         return range.clamped(to: model.modules.indices).map { model.modules[$0] }
     }
 
-    /// The full strip if it fits; else without "+" and tighter; else without the counts.
+    /// The full strip if it fits; else tighter, without the moon, without the counts. Quick
+    /// capture's "+" stays to the end: it is the one button people look for. Split around the
+    /// notch, the part right of it carries the "+".
     var body: some View {
-        if range != nil {
-            strip(counts: true, plus: false, padding: 5)
+        if let range {
+            strip(counts: true, plus: range.upperBound >= model.modules.count, moon: false, padding: 5)
         } else {
             full
         }
@@ -211,14 +213,15 @@ private struct TabStrip: View {
 
     private var full: some View {
         ViewThatFits(in: .horizontal) {
-            strip(counts: true, plus: true, padding: 8)
-            strip(counts: true, plus: false, padding: 6)
-            strip(counts: false, plus: false, padding: 5)
-            strip(counts: false, plus: false, padding: 3)
+            strip(counts: true, plus: true, moon: true, padding: 8)
+            strip(counts: true, plus: true, moon: false, padding: 6)
+            strip(counts: false, plus: true, moon: false, padding: 5)
+            strip(counts: false, plus: true, moon: false, padding: 3)
+            strip(counts: false, plus: false, moon: false, padding: 3)
         }
     }
 
-    private func strip(counts: Bool, plus showsPlus: Bool, padding: CGFloat) -> some View {
+    private func strip(counts: Bool, plus showsPlus: Bool, moon showsMoon: Bool, padding: CGFloat) -> some View {
         HStack(spacing: 2) {
             ForEach(shown, id: \.kind) { module in
                 let selected = module.kind == model.module
@@ -259,11 +262,12 @@ private struct TabStrip: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
             if showsPlus { plus }
+            if showsMoon { moon }
         }
         .fixedSize()
     }
 
-    /// Quick capture (design preview).
+    /// Quick capture.
     @ViewBuilder var plus: some View {
         if let request = model.requestCapture {
             Button(action: request) {
@@ -276,6 +280,10 @@ private struct TabStrip: View {
             .buttonStyle(PressScale())
             .help("Quick capture (⌃⌥N)")
         }
+    }
+
+    /// Watch mode on or off.
+    @ViewBuilder var moon: some View {
         if let toggle = model.toggleWatch {
             Button(action: toggle) {
                 Image(systemName: model.watching ? "moon.fill" : "moon")

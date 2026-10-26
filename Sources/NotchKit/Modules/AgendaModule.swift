@@ -24,6 +24,10 @@ final class AgendaModule: NotchModule {
     var selectedID: String?
     /// The user closed the detail side: the panel stays compact until they pick an event.
     var detailDismissed = false
+    /// The day on show: 0 today, -1 yesterday, 1 tomorrow (⌘← ⌘→, the week strip, the arrows).
+    private(set) var dayOffset = 0
+    /// The events of that day when it isn't today.
+    private var otherDay: [CalEvent] = []
 
     init(variant: Variant, people: (any PeopleProvider)?, source: CalendarModule? = nil) {
         self.variant = variant
@@ -47,7 +51,34 @@ final class AgendaModule: NotchModule {
     /// "Open note" shows when the connector has a note for someone in the meeting.
     func hasNote(for event: CalEvent) -> Bool { noteURL(for: event) != nil }
 
-    var events: [CalEvent] { source.map { $0.today.map(CalEvent.init) } ?? mockEvents }
+    /// Today's events: the ears, the peek line and the next meeting always look at today.
+    var todayEvents: [CalEvent] { source.map { $0.today.map(CalEvent.init) } ?? mockEvents }
+
+    /// The events of the day on show.
+    var events: [CalEvent] { dayOffset == 0 ? todayEvents : otherDay }
+
+    var isToday: Bool { dayOffset == 0 }
+
+    /// Shows another day; 0 goes back to today.
+    func showDay(_ offset: Int) {
+        guard offset != dayOffset else { return }
+        Haptics.tick()
+        withAnimation(Theme.snappy) {
+            otherDay = offset == 0 ? [] : (source?.meetings(dayOffset: offset).map(CalEvent.init) ?? [])
+            dayOffset = offset
+            selectedID = nil
+            detailDismissed = offset != 0
+        }
+    }
+
+    /// The clock the day's views draw with: the real time today; the start of a later day (all
+    /// of it ahead) or the end of an earlier one (all of it past).
+    func viewNow(_ now: Date) -> Date {
+        guard dayOffset != 0 else { return now }
+        let calendar = Calendar.current
+        let start = calendar.date(byAdding: .day, value: dayOffset, to: calendar.startOfDay(for: now)) ?? now
+        return dayOffset > 0 ? start : start.addingTimeInterval(86_399)
+    }
 
     /// What makes a day stand out in the week glance (mock only for now).
     var weekNotes: [Int: String] { source == nil ? AgendaSamples.weekNotes : [:] }
@@ -57,12 +88,12 @@ final class AgendaModule: NotchModule {
     /// The next meeting (not a focus block) that hasn't ended.
     var nextMeeting: CalEvent? {
         let now = now
-        return events.first { $0.kind == .meeting && $0.end > now }
+        return todayEvents.first { $0.kind == .meeting && $0.end > now }
     }
 
     var selected: CalEvent? {
         if let selectedID, let event = events.first(where: { $0.id == selectedID }) { return event }
-        return detailDismissed ? nil : nextMeeting
+        return detailDismissed || dayOffset != 0 ? nil : nextMeeting
     }
 
     /// A click on an event opens its detail; on the open one, closes it again.
@@ -106,8 +137,14 @@ final class AgendaModule: NotchModule {
 
     var weekCounts: [Int] {
         var counts = source?.week ?? AgendaSamples.week
-        counts[todayIndex] = meetingCount
+        counts[todayIndex] = todayEvents.filter { $0.kind == .meeting }.count
         return counts
+    }
+
+    /// The day on show in the week strip, nil when it lies outside this week.
+    var shownIndex: Int? {
+        let index = todayIndex + dayOffset
+        return (0..<7).contains(index) ? index : nil
     }
 
     var todayIndex: Int { (Calendar.current.component(.weekday, from: now) + 5) % 7 }
@@ -151,7 +188,7 @@ final class AgendaModule: NotchModule {
     /// header, the band (one row per lane), and the agenda list or the briefing, whichever is taller.
     var bodyHeight: CGFloat {
         guard variant == .b else { return 400 }
-        let list = AgendaList.height(module: self, now: now) + 20
+        let list = AgendaList.height(module: self, now: viewNow(now)) + 20
         let lower = showsDetail ? max(236, list) : list
         return min(NotchLayout.maxBodyHeight, 32 + 8 + DayBand.height(lanes: laneCount) + 16 + 8 + lower)
     }
@@ -174,6 +211,8 @@ final class AgendaModule: NotchModule {
         if !expanded {
             selectedID = nil
             detailDismissed = false
+            dayOffset = 0
+            otherDay = []
         }
     }
 
@@ -278,7 +317,14 @@ final class AgendaModule: NotchModule {
         switch press.key {
         case .upArrow, .downArrow:
             return step(press.key == .downArrow ? 1 : -1)
+        case .leftArrow where press.modifiers.contains(.command), .rightArrow where press.modifiers.contains(.command):
+            showDay(dayOffset + (press.key == .rightArrow ? 1 : -1))
+            return true
         default:
+            if press.characters == "t", dayOffset != 0 {
+                showDay(0)
+                return true
+            }
             return false
         }
     }
@@ -286,6 +332,7 @@ final class AgendaModule: NotchModule {
     /// Up and down: the previous or next event, focus blocks included.
     @discardableResult func step(_ delta: Int) -> Bool {
         let list = events
+        guard !list.isEmpty else { return true }
         let index = list.firstIndex { $0.id == selected?.id } ?? 0
         let next = min(max(index + delta, 0), list.count - 1)
         if next != index { select(list[next]) }
@@ -612,11 +659,11 @@ private struct AgendaBodyB: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let now = R5Clock.now(context.date)
+            let now = module.viewNow(R5Clock.now(context.date))
             VStack(spacing: 8) {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(R5Clock.longDay(now)).font(Theme.font(13.5, .semibold)).foregroundStyle(Theme.textPrimary)
+                        DayHeader(module: module, now: now)
                         ViewThatFits(in: .horizontal) {
                             Text(summary(now, short: false)).fixedSize()
                             Text(summary(now, short: true))
@@ -625,7 +672,10 @@ private struct AgendaBodyB: View {
                     }
                     .lineLimit(1)
                     Spacer(minLength: 8)
-                    WeekStrip(counts: module.weekCounts, today: module.todayIndex, notes: module.weekNotes, now: now)
+                    WeekStrip(counts: module.weekCounts, today: module.todayIndex, notes: module.weekNotes, now: R5Clock.now(context.date),
+                              shown: module.shownIndex) { index in
+                        module.showDay(index - module.todayIndex)
+                    }
                 }
                 .padding(.horizontal, 6)
                 .frame(height: 32)
@@ -658,12 +708,49 @@ private struct AgendaBodyB: View {
         let meetings = module.meetingCount
         let count = meetings == 0 ? (module.events.isEmpty ? "Nothing planned" : "No meetings")
             : meetings == 1 ? "1 meeting" : "\(meetings) meetings"
-        guard !module.events.isEmpty else { return count }
+        guard !module.events.isEmpty, module.isToday else { return count }
         var status = module.dayStatus(now: now)
         if short, !status.hasPrefix("free"), let until = status.range(of: " until ", options: .backwards) {
             status = "busy" + status[until.lowerBound...]
         }
         return "\(count) · \(status)"
+    }
+}
+
+/// The day's name with arrows to the day before and after, "Today" to come back, and a way to
+/// the full view in Calendar.
+private struct DayHeader: View {
+    let module: AgendaModule
+    let now: Date
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(R5Clock.longDay(now)).font(Theme.font(13.5, .semibold)).foregroundStyle(Theme.textPrimary)
+                .layoutPriority(1)
+            arrow("chevron.left", help: "Day before (⌘←)") { module.showDay(module.dayOffset - 1) }
+            arrow("chevron.right", help: "Day after (⌘→)") { module.showDay(module.dayOffset + 1) }
+            if !module.isToday {
+                Button("Today") { module.showDay(0) }
+                    .buttonStyle(PressScale())
+                    .font(Theme.font(11, .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .help("Back to today (T)")
+            }
+            if let source = module.source {
+                arrow("arrow.up.forward.app", help: "Open Calendar") { source.openCalendarApp() }
+            }
+        }
+    }
+
+    private func arrow(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .help(help)
     }
 }
 
@@ -673,6 +760,10 @@ struct WeekStrip: View {
     let today: Int
     var notes: [Int: String] = [:]
     let now: Date
+    /// The day on show when it isn't today: a ring around its date.
+    var shown: Int? = nil
+    /// A click on a day shows it.
+    var onSelect: ((Int) -> Void)? = nil
 
     private let letters = ["M", "T", "W", "T", "F", "S", "S"]
 
@@ -691,6 +782,7 @@ struct WeekStrip: View {
                         .foregroundStyle(isToday ? Color.white : index < today ? Theme.textTertiary : Theme.textBody)
                         .frame(width: 22, height: 18)
                         .background { if isToday { Capsule().fill(Theme.accent) } }
+                        .overlay { if shown == index && !isToday { Capsule().strokeBorder(Theme.accent, lineWidth: 1.5) } }
                     HStack(spacing: 2) {
                         ForEach(0..<min(3, counts[index]), id: \.self) { _ in
                             Circle().fill(index < today ? Color.white.opacity(0.25) : Theme.textSecondary).frame(width: 3, height: 3)
@@ -699,6 +791,8 @@ struct WeekStrip: View {
                     .frame(height: 3)
                 }
                 .frame(width: 24)
+                .contentShape(Rectangle())
+                .onTapGesture { onSelect?(index) }
                 .help(notes[index].map { "\(counts[index]) meetings · \($0)" } ?? (counts[index] == 1 ? "1 meeting" : "\(counts[index]) meetings"))
             }
         }
@@ -776,7 +870,7 @@ private struct AgendaList: View {
             if case .gap(let g) = row { return g.start >= nowMinutes - 1 }
             return false
         } ?? rows.count
-        rows.insert(.now, at: index)
+        if module.isToday { rows.insert(.now, at: index) }
         return rows
     }
 

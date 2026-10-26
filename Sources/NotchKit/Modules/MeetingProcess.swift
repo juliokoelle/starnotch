@@ -35,11 +35,14 @@ final class MeetingProcess: @unchecked Sendable {
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
         posix_spawnattr_setpgroup(&attributes, 0)
 
-        let arguments = ["/bin/zsh", "-lic", command]
+        let arguments = ["/bin/zsh", "-lic", MeetingAgentSetup.prelude + command]
         var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) } + [nil]
         defer { argv.forEach { free($0) } }
+        // The keys typed into Settings travel in the environment, never in the command line.
+        var envp: [UnsafeMutablePointer<CChar>?] = MeetingAgentSetup.environment().map { strdup($0) } + [nil]
+        defer { envp.forEach { free($0) } }
         var pid: pid_t = 0
-        let result = posix_spawn(&pid, "/bin/zsh", &actions, &attributes, &argv, environ)
+        let result = posix_spawn(&pid, "/bin/zsh", &actions, &attributes, &argv, &envp)
         try? stdin.fileHandleForReading.close()
         try? stdout.fileHandleForWriting.close()
         guard result == 0 else {

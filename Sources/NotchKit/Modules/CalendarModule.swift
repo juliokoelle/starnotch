@@ -129,6 +129,20 @@ final class CalendarModule: NotchModule {
         checkReminder()
     }
 
+    /// The timed events of another day: 0 is today, -1 yesterday, 1 tomorrow. Empty without access.
+    func meetings(dayOffset: Int) -> [Meeting] {
+        if dayOffset == 0 { return today }
+        guard !mock, access == .granted,
+              let start = Calendar.current.date(byAdding: .day, value: dayOffset, to: Calendar.current.startOfDay(for: Date()))
+        else { return [] }
+        return events(from: start, to: Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400))
+    }
+
+    /// Calendar.app, for the full view of a day.
+    func openCalendarApp() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+    }
+
     private func fetch(now: Date = Date()) -> [Meeting] {
         Array(events(from: now.addingTimeInterval(-60 * 60), to: now.addingTimeInterval(24 * 3600))
             .filter { $0.end > now }

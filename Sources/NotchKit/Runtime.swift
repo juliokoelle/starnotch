@@ -83,9 +83,11 @@ enum Runtime {
         return raw.trimmingCharacters(in: .whitespaces).isEmpty ? nil : section.path("markdown_file")
     }
 
-    /// The meeting agent's folder (`agent/` of this repo), where `uv run` starts its programs.
+    /// The meeting agent's folder, where `uv run` starts its programs: `[meeting] agent_dir`, else
+    /// the copy of the agent inside the app, else a checkout in ~/starnotch-jamie.
     static var meetingAgentDir: URL {
         config["meeting"].path("agent_dir")
+            ?? MeetingAgentSetup.ensureInstalled()
             ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "starnotch-jamie/agent")
     }
 

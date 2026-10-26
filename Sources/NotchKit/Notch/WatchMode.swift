@@ -16,6 +16,8 @@ final class WatchMode {
     private(set) var manualUntil: Date?
     private(set) var fullscreen = false
     private(set) var videoPlaying = false
+    /// Switched off by hand while on by itself; holds until the fullscreen app or video ends.
+    private(set) var dismissed = false
 
     @ObservationIgnored var automatic: () -> Bool = { true }
     @ObservationIgnored var timer: () -> WatchTimer = { .twoHours }
@@ -45,7 +47,11 @@ final class WatchMode {
         if manualOn {
             manualOn = false
             manualUntil = nil
+            dismissed = true  // off means off, even with a video still in front
+        } else if isOn {
+            dismissed = true  // on by itself (fullscreen or video): off until that ends
         } else {
+            dismissed = false
             manualOn = true
             manualUntil = timer().seconds.map { Date().addingTimeInterval($0) }
         }
@@ -67,11 +73,12 @@ final class WatchMode {
             manualOn = false
             manualUntil = nil
         }
+        if !fullscreen && !videoPlaying { dismissed = false }
         let on = Quiet.watching(manualUntil: manualUntil, manualOn: manualOn, automatic: automatic,
-                                fullscreen: fullscreen, videoPlaying: videoPlaying, now: Date())
+                                fullscreen: fullscreen, videoPlaying: videoPlaying, dismissed: dismissed, now: Date())
         if on != isOn {
             isOn = on
-            Log.app.info("Watch mode \(on ? "on" : "off", privacy: .public) (fullscreen \(self.fullscreen), video \(self.videoPlaying), manual \(self.manualOn))")
+            Log.app.info("Watch mode \(on ? "on" : "off", privacy: .public) (fullscreen \(self.fullscreen), video \(self.videoPlaying), manual \(self.manualOn), dismissed \(self.dismissed))")
             onChange?(on)
         }
     }

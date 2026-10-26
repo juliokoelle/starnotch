@@ -33,11 +33,12 @@ public enum Quiet {
     }
 
     /// Watch mode from what is on screen: a fullscreen app on the notch display, or video
-    /// keeping the display awake for the frontmost app; plus the manual toggle.
+    /// keeping the display awake for the frontmost app; plus the manual toggle. `dismissed`: the
+    /// user switched an automatic Watch mode off, which holds until the fullscreen app or video ends.
     public static func watching(manualUntil: Date?, manualOn: Bool, automatic: Bool, fullscreen: Bool,
-                                videoPlaying: Bool, now: Date) -> Bool {
+                                videoPlaying: Bool, dismissed: Bool = false, now: Date) -> Bool {
         if manualOn, manualUntil.map({ now < $0 }) ?? true { return true }
-        return automatic && (fullscreen || videoPlaying)
+        return automatic && (fullscreen || videoPlaying) && !dismissed
     }
 
     /// A window fills the whole screen (fullscreen Space): its bounds equal the display's,

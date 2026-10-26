@@ -33,6 +33,9 @@ import TestSupport
         #expect(!Quiet.watching(manualUntil: UTC.date("2026-10-22 19:00"), manualOn: true, automatic: false,
                                 fullscreen: false, videoPlaying: false, now: now))
         #expect(Quiet.watching(manualUntil: nil, manualOn: true, automatic: false, fullscreen: false, videoPlaying: false, now: now))
+        // Switched off by hand while a video keeps it on: stays off.
+        #expect(!Quiet.watching(manualUntil: nil, manualOn: false, automatic: true, fullscreen: false, videoPlaying: true,
+                                dismissed: true, now: now))
     }
 
     @Test func fullscreenWindow() {

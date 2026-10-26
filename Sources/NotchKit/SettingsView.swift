@@ -91,7 +91,11 @@ struct SettingsView: View {
                         guard on else { state.settings.remindersInToday = false; return }
                         // Asked here, on the click, never before.
                         RemindersSource.requestAccess { granted in
-                            Task { @MainActor in state.settings.remindersInToday = granted }
+                            Task { @MainActor in
+                                state.settings.remindersInToday = granted
+                                // Declined earlier: macOS won't ask again, so go to the switch itself.
+                                if !granted { PrivacyPane.open("Privacy_Reminders") }
+                            }
                         }
                     })) {
                     Text("Apple Reminders in Today")
@@ -137,6 +141,15 @@ struct SettingsView: View {
                 Text("Quiet")
             } footer: {
                 Text("By default the notch is just the notch: figures appear when something needs you, on hover, and for a moment when something happens.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                MeetingAgentSettings()
+            } header: {
+                Text("Meeting agent")
+            } footer: {
+                Text("The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Without an Anthropic key the agent runs on simple rules.")
                     .foregroundStyle(.secondary)
             }
 
@@ -187,6 +200,47 @@ struct SettingsView: View {
 
     private static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+}
+
+/// The meeting agent's keys and its one dependency, without a terminal or config.toml.
+private struct MeetingAgentSettings: View {
+    @State private var anthropic = MeetingAgentSetup.keys()["ANTHROPIC_API_KEY"] ?? ""
+    @State private var reson8 = MeetingAgentSetup.keys()["RESON8_API_KEY"] ?? ""
+    @State private var uvFound = MeetingAgentSetup.uvPath != nil
+    @State private var copied = false
+
+    var body: some View {
+        SecureField("Anthropic API key", text: $anthropic, prompt: Text("sk-ant-…"))
+            .onChange(of: anthropic) { _, value in MeetingAgentSetup.setKey("ANTHROPIC_API_KEY", value) }
+        SecureField("Reson8 API key", text: $reson8, prompt: Text("for live transcription"))
+            .onChange(of: reson8) { _, value in MeetingAgentSetup.setKey("RESON8_API_KEY", value) }
+        LabeledContent("uv") {
+            if uvFound {
+                Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            } else {
+                Button(copied ? "Copied: paste it into Terminal" : "Install uv") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(MeetingAgentSetup.uvInstallCommand, forType: .string)
+                    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"))
+                    copied = true
+                }
+                .help(MeetingAgentSetup.uvInstallCommand)
+            }
+        }
+        .onAppear { uvFound = MeetingAgentSetup.uvPath != nil }
+        if let url = URL(string: "https://console.anthropic.com/settings/keys") {
+            Link("Get an Anthropic key", destination: url)
+        }
+    }
+}
+
+/// System Settings › Privacy & Security, opened at the switch the app needs.
+enum PrivacyPane {
+    static func open(_ anchor: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
 

@@ -43,8 +43,9 @@ enum ModuleAvailability {
             return Status(available: true, detail: "CPU, GPU, memory and the apps behind them")
         case .meeting:
             let found = FileManager.default.fileExists(atPath: Runtime.meetingAgentDir.appending(path: "agent.py").path)
-            return Status(available: found, detail: found ? "Meeting agent: contradictions, questions, commitments"
-                                                          : "Set [meeting] agent_dir in config.toml")
+            let missing = MeetingAgentSetup.missing(agentFound: found)
+            return Status(available: found, detail: missing.isEmpty ? "Meeting agent: contradictions, questions, commitments"
+                                                    : "Needs \(missing.joined(separator: ", ")): Settings › Meeting agent")
         }
     }
 

@@ -79,6 +79,10 @@ final class MeetingModule: NotchModule {
             message = "agent.py not found in \(directory.path); set [meeting] agent_dir in config.toml"
             return
         }
+        guard MeetingAgentSetup.uvPath != nil else {
+            message = "The meeting agent needs uv: Settings › Meeting agent › Install uv"
+            return
+        }
         if agent != nil, agentIsDemo != demo { endAgent() }
         if let agent {
             agent.write(Data(#"{"cmd":"reset"}"#.utf8 + [0x0A]))
@@ -93,7 +97,7 @@ final class MeetingModule: NotchModule {
         }
         // Demo: the recorded meeting through Reson8 when there's a key, else the same meeting as text.
         let command = demo
-            ? #"if [[ -n "$RESON8_API_KEY" ]]; then exec uv run python transcribe.py --file demo/live.wav --language de; else exec uv run python demo/play.py --commands; fi"#
+            ? #"if [[ -n "$RESON8_API_KEY" && -f demo/live.wav ]]; then exec uv run python transcribe.py --file demo/live.wav --language de; else exec uv run python demo/play.py --commands; fi"#
             : "exec uv run --extra mic python transcribe.py --mic --language de"
         source = MeetingProcess(command: command, directory: directory, log: log, onLine: { [weak self] line in
             Task { @MainActor in self?.sourceLine(line) }

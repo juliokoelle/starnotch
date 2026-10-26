@@ -12,14 +12,14 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 
 | | Item | Notes |
 |---|---|---|
-| ⬜ | One-click Claude usage connection | No hand-edited status line; the app installs and removes the bridge itself after one confirmation |
+| ✅ | One-click Claude usage connection | Setup page: "Claude plan limits and context" installs the status line bridge, with backup and Remove. Onboarding should lead there |
 | ⬜ | First-run onboarding | Pick an avatar, connect Claude, set up the Meeting Agent (key, folder) in one flow |
-| 🔧 | Meeting Agent switch does nothing without setup | Opens the setup instead of failing silently |
-| 🔧 | Watch mode toggle | Doesn't switch |
-| 🔧 | Calendar | Move between days, a full-day view |
-| 🔧 | Quick capture plus button | Lost in the compact view |
-| ⬜ | Notch on external monitors | Floating pill on screens without a notch (see Shape) |
-| ⬜ | Permission prompts | Open the exact System Settings pane |
+| ✅ | Meeting Agent switch does nothing without setup | The agent ships in the app; keys and uv in Settings › Meeting agent |
+| ✅ | Watch mode toggle | Switching off now holds while a video or fullscreen app keeps it on |
+| ✅ | Calendar | Day before and after (arrows, ⌘← ⌘→, week strip), Today, open Calendar |
+| ✅ | Quick capture plus button | Stays in narrow strips and right of the notch |
+| ✅ | Notch on external monitors | Settings › Display: Notch, Main display or With pointer; a pill without a notch |
+| ✅ | Permission prompts | Calendar, Reminders, Accessibility, Automation open their pane |
 | ⬜ | Past sessions | List with resume (`claude --resume <id>` in the right folder) |
 
 ### Basics nobody may beat us on
@@ -27,19 +27,19 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 | | Item | Notes |
 |---|---|---|
 | ✅ | Battery, keep awake, reminders source, now playing, calendar, quick capture | |
-| ⬜ | Clipboard history | Search, pin, skips concealed and transient types (passwords) |
-| ⬜ | Pomodoro and timers | Focus chain, streak, end as a sneak |
+| ✅ | Clipboard history | Tools module: pin, Clear, skips concealed types and password apps; search next |
+| ✅ | Pomodoro and timers | Tools module: 25/5, long break every fourth, time beside the notch |
 | ⬜ | Device batteries | AirPods and Bluetooth devices |
-| ⬜ | File shelf | Drag into the notch, drag back out, AirDrop |
-| ⬜ | Image converter | Drop an image, get PNG, JPEG, HEIC or WebP back (ImageIO) |
-| ⬜ | Sound | Output device switch, volume; per-app volume later |
-| ⬜ | Reminders in the notch | Tick off, create from quick capture |
+| ✅ | File shelf | Tools module: drop in the panel, drag out, AirDrop; drop on the closed notch next |
+| ✅ | Image converter | Shelf: PNG, JPEG, HEIC, TIFF next to the original |
+| ✅ | Sound | Output device switch and volume (with music); per-app volume later |
+| 🔧 | Reminders in the notch | Shown in Today; tick off and create from quick capture next |
 
 ### Shape
 
 | | Item | Notes |
 |---|---|---|
-| ⬜ | Pill mode | A floating island at the top center for displays without a notch (externals, Mac mini, iMac). The same pill is the design language of a later Windows build |
+| ✅ | Pill mode | A floating island at the top center for displays without a notch (externals, Mac mini, iMac). The same pill is the design language of a later Windows build |
 
 ### Agentic layer
 
@@ -47,16 +47,16 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 |---|---|---|
 | ✅ | Claude Code sessions, approvals, subagents, usage | |
 | ✅ | Meeting agent: contradictions, questions, commitments, prep, ask the memory | |
-| ⬜ | Starnotch MCP server | Tools `notify`, `ask` (options or free text) and `approve`, answered in the notch. One install makes every MCP client a Starnotch client: Claude Code, Codex, Cursor, Gemini CLI, VS Code, Claude Desktop and Cowork |
+| ✅ | Starnotch MCP server | Tools `notify` and `confirm` (yes/no card); `ask` with options or free text next. One install makes every MCP client a Starnotch client: Claude Code, Codex, Cursor, Gemini CLI, VS Code, Claude Desktop and Cowork |
 | ⬜ | `ask` in the local API | Blocking question with options, returns the answer; the MCP server and the SDKs build on it |
 | ⬜ | Cloud sessions | Claude Code sessions running in the cloud (claude.ai/code, desktop app) in the same list, marked with a cloud badge (the star on a cloud) and the label "Cloud". Source to verify on a Mac: the desktop app's session files, else the sessions API with the user's login |
-| ⬜ | Codex provider | Sessions, limits, approvals through its `PermissionRequest` hook |
+| ✅ | Codex provider | Sessions, limits, approvals through its `PermissionRequest` hook |
 
 ### Distribution
 
 | | Item | Notes |
 |---|---|---|
-| ⬜ | Download build from CI | Every push builds the app as a downloadable artifact |
+| ✅ | Download build from CI | Every push builds the app as a downloadable artifact |
 | ⬜ | Signed, notarized DMG with updates | Needs the Apple Developer account (99 USD a year) |
 | ⬜ | Website | Waitlist, Founding Member pre-order (Stripe), no source links |
 

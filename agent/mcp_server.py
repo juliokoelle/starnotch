@@ -3,10 +3,11 @@
     claude mcp add starnotch -- uv run --directory "$HOME/Library/Application Support/Starnotch/agent" python mcp_server.py
 
 One install makes every MCP client a Starnotch client (Claude Code, Codex, Cursor, Gemini CLI,
-VS Code, Claude Desktop). Two tools:
+VS Code, Claude Desktop). Three tools:
 
 - notify: one line in the notch ("Deploy done", "Tests failed"), clickable with a link.
 - confirm: a yes/no question as a card in the notch; returns "yes", "no" or "no answer".
+- ask: a question with up to four answers to pick and/or a field to type; returns the answer.
 
 Questions go through the app's approvals socket (the same one the Claude Code plugin uses), so they
 queue with permission requests and never answer themselves: only a click says yes. Notifications
@@ -60,6 +61,16 @@ def request_for(question: str, details: str, client: str, cwd: str | None) -> di
     }
 
 
+def text_answer_from(reply: bytes) -> str:
+    """The picked or typed answer from the socket's reply; 'no answer' when skipped or unanswered."""
+    try:
+        data = json.loads(reply)
+    except ValueError:
+        return "no answer"
+    answer = data.get("starnotch_answer") if isinstance(data, dict) else None
+    return answer if isinstance(answer, str) and answer.strip() else "no answer"
+
+
 def answer_from(reply: bytes) -> str:
     """'yes', 'no' or 'no answer' from the socket's reply (empty when unanswered)."""
     try:
@@ -107,7 +118,8 @@ def build(notch: Notch | None = None, sock: Path | None | bool = None) -> MCPSer
         "starnotch",
         instructions=("Reach the user in their MacBook notch. Use notify for short updates they should see "
                       "without being interrupted (a long task finished, a deploy failed). Use confirm when you "
-                      "need a yes or no before a consequential step; it waits up to a minute for their click."),
+                      "need a yes or no before a consequential step, and ask when you need a choice or a short "
+                      "answer (give options when you can). Both wait up to a minute for the user."),
     )
     poster = notch
 
@@ -139,6 +151,28 @@ def build(notch: Notch | None = None, sock: Path | None | bool = None) -> MCPSer
         except OSError as error:
             return f"no answer (Starnotch: {error.strerror or error})"
         return answer_from(reply)
+
+    @server.tool()
+    async def ask(question: str, ctx: Context, options: list[str] | None = None, free_text: bool = True,
+                  details: str = "") -> str:
+        """Ask the user a question in their notch and wait for the answer (up to a minute).
+        options: up to four short answers shown as buttons (each up to 60 characters).
+        free_text: also show a field to type an answer. Returns the chosen or typed answer, or
+        "no answer" when the user skipped it or didn't answer."""
+        picks = [o.strip()[:60] for o in (options or []) if o.strip()][:4]
+        if not picks and not free_text:
+            free_text = True  # a question needs some way to answer it
+        path = socket_path() if sock is None else (sock or None)
+        if path is None:
+            return "no answer (Starnotch isn't running)"
+        request = request_for(question, details, client_name(ctx), os.getcwd())
+        request["starnotch_options"] = picks
+        request["starnotch_free_text"] = free_text
+        try:
+            reply = await asyncio.to_thread(ask_socket, path, request)
+        except OSError as error:
+            return f"no answer (Starnotch: {error.strerror or error})"
+        return text_answer_from(reply)
 
     return server
 

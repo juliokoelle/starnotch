@@ -93,7 +93,7 @@ final class NotchModel {
 
     var layout: NotchLayout {
         NotchLayout(presentation: presentation, notch: notchSize,
-                    bodyHeight: approvals?.current != nil ? 150 : current.bodyHeight,
+                    bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? current.bodyHeight,
                     bodyWidth: approvals?.current != nil ? NotchLayout.expandedWidth : current.bodyWidth,
                     earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom)
     }

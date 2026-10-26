@@ -16,7 +16,7 @@ class FakeNotch:
         return "http"
 
 
-def fake_app(path, behavior):
+def fake_app(path, behavior, answer=None):
     """The app's end of the approvals socket: reads one request, answers with `behavior` (None: no answer)."""
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(path))
@@ -31,6 +31,8 @@ def fake_app(path, behavior):
         seen["request"] = json.loads(data)
         if behavior:
             reply = {"hookSpecificOutput": {"decision": {"behavior": behavior}, "hookEventName": "PermissionRequest"}}
+            if answer is not None:
+                reply["starnotch_answer"] = answer
             conn.sendall(json.dumps(reply).encode())
         conn.close()
         server.close()
@@ -102,3 +104,23 @@ def test_socket_path_rejects_open_folder(tmp_path, monkeypatch):
     folder.chmod(0o700)
     assert mcp_server.socket_path() == path
     s.close()
+
+
+async def test_ask_with_options(tmp_path):
+    path = tmp_path / "ask.sock"
+    seen = fake_app(path, "allow", answer="Staging")
+    answer = await call(mcp_server.build(sock=path), "ask",
+                        {"question": "Where should I deploy?", "options": ["Staging", "Production", " ", "x" * 80, "a", "b"],
+                         "free_text": False})
+    assert answer == "Staging"
+    request = seen["request"]
+    assert request["starnotch_options"] == ["Staging", "Production", "x" * 60, "a"]
+    assert request["starnotch_free_text"] is False
+
+
+async def test_ask_skipped_and_free_text_fallback(tmp_path):
+    path = tmp_path / "skip.sock"
+    seen = fake_app(path, "deny")
+    answer = await call(mcp_server.build(sock=path), "ask", {"question": "Name?", "free_text": False})
+    assert answer == "no answer"
+    assert seen["request"]["starnotch_free_text"] is True  # no options: typing stays possible

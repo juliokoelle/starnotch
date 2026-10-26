@@ -70,6 +70,8 @@ final class ApprovalCenter {
         guard let pending = queue.first else { return }
         // Codex can't take a session rule: ⌘↵ does nothing there rather than something else.
         if decision == .allowSession, !pending.request.supportsSessionRules { return }
+        // A question with answers to pick or type: ↵ alone doesn't pick one.
+        if pending.request.asksForAnswer, decision == .allowOnce || decision == .allowSession { return }
         Haptics.confirm()
         pending.reply(decision)
         advance()
@@ -91,6 +93,74 @@ final class ApprovalCenter {
         withAnimation(Theme.snappy) { _ = queue.removeFirst() }
         onChange?(queue.map(\.request))
         if queue.isEmpty { onEmpty?() } else { show() }
+    }
+}
+
+/// An agent's question with answers: up to four to pick (1–4), a field to type one, and Skip.
+private struct QuestionAnswers: View {
+    let center: ApprovalCenter
+    let request: ApprovalRequest
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !request.options.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(Array(request.options.enumerated()), id: \.offset) { index, option in
+                        let pick = Button { center.answer(.answer(option)) } label: {
+                            HStack(spacing: 5) {
+                                Text("\(index + 1)").font(Theme.font(10.5, .bold)).foregroundStyle(Theme.textTertiary)
+                                Text(option).font(Theme.font(12.5, .semibold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                            }
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(Color.white.opacity(0.09), in: Capsule())
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressScale())
+                        // Number keys pick, unless they belong in the text field.
+                        if request.freeText {
+                            pick
+                        } else {
+                            pick.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [])
+                        }
+                    }
+                }
+            }
+            if request.freeText {
+                HStack(spacing: 8) {
+                    TextField("Type an answer", text: $text)
+                        .textFieldStyle(.plain)
+                        .font(Theme.font(12.5))
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .focused($focused)
+                        .onSubmit(send)
+                    Button("Send", action: send)
+                        .buttonStyle(PressScale())
+                        .font(Theme.font(12, .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .onAppear { focused = true }
+            }
+            HStack {
+                Spacer()
+                Button("Skip") { center.answer(.deny) }
+                    .buttonStyle(PressScale())
+                    .font(Theme.font(11.5))
+                    .foregroundStyle(Theme.textTertiary)
+                    .help("The agent hears that you didn't answer (esc)")
+            }
+        }
+    }
+
+    private func send() {
+        let answer = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !answer.isEmpty else { return }
+        center.answer(.answer(answer))
     }
 }
 
@@ -156,6 +226,9 @@ struct ApprovalCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .help(request.detail)
+                    if isQuestion && request.asksForAnswer {
+                        QuestionAnswers(center: center, request: request)
+                    } else {
                     HStack(spacing: 8) {
                         button(isQuestion ? "Yes" : "Allow once", key: "↵", style: .primary) { center.answer(.allowOnce) }
                         if request.supportsSessionRules {
@@ -163,6 +236,7 @@ struct ApprovalCard: View {
                         }
                         Spacer(minLength: 4)
                         button(isQuestion ? "No" : "Deny", key: "esc", style: .quiet) { center.answer(.deny) }
+                    }
                     }
                     Text(isQuestion ? "Unanswered, \(request.tool) hears no answer after \(Int(ApprovalCenter.timeout)) s."
                          : "Unanswered, \(request.provider == CodexProvider.id ? "Codex" : "the terminal") asks after \(Int(ApprovalCenter.timeout)) s.")

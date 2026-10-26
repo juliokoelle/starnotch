@@ -98,4 +98,17 @@ import TestSupport
         #expect(provider.parse(hook: Bytes.data(request))?.sessionID == "codex:019a0001")
         #expect(provider.approvalSetup.install.hasSuffix("codex/install-hook.sh\""))
     }
+
+    @Test func mcpQuestionsCarryOptionsAndAnswers() throws {
+        let json = #"{"hook_event_name":"PermissionRequest","starnotch_provider":"mcp","tool_name":"Cursor","tool_input":{"description":"Deploy where?"},"starnotch_options":["Staging"," ","Production","a","b"],"starnotch_free_text":true}"#
+        let request = try #require(ApprovalRequest.parse(Data(json.utf8)))
+        #expect(request.options == ["Staging", "Production", "a", "b"])
+        #expect(request.freeText && request.asksForAnswer)
+        let answer = String(decoding: ApprovalDecision.answer("Staging").output(for: request), as: UTF8.self)
+        #expect(answer.contains(#""starnotch_answer":"Staging""#) && answer.contains(#""behavior":"allow""#))
+        #expect(String(decoding: ApprovalDecision.deny.output(for: request), as: UTF8.self).contains(#""behavior":"deny""#))
+        // Options only count for the MCP server's questions.
+        let claude = #"{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"},"starnotch_options":["x"]}"#
+        #expect(try #require(ApprovalRequest.parse(Data(claude.utf8))).options.isEmpty)
+    }
 }

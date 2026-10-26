@@ -17,6 +17,13 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
     public var detail: String
     /// `permission_suggestions` that add allow rules, kept for "Allow for session".
     public var allowRules: [[String: String]]
+    /// An agent's question through the MCP server: up to four answers to pick from …
+    public var options: [String] = []
+    /// … and/or a field to type the answer.
+    public var freeText = false
+
+    /// A question that wants an answer rather than yes or no.
+    public var asksForAnswer: Bool { !options.isEmpty || freeText }
 
     /// The hook's stdin JSON; nil unless it is a PermissionRequest with a tool name.
     public static func parse(_ data: Data, id: String = UUID().uuidString) -> ApprovalRequest? {
@@ -38,6 +45,13 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
         var request = ApprovalRequest(id: id, sessionID: object["session_id"] as? String, cwd: object["cwd"] as? String,
                                       tool: tool, summary: summary, detail: detail, allowRules: rules)
         if let provider = (object["starnotch_provider"] as? String)?.nilIfEmpty { request.provider = provider }
+        if request.provider == mcpProvider {
+            let options = (object["starnotch_options"] as? [String] ?? [])
+                .map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)) }
+                .filter { !$0.isEmpty }
+            request.options = Array(options.prefix(4))
+            request.freeText = object["starnotch_free_text"] as? Bool ?? false
+        }
         return request
     }
 
@@ -105,19 +119,22 @@ extension ApprovalRequest {
 }
 
 /// What the user clicked in the notch.
-public enum ApprovalDecision: String, Sendable {
+public enum ApprovalDecision: Equatable, Sendable {
     case allowOnce, allowSession, deny
+    /// The answer to an agent's question (an option or typed text), for the MCP server only.
+    case answer(String)
 
     /// The hook's stdout for the request's tool.
     public func output(for request: ApprovalRequest) -> Data {
-        request.provider == "codex" ? ApprovalFormat.codex(self) : claudeOutput(for: request)
+        if request.provider == ApprovalRequest.mcpProvider { return ApprovalFormat.mcp(self) }
+        return request.provider == "codex" ? ApprovalFormat.codex(self) : claudeOutput(for: request)
     }
 
     /// Claude Code's stdout, exactly as its PermissionRequest decision control documents it.
     func claudeOutput(for request: ApprovalRequest) -> Data {
         var decision: [String: Any]
         switch self {
-        case .allowOnce:
+        case .allowOnce, .answer:
             decision = ["behavior": "allow"]
         case .allowSession:
             // Claude Code's own suggestions, kept in memory for this session only. Without one,
@@ -141,11 +158,20 @@ public enum ApprovalDecision: String, Sendable {
 
 /// Reply formats per tool.
 public enum ApprovalFormat {
+    /// The MCP server's reply: the PermissionRequest shape (yes is allow, no is deny) plus the
+    /// answer to a question.
+    public static func mcp(_ decision: ApprovalDecision) -> Data {
+        var output: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PermissionRequest",
+                                                            "decision": ["behavior": decision == .deny ? "deny" : "allow"]]]
+        if case .answer(let text) = decision { output["starnotch_answer"] = text }
+        return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
+    }
+
     /// Codex's PermissionRequest output: allow or deny only. Codex fails closed on
     /// `updatedPermissions`, so "for this session" can't be expressed and is sent as a plain allow.
     public static func codex(_ decision: ApprovalDecision) -> Data {
         let body: [String: Any] = switch decision {
-        case .allowOnce, .allowSession: ["behavior": "allow"]
+        case .allowOnce, .allowSession, .answer: ["behavior": "allow"]
         case .deny: ["behavior": "deny", "message": "Denied from the notch."]
         }
         let output: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": body]]

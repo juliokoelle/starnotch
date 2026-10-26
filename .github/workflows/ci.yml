@@ -16,9 +16,13 @@ jobs:
       - name: Swift version
         run: swift --version
       - name: Build
-        run: swift build
+        run: |
+          set -o pipefail
+          swift build 2>&1 | tee build.log || { echo "::group::Errors"; grep -E "error:" build.log | sort -u | head -40; echo "::endgroup::"; exit 1; }
       - name: Test
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee test.log || { grep -E "error:|failed|✘" test.log | sort -u | head -40; exit 1; }
       - name: App bundle
         run: ./scripts/build-app.sh
       - name: No private assets in the bundle

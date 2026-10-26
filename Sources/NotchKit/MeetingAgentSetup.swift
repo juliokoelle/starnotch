@@ -1,4 +1,5 @@
 import Foundation
+import NotchCore
 
 /// What the meeting agent needs, without a terminal: the agent ships inside the app
 /// (`Resources/agent`) and runs from a copy in Application Support, where `uv` keeps its

@@ -175,7 +175,7 @@ final class MeetingModule: NotchModule {
             jamieLogin = nil
             syncedCount += 1
             message = "Jamie: \(syncedCount) · \(title)"
-        case .syncDone(let meetings):
+        case .syncDone(let meetings, _):
             message = "Jamie: \(meetings) meeting\(meetings == 1 ? "" : "s") synced into the memory"
             agent?.write(MeetingCommand.reload)
         case .error(let text):

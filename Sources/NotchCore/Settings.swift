@@ -103,8 +103,13 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public var didOnboard: Bool
     /// Which display the island lives on.
     public var islandDisplay: IslandDisplay
-    /// Modules the user switched off (onboarding or Settings).
+    /// Tabs the user switched off (onboarding or Settings › Tools); a fresh install starts with
+    /// all but the core off (`ToolSwitches`).
     public var disabledModules: [ModuleKind]
+    /// Small tools switched off (clipboard, timers, keep awake …), off on a fresh install.
+    public var disabledFeatures: [ToolFeature]
+    /// How the meeting agent thinks (onboarding or Settings › Meeting agent).
+    public var brain: TaraBrain
     /// The open panel stays until a click outside (or Esc), not when the pointer leaves.
     public var keepOpenUntilClick: Bool
     /// Figures beside the notch at rest.
@@ -136,7 +141,9 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         colourScale: [PerformanceLevel: String] = PerformanceLevel.defaultScale,
         didOnboard: Bool = false,
         islandDisplay: IslandDisplay = .automatic,
-        disabledModules: [ModuleKind] = [],
+        disabledModules: [ModuleKind] = ToolSwitches.offModules,
+        disabledFeatures: [ToolFeature] = ToolSwitches.offFeatures,
+        brain: TaraBrain = .auto,
         keepOpenUntilClick: Bool = false,
         earsMode: EarsMode = .attention,
         watchAutomatic: Bool = true,
@@ -161,6 +168,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         self.didOnboard = didOnboard
         self.islandDisplay = islandDisplay
         self.disabledModules = disabledModules
+        self.disabledFeatures = disabledFeatures
+        self.brain = brain
         self.keepOpenUntilClick = keepOpenUntilClick
         self.earsMode = earsMode
         self.watchAutomatic = watchAutomatic
@@ -246,7 +255,10 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             // Saved settings without the key come from before onboarding existed: don't show it.
             didOnboard: try c.decodeIfPresent(Bool.self, forKey: .didOnboard) ?? true,
             islandDisplay: (try? c.decodeIfPresent(IslandDisplay.self, forKey: .islandDisplay)) ?? .automatic,
+            // Saved before the Tools gallery: every tool the user had stays on.
             disabledModules: (try? c.decodeIfPresent([ModuleKind].self, forKey: .disabledModules)) ?? [],
+            disabledFeatures: (try? c.decodeIfPresent([ToolFeature].self, forKey: .disabledFeatures)) ?? [],
+            brain: (try? c.decodeIfPresent(TaraBrain.self, forKey: .brain)) ?? .auto,
             keepOpenUntilClick: (try? c.decodeIfPresent(Bool.self, forKey: .keepOpenUntilClick)) ?? false,
             earsMode: (try? c.decodeIfPresent(EarsMode.self, forKey: .earsMode)) ?? .attention,
             watchAutomatic: (try? c.decodeIfPresent(Bool.self, forKey: .watchAutomatic)) ?? true,

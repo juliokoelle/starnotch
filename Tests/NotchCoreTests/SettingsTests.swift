@@ -62,6 +62,22 @@ import TestSupport
         #expect(loaded.activeSlot == SlotPosition.top)
         #expect(loaded.holdDuration == 0.25)
         #expect(loaded.modules == ModuleKind.defaultLayout)
+        // Saved before the Tools gallery: every tool stays on, the brain is the agent's pick.
+        #expect(loaded.disabledModules.isEmpty)
+        #expect(loaded.disabledFeatures.isEmpty)
+        #expect(loaded.brain == .auto)
+    }
+
+    @Test func toolsGalleryAndBrainRoundTrip() {
+        let isolated = IsolatedSettings()
+        var settings = SwitcherSettings()
+        settings.disabledFeatures = [.keepAwake]
+        settings.brain = .claudeCode
+        isolated.store.save(settings)
+        let loaded = isolated.store.load()
+        #expect(loaded.disabledFeatures == [.keepAwake])
+        #expect(loaded.brain == .claudeCode)
+        #expect(TaraBrain.claudeCode.rawValue == "claude-code")
     }
 
     @Test func corruptDataFallsBackToDefaults() {

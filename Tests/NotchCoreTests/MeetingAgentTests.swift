@@ -61,6 +61,7 @@ import TestSupport
         #expect(parse(#"{"type":"status","state":"login","url":"https://jamie/auth"}"#) == .status(state: "login", message: "https://jamie/auth"))
         #expect(parse(#"{"type":"synced","meeting_id":"jamie-abc","title":"Weekly","date":"2026-10-19","lines":120,"path":"/p"}"#) == .synced(title: "Weekly"))
         #expect(parse(#"{"type":"status","state":"synced","meetings":12}"#) == .syncDone(meetings: 12))
+        #expect(parse(#"{"type":"status","state":"synced","meetings":0,"hint":"empty_account"}"#) == .syncDone(meetings: 0, hint: "empty_account"))
         #expect(parse(#"{"type":"status","state":"warning","message":"get_meeting abc: 404"}"#) == .status(state: "warning", message: "get_meeting abc: 404"))
     }
 

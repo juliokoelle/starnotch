@@ -27,16 +27,19 @@ final class HeadphoneBattery {
         current = device
         guard Self.isBluetooth(device) else { return }
         let name = Self.name(of: device)
-        Task.detached(priority: .utility) { [weak self] in
+        Task { [weak self] in
             // The earbuds report their levels a few seconds after they connect: try a few times,
             // and only take the device that is the output.
-            for wait in [2.0, 3, 5, 10] {
-                try? await Task.sleep(for: .seconds(wait))
-                guard let data = Self.profile(), let battery = DeviceBattery.parse(data, preferring: name),
-                      DeviceBattery.sameDevice(battery.name, name) else { continue }
-                await MainActor.run { self?.onBattery?(battery) }
-                return
-            }
+            let battery = await Task.detached(priority: .utility) { () -> DeviceBattery? in
+                for wait in [2.0, 3, 5, 10] {
+                    try? await Task.sleep(for: .seconds(wait))
+                    guard let data = Self.profile(), let battery = DeviceBattery.parse(data, preferring: name),
+                          DeviceBattery.sameDevice(battery.name, name) else { continue }
+                    return battery
+                }
+                return nil
+            }.value
+            if let battery { self?.onBattery?(battery) }
         }
     }
 

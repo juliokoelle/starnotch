@@ -30,6 +30,12 @@ final class ToolsModule: NotchModule {
     let symbol = ModuleSymbols.symbol(.tools)
 
     var tab = Tab.clipboard
+    /// The tabs switched on in Settings › Tools, in their order.
+    var tabs = Tab.allCases {
+        didSet { if !tabs.contains(tab), let first = tabs.first { tab = first } }
+    }
+    /// The image converter is switched on (it works on the shelf's files).
+    var converts = true
     private(set) var history = ClipboardHistory()
     private(set) var timer = FocusTimer()
     /// Countdown and stopwatch.
@@ -304,7 +310,7 @@ final class ToolsModule: NotchModule {
             withAnimation(Theme.snappy) { selected = list[next].id }
             return true
         case .tab:
-            let all = Tab.allCases
+            let all = tabs.isEmpty ? Tab.allCases : tabs
             let index = all.firstIndex(of: tab) ?? 0
             withAnimation(Theme.snappy) { tab = all[(index + 1) % all.count] }
             return true
@@ -377,7 +383,7 @@ private struct ToolsBody: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
-                ForEach(ToolsModule.Tab.allCases, id: \.self) { tab in
+                ForEach(module.tabs, id: \.self) { tab in
                     let selected = module.tab == tab
                     Button {
                         Haptics.tick()
@@ -683,7 +689,8 @@ private struct ShelfCard: View {
                 if module.shelf.isEmpty {
                     VStack(spacing: 6) {
                         Image(systemName: "tray.and.arrow.down").font(.system(size: 22, weight: .semibold))
-                        Text("Drop files here. Drag them out again, AirDrop them, or convert images.")
+                        Text(module.converts ? "Drop files here. Drag them out again, AirDrop them, or convert images."
+                                             : "Drop files here. Drag them out again or AirDrop them.")
                             .font(Theme.font(12)).multilineTextAlignment(.center)
                     }
                     .foregroundStyle(targeted ? Theme.accent : Theme.textSecondary)
@@ -736,7 +743,7 @@ private struct ShelfRow: View {
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 4)
             if hovering {
-                if ImageConverter.isImage(url) {
+                if module.converts, ImageConverter.isImage(url) {
                     Menu {
                         ForEach(ImageFormat.allCases, id: \.self) { format in
                             Button(format.rawValue) { module.convert(url, to: format) }

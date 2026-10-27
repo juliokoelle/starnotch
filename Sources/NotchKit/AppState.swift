@@ -13,7 +13,8 @@ final class AppState {
         didSet {
             if settings != oldValue { store.save(settings) }
             if settings.localAPIEnabled != oldValue.localAPIEnabled { onLocalAPIToggle?(settings.localAPIEnabled) }
-            if settings.disabledModules != oldValue.disabledModules || settings.remindersInToday != oldValue.remindersInToday {
+            if settings.disabledModules != oldValue.disabledModules || settings.disabledFeatures != oldValue.disabledFeatures
+                || settings.remindersInToday != oldValue.remindersInToday {
                 onModulesChanged?()
             }
             if settings.islandDisplay != oldValue.islandDisplay { onDisplayChanged?() }

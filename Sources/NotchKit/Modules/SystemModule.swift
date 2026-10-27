@@ -29,6 +29,8 @@ final class SystemModule: NotchModule {
     @ObservationIgnored var cast: AvatarCast?
     /// "Keep awake" holds the display on.
     var keepAwake = false
+    /// Keep awake is switched on in Settings › Tools.
+    var offersKeepAwake = true
     @ObservationIgnored var onToggleKeepAwake: (() -> Void)?
     /// Terminal commands running for 30 s or more (from the shell snippet).
     var longCommands: [ShellActivity.Running] = []
@@ -583,15 +585,17 @@ private struct StatusChips: View {
                      tint: battery.isLow ? Theme.waiting : Theme.textBody)
                     .help(battery.line)
             }
-            Button { module.onToggleKeepAwake?() } label: {
-                Image(systemName: module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(module.keepAwake ? Theme.accent : Theme.textSecondary)
-                    .frame(width: 34, height: 28)
-                    .background(module.keepAwake ? Theme.accent.opacity(0.14) : Color.white.opacity(0.06), in: Capsule())
+            if module.offersKeepAwake {
+                Button { module.onToggleKeepAwake?() } label: {
+                    Image(systemName: module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(module.keepAwake ? Theme.accent : Theme.textSecondary)
+                        .frame(width: 34, height: 28)
+                        .background(module.keepAwake ? Theme.accent.opacity(0.14) : Color.white.opacity(0.06), in: Capsule())
+                }
+                .buttonStyle(PressScale())
+                .help(module.keepAwake ? "The display stays on until you switch this off" : "Keep the display and the Mac awake")
             }
-            .buttonStyle(PressScale())
-            .help(module.keepAwake ? "The display stays on until you switch this off" : "Keep the display and the Mac awake")
             if module.media.inUse {
                 HStack(spacing: 6) {
                     Circle().fill(module.media.camera ? Theme.ok : Theme.waiting).frame(width: 7, height: 7)

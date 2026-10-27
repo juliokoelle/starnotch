@@ -19,6 +19,7 @@ struct SettingsView: View {
             }
 
             Section {
+                MainCharacterRow(state: state, cast: cast)
                 ProjectsList(state: state, cast: cast)
             } header: {
                 Text("Projects")
@@ -84,29 +85,31 @@ struct SettingsView: View {
             }
 
             Section {
-                ModuleSwitches(state: state)
-                Toggle(isOn: Binding(
-                    get: { state.settings.remindersInToday },
-                    set: { on in
-                        guard on else { state.settings.remindersInToday = false; return }
-                        // Asked here, on the click, never before.
-                        RemindersSource.requestAccess { granted in
-                            Task { @MainActor in
-                                state.settings.remindersInToday = granted
-                                // Declined earlier: macOS won't ask again, so go to the switch itself.
-                                if !granted { PrivacyPane.open("Privacy_Reminders") }
+                ToolGallery(state: state)
+                if !state.settings.disabledModules.contains(.today) {
+                    Toggle(isOn: Binding(
+                        get: { state.settings.remindersInToday },
+                        set: { on in
+                            guard on else { state.settings.remindersInToday = false; return }
+                            // Asked here, on the click, never before.
+                            RemindersSource.requestAccess { granted in
+                                Task { @MainActor in
+                                    state.settings.remindersInToday = granted
+                                    // Declined earlier: macOS won't ask again, so go to the switch itself.
+                                    if !granted { PrivacyPane.open("Privacy_Reminders") }
+                                }
                             }
-                        }
-                    })) {
-                    Text("Apple Reminders in Today")
-                    Text(RemindersSource.authorized || EKEventStore.authorizationStatus(for: .reminder) == .notDetermined
-                         ? "Reminders due today and overdue. macOS asks once when you switch this on."
-                         : "Reminders access is off in System Settings › Privacy & Security › Reminders.")
+                        })) {
+                        Text("Apple Reminders in Today")
+                        Text(RemindersSource.authorized || EKEventStore.authorizationStatus(for: .reminder) == .notDetermined
+                             ? "Reminders due today and overdue. macOS asks once when you switch this on."
+                             : "Reminders access is off in System Settings › Privacy & Security › Reminders.")
+                    }
                 }
             } header: {
-                Text("Modules")
+                Text("Tools")
             } footer: {
-                Text("Modules hide themselves when what they need isn't on this Mac.")
+                Text("A tool is off until you switch it on; the notch shows only the ones that are on. Tabs hide themselves when what they need isn't on this Mac.")
                     .foregroundStyle(.secondary)
             }
 
@@ -154,11 +157,11 @@ struct SettingsView: View {
             }
 
             Section {
-                MeetingAgentSettings()
+                MeetingAgentSettings(state: state)
             } header: {
                 Text("Meeting agent")
             } footer: {
-                Text("The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Without an Anthropic key the agent runs on simple rules.")
+                Text("The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Automatic uses Claude Code when it's there, else an Anthropic key, else simple rules.")
                     .foregroundStyle(.secondary)
             }
 
@@ -212,9 +215,10 @@ struct SettingsView: View {
     }
 }
 
-/// The meeting agent's keys and its one dependency, without a terminal or config.toml. Compact
-/// (the setup page): the Anthropic key and uv only.
+/// The meeting agent's brain, keys and its one dependency, without a terminal or config.toml.
+/// Compact: the Anthropic key and uv only.
 struct MeetingAgentSettings: View {
+    @Bindable var state: AppState
     var compact = false
     @State private var anthropic = MeetingAgentSetup.keys()["ANTHROPIC_API_KEY"] ?? ""
     @State private var reson8 = MeetingAgentSetup.keys()["RESON8_API_KEY"] ?? ""
@@ -222,6 +226,13 @@ struct MeetingAgentSettings: View {
     @State private var copied = false
 
     var body: some View {
+        if !compact {
+            Picker("How Tara thinks", selection: $state.settings.brain) {
+                ForEach(TaraBrain.allCases, id: \.self) { brain in
+                    Text(LocalizedStringKey(BrainInfo.title(brain))).tag(brain)
+                }
+            }
+        }
         SecureField("Anthropic API key", text: $anthropic, prompt: Text("sk-ant-…"))
             .onChange(of: anthropic) { _, value in MeetingAgentSetup.setKey("ANTHROPIC_API_KEY", value) }
         if !compact {
@@ -497,13 +508,10 @@ private struct ProjectStylePicker: View {
             Text(project).font(.system(size: 13, weight: .semibold))
             LazyVGrid(columns: characterColumns, alignment: .leading, spacing: 6) {
                 ForEach(library.characters, id: \.id) { character in
-                    tile(selected: character.id == current, help: character.name, size: 58) {
+                    PickerTile(selected: character.id == current, help: character.name, size: 58) {
                         cast.setStyle(project: project, character: character.id)
                     } content: {
-                        if let sprite = character.portrait, let image = library.image(sprite) {
-                            Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
-                                .frame(height: 44, alignment: .bottom)
-                        }
+                        CharacterPortrait(character: character.id, height: 44)
                     }
                 }
             }
@@ -515,9 +523,17 @@ private struct ProjectStylePicker: View {
         .padding(16)
         .frame(width: 400)
     }
+}
 
-    private func tile<Content: View>(selected: Bool, help: String, size: CGFloat, action: @escaping () -> Void,
-                                     @ViewBuilder content: () -> Content) -> some View {
+/// A square choice in a picker: a character, a colour. The selected one carries the accent ring.
+struct PickerTile<Content: View>: View {
+    let selected: Bool
+    let help: String
+    var size: CGFloat = 58
+    let action: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
         Button(action: action) {
             content()
                 .frame(width: size, height: size, alignment: .bottom)
@@ -530,6 +546,109 @@ private struct ProjectStylePicker: View {
         .help(help)
         .accessibilityLabel(help)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// A character's portrait from its pack, standing on the bottom edge.
+struct CharacterPortrait: View {
+    let character: String
+    var height: CGFloat
+
+    var body: some View {
+        let library = AvatarLibrary.shared
+        if let sprite = library.character(character)?.portrait, let image = library.image(sprite) {
+            Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                .frame(height: height, alignment: .bottom)
+        }
+    }
+}
+
+/// The main character and its colour: who comes out of the notch for music, dictation and
+/// capture, and who leads the projects without a pick. Onboarding and Settings share it.
+struct MainCharacterPicker: View {
+    let cast: AvatarCast
+    @Bindable var state: AppState
+    var tileSize: CGFloat = 58
+    /// "Character" and "Colour" above the rows (onboarding).
+    var labelled = false
+
+    var body: some View {
+        let library = cast.library
+        let current = cast.main
+        VStack(alignment: .leading, spacing: 14) {
+            if labelled { label("Character") }
+            HStack(spacing: 8) {
+                ForEach(library.characters, id: \.id) { character in
+                    PickerTile(selected: character.id == current, help: character.name, size: tileSize) {
+                        Haptics.tick()
+                        cast.setMain(character.id)
+                    } content: {
+                        CharacterPortrait(character: character.id, height: tileSize - 12)
+                    }
+                }
+            }
+            if labelled { label("Colour").padding(.top, 4) }
+            if cast.isTintable(current) {
+                let selected = state.settings.colorway ?? Colorway.builtIn[0].key
+                HStack(spacing: 6) {
+                    ForEach(Colorway.recipes, id: \.key) { recipe in
+                        PickerTile(selected: recipe.key == selected, help: recipe.name, size: 36) {
+                            Haptics.tick()
+                            cast.setMainColorway(recipe.key == Colorway.builtIn[0].key ? nil : recipe.key)
+                        } content: {
+                            AvatarView(character: current, mood: .idle, height: 28, colorway: recipe.colorway,
+                                       emergeOnAppear: false, alive: false)
+                        }
+                    }
+                }
+            } else {
+                Text("\(library.character(current)?.name ?? "This character") keeps its own colours.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .frame(height: 36, alignment: .center)
+            }
+        }
+    }
+
+    private func label(_ text: LocalizedStringKey) -> some View {
+        Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.leading, 2).padding(.bottom, -6)
+    }
+}
+
+/// Settings: the main character with its colour, "Change" opens the same picker as onboarding.
+private struct MainCharacterRow: View {
+    @Bindable var state: AppState
+    let cast: AvatarCast
+    @State private var picking = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AvatarView(character: cast.main, mood: .idle, height: 30, colorway: cast.colorway, emergeOnAppear: false, alive: false)
+                .frame(width: 40, height: 32, alignment: .bottom)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Main character").font(.system(size: 13, weight: .medium))
+                Text(cast.library.character(cast.main)?.name ?? cast.main)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                picking.toggle()
+            } label: {
+                Text("Change")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 10)
+                    .frame(height: 26)
+                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScale())
+            .popover(isPresented: $picking, arrowEdge: .leading) {
+                MainCharacterPicker(cast: cast, state: state, tileSize: 52)
+                    .padding(16)
+            }
+        }
+        .padding(.vertical, 3)
     }
 }
 
@@ -549,7 +668,7 @@ private struct SlotPicker: View {
         VStack(alignment: .leading, spacing: 12) {
             label("Modules")
             LazyVGrid(columns: tiles, alignment: .leading, spacing: 8) {
-                ForEach(ModuleKind.selectable, id: \.self) { module in
+                ForEach(ModuleKind.selectable.filter { !state.settings.disabledModules.contains($0) }, id: \.self) { module in
                     tile(title: module.title, selected: state.settings[module: position] == module) {
                         Image(systemName: ModuleSymbols.symbol(module)).font(.system(size: 17, weight: .semibold))
                     } action: {

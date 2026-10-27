@@ -278,10 +278,25 @@ final class AvatarCast {
     static var homeProject: String { Runtime.homeProject }
 
     var main: String {
-        Self.homeProject.isEmpty ? (library.characters.first?.id ?? "") : character(forProject: Self.homeProject)
+        Self.homeProject.isEmpty ? (picked ?? library.characters.first?.id ?? "") : character(forProject: Self.homeProject)
     }
-    /// The home character outside sessions (music, dictation, capture): its base look.
-    var colorway: Colorway { Colorway() }
+    /// The home character outside sessions (music, dictation, capture): the colour picked in
+    /// onboarding or Settings, else its base look.
+    var colorway: Colorway { state.settings.colorway.map(Colorway.named) ?? Colorway() }
+
+    /// The main character picked in onboarding or Settings, while its pack is installed.
+    private var picked: String? {
+        let id = state.settings.mainCharacter
+        return library.character(id) == nil ? nil : id
+    }
+
+    /// Picks the main character; with a home project, that project's character too.
+    func setMain(_ id: String) {
+        state.settings.mainCharacter = id
+        if !Self.homeProject.isEmpty { setStyle(project: Self.homeProject, character: id) }
+    }
+
+    func setMainColorway(_ key: String?) { state.settings.colorway = key }
 
     var colourBy: ColourBy { state.settings.colourBy }
     var colourScale: [PerformanceLevel: String] { state.settings.colourScale }
@@ -323,7 +338,8 @@ final class AvatarCast {
         if let previewCharacter { return previewCharacter }
         let all = projects.union([project])
         let defaults = Runtime.projectCharacters
-        let fallback = Runtime.fallbackCharacter
+        // Projects without a pick follow the main character when config.toml names no fallback.
+        let fallback = Runtime.fallbackCharacter.map { $0 == library.characters.first?.id ? (picked ?? $0) : $0 }
         return ProjectAssignment.characters(projects: Array(all), styles: state.settings.projects, characters: library.ids,
                                             defaults: defaults, fallback: fallback)[project]
             ?? ProjectAssignment.character(project: project, styles: state.settings.projects, characters: library.ids,

@@ -24,12 +24,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var previewDirector: PreviewDirector?
     private var agendaPreview: AgendaPreview?
     private var setup: SetupCenter!
-    private var setupWindow: SetupWindowController?
+    private var onboarding: OnboardingWindowController?
+    private var cast: AvatarCast!
     /// Every module built, shown or not; `NotchModel.modules` holds the shown ones.
     private var allModules: [NotchModule] = []
     private var system: SystemModule?
     private var meeting: MeetingModule?
     private var tools: ToolsModule?
+    /// The Tools module watches the clipboard (not in previews).
+    private var toolsLive = false
     private let headphones = HeadphoneBattery()
     private var companion: MeetingCompanion?
     private let battery = BatteryMonitor()
@@ -43,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if options.demoSlots { applyDemoSlots() }
 
         let cast = AvatarCast(state: state)
+        self.cast = cast
         let agents = AgentsModule(cast: cast)
         let dictation = DictationModule(cast: cast)
         let preview = options.preview != nil
@@ -93,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.onModulesChanged = { [weak self] in
             guard let self else { return }
             withAnimation(Theme.snappy) { self.notchModel.modules = self.shownModules(sample: sample) }
+            self.applyTools()
         }
         state.onDisplayChanged = { [weak self] in self?.notch.placeOnScreen() }
         notch.keepsOpen = { [weak self] in
@@ -205,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setup = SetupCenter(state: state)
         if preview { setup.usePreviewLedger() }
-        settingsWindow = SettingsWindowController(state: state, cast: cast, setup: setup) { [weak self] in self?.showSetup() }
+        settingsWindow = SettingsWindowController(state: state, cast: cast, setup: setup) { [weak self] in self?.showSetup(at: .agents) }
         statusItem = StatusItemController(
             state: state,
             onToggleNotch: { [weak self] in self?.notch.toggleFromKeyboard() },
@@ -214,7 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         statusItem.keepingAwake = { [weak self] in self?.keepAwake.isOn ?? false }
         statusItem.onToggleKeepAwake = { [weak self] in self?.keepAwake.toggle() }
-        statusItem.onOpenSetup = { [weak self] in self?.showSetup() }
+        statusItem.onOpenSetup = { [weak self] in self?.showSetup(at: .agents) }
         statusItem.updater = updater
         hotKey = HotKey.controlOptionSpace { [weak self] in self?.notch.toggleFromKeyboard() }
         joinHotKey = HotKey.controlOptionJ { [weak self] in self?.joinNextMeeting() }
@@ -237,9 +242,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.onLocalAPIToggle = { [weak self] on in self?.setLocalAPI(on) }
         if options.preview == nil { setLocalAPI(state.settings.localAPIEnabled) }
 
-        // First launch: the setup page. Nothing is set up before the user's click there.
-        if !state.settings.didOnboard && !preview && !options.tour {
-            showSetup()
+        // First launch: onboarding. Nothing is set up before the user's click there.
+        if (!state.settings.didOnboard && !preview && !options.tour) || options.onboarding {
+            showSetup(at: options.onboardingStep.flatMap(Onboarding.Step.init(rawValue:)))
             state.settings.didShowAccessibilityIntro = true
         }
         // Explain the Accessibility permission once, on first launch.
@@ -289,9 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.demoAgentFinished()
             }
         }
-        notchModel.requestCapture = { [weak self] in self?.notch.openCapture() }
-        captureHotKey = HotKey.controlOptionN { [weak self] in self?.notch.openCapture() }
-        inboxHotKey = HotKey.controlOptionI { if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) } }
+        applyTools()
         notch.inbox.loadPeople(from: people)
         music.onTrackChange = { [weak self] track in
             self?.notch.sneak(Sneak(visual: .cover(track.cover), title: track.title, detail: track.artist),
@@ -300,14 +303,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agents.onLoopFinished = { [weak self] loop in self?.loopFinished(loop) }
         if let name = options.preview, let agendaPreview {
             agendaPreview.run(name, notch: notch, agents: agents)
-        } else if let name = options.preview, name == "setup-consent" || name == "setup-done" {
+        } else if let name = options.preview, name == "setup-consent" || name == "setup-done" || name.hasPrefix("onboarding") {
             // The setup pages with nothing behind them (the center is in preview mode).
             agents.usePreview(PreviewDirector.snapshot(agentsActive: false))
-            if name == "setup-consent" {
-                setup.resetForPreview()
-                showSetup()
-            } else {
+            if name == "setup-done" {
                 SetupLedgerWindow.show(center: setup)
+            } else {
+                setup.resetForPreview()
+                showOnboardingPreview(name)
             }
         } else if let name = options.preview {
             previewDirector = PreviewDirector(notch: notch, agents: agents, music: music)
@@ -340,6 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        onboarding?.model.jamie.cancel()
         approvals?.stop()
         meeting?.shutdown()
     }
@@ -413,7 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startTools(_ tools: ToolsModule) {
         tools.isEnabled = { [weak self] in
             guard let self else { return false }
-            return ModuleAvailability.isShown(.tools, settings: self.state.settings)
+            return ToolSwitches.isOn(.clipboard, in: self.state.settings)
         }
         tools.onPhaseEnd = { [weak self, weak tools] ended, next in
             let focusDone = ended == .focus
@@ -424,6 +428,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               key: "focus", urgent: true)
         }
         tools.start()
+        toolsLive = true
+        applyTools()
         headphones.onBattery = { [weak self] battery in
             let low = (battery.lowest ?? 100) <= 20
             self?.notch.sneak(Sneak(visual: .symbol(battery.left != nil ? "airpodspro" : "headphones", tint: low ? .waiting : .ok),
@@ -431,27 +437,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               key: "headphones")
         }
         headphones.start()
-        notch.onFileDrag = { [weak tools] in tools?.tab = .shelf }
         tools.onCountdownDone = { [weak self] length in
             NSSound(named: "Glass")?.play()
             self?.notch.sneak(Sneak(visual: .symbol("hourglass", tint: .waiting), title: "Time's up",
                                     detail: "\(Int(length / 60)) min timer", duration: 4),
                               key: "countdown", urgent: true)
         }
-        clipboardHotKey = HotKey.controlOptionV { [weak self, weak tools] in
-            tools?.tab = .clipboard
-            self?.notch.expand(.tools, pinned: true)
-        }
     }
 
-    /// The consent page: what this Mac has and what can be set up, one click for all of it.
-    func showSetup() {
-        if setupWindow == nil {
-            let window = SetupWindowController(center: setup)
+    /// The tools switched on in Settings › Tools, applied to what sits outside the tabs: the plus
+    /// button and its shortcuts, the clipboard shortcut and watcher, the shelf, keep awake.
+    private func applyTools() {
+        let settings = state.settings
+        // Previews and sample data show every tool.
+        let sample = options.preview != nil || options.sampleData
+        let isOn = { (feature: ToolFeature) in sample || ToolSwitches.isOn(feature, in: settings) }
+        let capture = isOn(.quickCapture)
+        notchModel.requestCapture = capture ? { [weak self] in self?.notch.openCapture() } : nil
+        captureHotKey = capture ? captureHotKey ?? HotKey.controlOptionN { [weak self] in self?.notch.openCapture() } : nil
+        inboxHotKey = capture ? inboxHotKey ?? HotKey.controlOptionI { if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) } } : nil
+
+        let awake = isOn(.keepAwake)
+        system?.offersKeepAwake = awake
+        if !awake { keepAwake.set(false) }
+
+        guard let tools else { return }
+        let tabs: [(ToolsModule.Tab, ToolFeature)] = [(.clipboard, .clipboard), (.timer, .timers), (.shelf, .shelf)]
+        tools.tabs = tabs.filter { isOn($0.1) }.map(\.0)
+        tools.converts = isOn(.imageConverter)
+        guard toolsLive else { return }
+        let clipboard = tools.tabs.contains(.clipboard)
+        clipboardHotKey = clipboard ? clipboardHotKey ?? HotKey.controlOptionV { [weak self, weak tools] in
+            tools?.tab = .clipboard
+            self?.notch.expand(.tools, pinned: true)
+        } : nil
+        // Files dragged onto the notch open the shelf, while there is one.
+        notch.onFileDrag = tools.tabs.contains(.shelf) ? { [weak tools] in tools?.tab = .shelf } : nil
+    }
+
+    /// Onboarding: first launch, "Set up…" in the menu, and "Set up more…" in Settings.
+    func showSetup(at step: Onboarding.Step? = nil) {
+        if onboarding == nil {
+            let window = OnboardingWindowController(model: Onboarding(state: state, cast: cast, setup: setup))
             window.onClose = { [weak self] in self?.state.settings.didOnboard = true }
-            setupWindow = window
+            onboarding = window
         }
-        setupWindow?.show()
+        onboarding?.show(at: step)
+    }
+
+    /// `--preview onboarding[:step[:jamie]]`: a step with nothing behind it; the Jamie row in
+    /// one of its states (`connecting`, `login`, `syncing`, `done`, `empty`, `failed`).
+    private func showOnboardingPreview(_ name: String) {
+        let parts = name.split(separator: ":").map(String.init)
+        let step = name == "setup-consent" ? .agents : parts.count > 1 ? Int(parts[1]).flatMap(Onboarding.Step.init(rawValue:)) : nil
+        showSetup(at: step)
+        guard parts.count > 2, let jamie = onboarding?.model.jamie else { return }
+        switch parts[2] {
+        case "connecting": jamie.preview(.connecting)
+        case "login": jamie.preview(.login(nil))
+        case "syncing": jamie.preview(.syncing(count: 7, title: "Weekly with Lena"))
+        case "done": jamie.preview(.done(meetings: 42, hint: nil))
+        case "empty": jamie.preview(.done(meetings: 0, hint: "empty_account"))
+        case "failed": jamie.preview(.failed("Jamie login failed: access_denied"))
+        default: break
+        }
     }
 
     private func setLocalAPI(_ on: Bool) {

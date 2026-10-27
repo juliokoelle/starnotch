@@ -52,3 +52,14 @@
 "Nothing playing" = "Gerade läuft nichts";
 "Play something in Spotify or Music and it shows up here." = "Spiel etwas in Spotify oder Musik ab, dann erscheint es hier.";
 
+/* System */
+"Network" = "Netzwerk";
+"Wi-Fi and Ethernet, down and up" = "WLAN und Ethernet, herunter und hoch";
+"Open Activity Monitor" = "Aktivitätsanzeige öffnen";
+"Keep awake" = "Wach halten";
+"Keep the display and the Mac awake" = "Bildschirm und Mac wach halten";
+"The display stays on until you switch this off" = "Der Bildschirm bleibt an, bis du das ausschaltest";
+"Dark mode" = "Dunkelmodus";
+"Switch the whole Mac between light and dark" = "Den ganzen Mac zwischen hell und dunkel umschalten";
+"Hide icons" = "Icons ausblenden";
+"Hide the icons on the desktop (Finder restarts to apply it)" = "Die Icons auf dem Schreibtisch ausblenden (Finder startet dafür neu)";

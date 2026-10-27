@@ -325,7 +325,11 @@ final class PreviewDirector {
                      cpu: 0.04, memory: 380 * mb, processes: 1),
             AppUsage(key: "WindowServer", name: "WindowServer", bundlePath: nil, cpu: 0.03, memory: 900 * mb, processes: 1),
         ]
-        system?.usePreview(cpu: cpu, gpu: gpu, memory: memory, apps: apps)
+        // A download that picks up in the last minute: about 0.3 to 2.4 MB/s.
+        let network: [Double] = (0..<SystemModule.historyLength).map { (i: Int) -> Double in
+            Double(mb) * (0.3 + 0.2 * sin(Double(i) / 4) + (i > 34 ? 1.9 : 0))
+        }
+        system?.usePreview(cpu: cpu, gpu: gpu, memory: memory, apps: apps, network: network, upload: 180 * 1024)
     }
 
     func run(_ name: String) {

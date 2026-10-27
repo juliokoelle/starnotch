@@ -96,7 +96,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
             <key>CFBundleURLSchemes</key><array><string>$URL_SCHEME</string></array>
         </dict>
     </array>
-    <key>NSAppleEventsUsageDescription</key><string>Shows what Spotify or Music is playing in the notch and lets you pause or skip, and brings an agent's own Terminal or iTerm2 tab to the front when you click it.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Shows what Spotify or Music is playing in the notch and lets you pause or skip, and brings an agent's own Terminal or iTerm2 tab to the front when you click it, and switches dark mode when you ask for it.</string>
     <key>NSCalendarsFullAccessUsageDescription</key><string>Shows your next meeting in the notch with a countdown and a Join button.</string>
     <key>NSCalendarsWriteOnlyAccessUsageDescription</key><string>Adds the event you type in quick capture to your calendar.</string>
     <key>NSMicrophoneUsageDescription</key><string>The meeting agent transcribes your meeting from the microphone while you have started it in the notch.</string>

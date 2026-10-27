@@ -15,6 +15,8 @@ final class SystemSampler: @unchecked Sendable {
         /// Empty unless asked for.
         var processes: [ProcessSample]
         var date: Date
+        /// Bytes so far over Wi-Fi and Ethernet; nil when the counters can't be read.
+        var network: NetworkTotals?
     }
 
     private var lastTicks: [CoreTicks] = []
@@ -34,7 +36,37 @@ final class SystemSampler: @unchecked Sendable {
         let load = lastTicks.isEmpty ? (total: 0.0, cores: [Double]()) : CPULoad.usage(previous: lastTicks, current: ticks)
         lastTicks = ticks
         return Reading(cpu: load.total, cores: load.cores, gpu: Self.gpuUtilization(), memory: memory(),
-                       processes: wantProcesses ? processes(now: now) : [], date: now)
+                       processes: wantProcesses ? processes(now: now) : [], date: now, network: Self.networkTotals())
+    }
+
+    // MARK: Network
+
+    /// Bytes in and out over the Ethernet-type interfaces (Wi-Fi, Ethernet, USB tethering), from
+    /// the 64-bit interface counters. Loopback and VPN tunnels are left out, so traffic through a
+    /// VPN isn't counted twice.
+    static func networkTotals() -> NetworkTotals? {
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
+        var length = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &length, nil, 0) == 0, length > 0 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: length)
+        guard sysctl(&mib, UInt32(mib.count), &buffer, &length, nil, 0) == 0 else { return nil }
+        var totals = NetworkTotals(received: 0, sent: 0)
+        buffer.withUnsafeBytes { raw in
+            var offset = 0
+            while offset + MemoryLayout<if_msghdr>.size <= length {
+                let header = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr.self)
+                guard header.ifm_msglen > 0 else { break }
+                if Int32(header.ifm_type) == RTM_IFINFO2, offset + MemoryLayout<if_msghdr2>.size <= length {
+                    let info = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr2.self)
+                    if info.ifm_data.ifi_type == UInt8(IFT_ETHER), info.ifm_flags & IFF_LOOPBACK == 0 {
+                        totals.received += info.ifm_data.ifi_ibytes
+                        totals.sent += info.ifm_data.ifi_obytes
+                    }
+                }
+                offset += Int(header.ifm_msglen)
+            }
+        }
+        return totals
     }
 
     // MARK: CPU

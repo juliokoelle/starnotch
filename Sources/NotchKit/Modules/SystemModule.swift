@@ -3,9 +3,10 @@ import NotchCore
 import Observation
 import SwiftUI
 
-/// Is the Mac overloaded, and by what? CPU, GPU and memory with a two-minute history, and the
-/// apps behind them (helpers summed into their app). Samples every 2 s while the panel is open,
-/// every 10 s otherwise (CPU and memory only, for the warning). Nothing is ever quit from here.
+/// Is the Mac overloaded, and by what? CPU, GPU, memory and network with a two-minute history,
+/// and the apps behind them (helpers summed into their app). Samples every 2 s while the panel is
+/// open, every 10 s otherwise (CPU and memory only, for the warning). Nothing is ever quit from
+/// here. Below: keep awake, dark mode and the desktop icons as quick switches.
 @MainActor
 @Observable
 final class SystemModule: NotchModule {
@@ -18,6 +19,10 @@ final class SystemModule: NotchModule {
     private(set) var cpuHistory: [Double] = []
     private(set) var gpuHistory: [Double] = []
     private(set) var memoryHistory: [Double] = []
+    /// Bytes per second over Wi-Fi and Ethernet; nil until two readings exist.
+    private(set) var networkDown: Double?
+    private(set) var networkUp: Double?
+    private(set) var networkHistory: [Double] = []
     private(set) var apps: [AppUsage] = []
     private(set) var thermal = ProcessInfo.processInfo.thermalState
     private(set) var alertLevel = SystemAlert.Level.none
@@ -30,6 +35,9 @@ final class SystemModule: NotchModule {
     /// "Keep awake" holds the display on.
     var keepAwake = false
     @ObservationIgnored var onToggleKeepAwake: (() -> Void)?
+    /// The Mac's appearance and Finder's desktop icons, read again whenever the panel opens.
+    private(set) var darkMode = false
+    private(set) var desktopHidden = false
     /// Terminal commands running for 30 s or more (from the shell snippet).
     var longCommands: [ShellActivity.Running] = []
     @ObservationIgnored private var mediaTask: Task<Void, Never>?
@@ -46,6 +54,7 @@ final class SystemModule: NotchModule {
     @ObservationIgnored private var expanded = false
     @ObservationIgnored private var alert = SystemAlert()
     @ObservationIgnored private var processes: [ProcessSample] = []
+    @ObservationIgnored private var lastNetwork: (totals: NetworkTotals, date: Date)?
     @ObservationIgnored private var previewMode = false
     /// Two minutes at 2 s.
     static let historyLength = 60
@@ -72,7 +81,8 @@ final class SystemModule: NotchModule {
     }
 
     /// Previews: fixed values.
-    func usePreview(cpu: [Double], gpu: [Double], memory: MemoryStats, apps: [AppUsage]) {
+    func usePreview(cpu: [Double], gpu: [Double], memory: MemoryStats, apps: [AppUsage],
+                    network: [Double] = [], upload: Double? = nil) {
         previewMode = true
         task?.cancel()
         task = nil
@@ -82,6 +92,9 @@ final class SystemModule: NotchModule {
         self.gpu = gpu.last
         self.memory = memory
         memoryHistory = Array(repeating: memory.fraction, count: Self.historyLength)
+        networkHistory = network
+        networkDown = network.last
+        networkUp = upload
         self.apps = apps
         alertLevel = memory.pressure == .critical ? .critical : memory.pressure == .warn ? .warn : .none
     }
@@ -110,6 +123,15 @@ final class SystemModule: NotchModule {
         push(reading.cpu, &cpuHistory)
         push(reading.gpu ?? 0, &gpuHistory)
         push(reading.memory.fraction, &memoryHistory)
+        if let totals = reading.network {
+            if let last = lastNetwork {
+                let rate = NetworkRate.rate(previous: last.totals, current: totals, seconds: reading.date.timeIntervalSince(last.date))
+                networkDown = rate.down
+                networkUp = rate.up
+                push(rate.down, &networkHistory)
+            }
+            lastNetwork = (totals, reading.date)
+        }
         if detailed {
             processes = reading.processes
             regroup()
@@ -134,7 +156,7 @@ final class SystemModule: NotchModule {
     }
 
     private func regroup() {
-        withAnimation(Theme.snappy) { apps = ProcessGrouping.group(processes, sort: sort, limit: 5) }
+        withAnimation(Theme.snappy) { apps = ProcessGrouping.group(processes, sort: sort, limit: 6) }
     }
 
     func activate(_ app: AppUsage) {
@@ -145,6 +167,27 @@ final class SystemModule: NotchModule {
         } else if let path = app.bundlePath {
             NSWorkspace.shared.open(URL(fileURLWithPath: path))
         }
+    }
+
+    /// Switches the whole Mac between light and dark. Previews only flip the switch.
+    func toggleDarkMode() {
+        Haptics.tick()
+        let next = !darkMode
+        withAnimation(Theme.snappy) { darkMode = next }
+        guard !previewMode else { return }
+        DarkMode.set(next) { [weak self] actual in
+            guard let self, self.darkMode != actual else { return }
+            withAnimation(Theme.snappy) { self.darkMode = actual }
+        }
+    }
+
+    /// Hides or shows the icons on the desktop (Finder restarts). Previews only flip the switch.
+    func toggleDesktopIcons() {
+        Haptics.tick()
+        let next = !desktopHidden
+        withAnimation(Theme.snappy) { desktopHidden = next }
+        guard !previewMode else { return }
+        DesktopIcons.set(hidden: next)
     }
 
     func openActivityMonitor() {
@@ -172,6 +215,8 @@ final class SystemModule: NotchModule {
     func setExpanded(_ expanded: Bool) {
         self.expanded = expanded
         if expanded, !previewMode {
+            darkMode = DarkMode.isOn
+            desktopHidden = DesktopIcons.hidden
             // Restart the loop so the 2 s cadence (and the app list) starts now, not in 10 s.
             task?.cancel()
             task = nil
@@ -329,20 +374,29 @@ private struct SystemPeekLine: View {
 private struct SystemBody: View {
     let module: SystemModule
 
+    /// Four meters in a square on the left, the apps behind them on the right, the switches
+    /// along the bottom: the whole panel without scrolling.
     var body: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Meter(title: "CPU", value: module.cpu, history: module.cpuHistory,
-                      detail: "\(ProcessInfo.processInfo.activeProcessorCount) cores",
-                      tint: module.cpu >= 0.85 ? Theme.waiting : Theme.textBody)
-                Meter(title: "GPU", value: module.gpu ?? 0, history: module.gpuHistory,
-                      detail: module.gpu == nil ? "not readable" : "", tint: Theme.textBody)
-                MemoryMeter(memory: module.memory, history: module.memoryHistory)
+            HStack(alignment: .top, spacing: 10) {
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        Meter(title: "CPU", value: module.cpu, history: module.cpuHistory,
+                              detail: "\(ProcessInfo.processInfo.activeProcessorCount) cores",
+                              tint: module.cpu >= 0.85 ? Theme.waiting : Theme.textBody)
+                        Meter(title: "GPU", value: module.gpu ?? 0, history: module.gpuHistory,
+                              detail: module.gpu == nil ? "not readable" : "", tint: Theme.textBody)
+                    }
+                    HStack(spacing: 10) {
+                        MemoryMeter(memory: module.memory, history: module.memoryHistory)
+                        NetworkMeter(down: module.networkDown, up: module.networkUp, history: module.networkHistory)
+                    }
+                }
+                .frame(width: 280)
+                TopApps(module: module)
             }
-            .frame(height: 112)
             StatusChips(module: module)
-                .frame(height: 34)
-            TopApps(module: module)
+                .frame(height: 28)
         }
     }
 }
@@ -416,6 +470,36 @@ private struct MemoryMeter: View {
     }
 }
 
+/// Download speed large, a line of the last two minutes scaled to its own peak (at least
+/// 256 KB/s, so an idle line stays flat), upload small underneath.
+private struct NetworkMeter: View {
+    let down: Double?
+    let up: Double?
+    let history: [Double]
+
+    var body: some View {
+        NotchCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Network").font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.textSecondary)
+                Text(down.map { "↓ \(ByteText.rate($0))" } ?? "–")
+                    .font(Theme.font(22, .semibold).monospacedDigit())
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .contentTransition(.numericText())
+                let peak = max(262_144, history.max() ?? 0)
+                Sparkline(values: history.map { $0 / peak }, tint: Theme.textBody)
+                    .frame(maxHeight: .infinity)
+                if let up {
+                    Text("↑ \(ByteText.rate(up))").font(Theme.font(10.5).monospacedDigit()).foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .help("Wi-Fi and Ethernet, down and up")
+    }
+}
+
 /// A line over the last two minutes with a faint fill, scaled 0 to 100 %.
 private struct Sparkline: View {
     let values: [Double]
@@ -479,8 +563,15 @@ private struct TopApps: View {
                     }
                     .padding(2)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    QuietLink(title: "Activity Monitor") { module.openActivityMonitor() }
-                        .lineLimit(1)
+                    Button { module.openActivityMonitor() } label: {
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 28, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScale())
+                    .help("Open Activity Monitor")
                 }
                 .padding(.horizontal, 6)
                 .padding(.bottom, 4)
@@ -538,11 +629,11 @@ private struct AppRow: View {
                 Text(Percent.text(app.cpu))
                     .font(Theme.font(12).monospacedDigit())
                     .foregroundStyle(sort == .cpu ? Theme.textPrimary : Theme.textSecondary)
-                    .frame(width: 58, alignment: .trailing)
+                    .frame(width: 44, alignment: .trailing)
                 Text(ByteText.short(app.memory))
                     .font(Theme.font(12).monospacedDigit())
                     .foregroundStyle(sort == .memory ? Theme.textPrimary : Theme.textSecondary)
-                    .frame(width: 64, alignment: .trailing)
+                    .frame(width: 56, alignment: .trailing)
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
@@ -570,11 +661,19 @@ private struct AppRow: View {
     }
 }
 
-/// One quiet row: battery, keep awake, the camera or microphone in use, long terminal commands.
+/// One quiet row: battery, the camera or microphone in use and long terminal commands on the
+/// left; the switches (keep awake, dark mode, desktop icons) on the right. Status gives way first.
 private struct StatusChips: View {
     let module: SystemModule
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            row(labels: true)
+            row(labels: false)
+        }
+    }
+
+    private func row(labels: Bool) -> some View {
         HStack(spacing: 8) {
             if let battery = module.battery {
                 chip(symbol: battery.charging ? "battery.100percent.bolt" : battery.percent <= 20 ? "battery.25percent" : "battery.75percent",
@@ -582,15 +681,6 @@ private struct StatusChips: View {
                      tint: battery.isLow ? Theme.waiting : Theme.textBody)
                     .help(battery.line)
             }
-            Button { module.onToggleKeepAwake?() } label: {
-                Image(systemName: module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(module.keepAwake ? Theme.accent : Theme.textSecondary)
-                    .frame(width: 34, height: 28)
-                    .background(module.keepAwake ? Theme.accent.opacity(0.14) : Color.white.opacity(0.06), in: Capsule())
-            }
-            .buttonStyle(PressScale())
-            .help(module.keepAwake ? "The display stays on until you switch this off" : "Keep the display and the Mac awake")
             if module.media.inUse {
                 HStack(spacing: 6) {
                     Circle().fill(module.media.camera ? Theme.ok : Theme.waiting).frame(width: 7, height: 7)
@@ -607,8 +697,46 @@ private struct StatusChips: View {
                 .help(module.longCommands.map { "\($0.command) in \(($0.cwd as NSString).lastPathComponent)" }.joined(separator: "\n"))
             }
             Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                toggle(module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer", labels ? "Keep awake" : nil, on: module.keepAwake,
+                       help: module.keepAwake ? "The display stays on until you switch this off" : "Keep the display and the Mac awake") {
+                    module.onToggleKeepAwake?()
+                }
+                toggle(module.darkMode ? "moon.fill" : "moon", labels ? "Dark mode" : nil, on: module.darkMode,
+                       help: "Switch the whole Mac between light and dark") {
+                    module.toggleDarkMode()
+                }
+                toggle(module.desktopHidden ? "eye.slash" : "menubar.dock.rectangle", labels ? "Hide icons" : nil, on: module.desktopHidden,
+                       help: "Hide the icons on the desktop (Finder restarts to apply it)") {
+                    module.toggleDesktopIcons()
+                }
+            }
+            .fixedSize()
+            .layoutPriority(1)
         }
         .lineLimit(1)
+    }
+
+    /// A switch as a capsule: the accent while on. Without a title (little room) the icon alone,
+    /// the title in its tooltip.
+    private func toggle(_ symbol: String, _ title: LocalizedStringKey?, on: Bool, help: LocalizedStringKey,
+                        action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                if let title { Text(title).font(Theme.font(12, .medium)) }
+            }
+            .foregroundStyle(on ? Theme.accent : Theme.textSecondary)
+            .padding(.horizontal, title == nil ? 0 : 10)
+            .frame(minWidth: 34)
+            .frame(height: 28)
+            .background(on ? Theme.accent.opacity(0.14) : Color.white.opacity(0.06), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressScale())
+        .help(Text(help))
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func chip(symbol: String, text: String, tint: Color) -> some View {

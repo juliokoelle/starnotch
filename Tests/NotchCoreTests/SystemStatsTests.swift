@@ -77,4 +77,24 @@ import TestSupport
         #expect(ByteText.short(640 * 1_048_576) == "640 MB")
         #expect(ByteText.short(12 * 1_073_741_824) == "12 GB")
     }
+
+    @Test func networkRate() {
+        let before = NetworkTotals(received: 1_000_000, sent: 200_000)
+        let after = NetworkTotals(received: 5_194_304, sent: 210_240)
+        let rate = NetworkRate.rate(previous: before, current: after, seconds: 2)
+        #expect(rate.down == 2_097_152)
+        #expect(rate.up == 5_120)
+        // An interface that went away lowers the totals: 0, never negative; no time, no rate.
+        let back = NetworkRate.rate(previous: after, current: before, seconds: 2)
+        #expect(back.down == 0 && back.up == 0)
+        let instant = NetworkRate.rate(previous: before, current: after, seconds: 0)
+        #expect(instant.down == 0 && instant.up == 0)
+    }
+
+    @Test func rateText() {
+        #expect(ByteText.rate(2_097_152) == "2.0 MB/s")
+        #expect(ByteText.rate(18 * 1_048_576) == "18 MB/s")
+        #expect(ByteText.rate(5_120) == "5 KB/s")
+        #expect(ByteText.rate(0) == "0 KB/s")
+    }
 }

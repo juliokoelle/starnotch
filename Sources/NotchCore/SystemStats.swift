@@ -208,6 +208,27 @@ public struct SystemAlert: Equatable, Sendable {
     }
 }
 
+/// Bytes received and sent so far over the network interfaces (cumulative counters).
+public struct NetworkTotals: Equatable, Sendable {
+    public var received: UInt64
+    public var sent: UInt64
+
+    public init(received: UInt64, sent: UInt64) {
+        self.received = received
+        self.sent = sent
+    }
+}
+
+public enum NetworkRate {
+    /// Bytes per second down and up between two readings. A counter that went backwards (an
+    /// interface went away) reads as 0, never negative.
+    public static func rate(previous: NetworkTotals, current: NetworkTotals, seconds: TimeInterval) -> (down: Double, up: Double) {
+        guard seconds > 0 else { return (0, 0) }
+        func perSecond(_ old: UInt64, _ new: UInt64) -> Double { new >= old ? Double(new - old) / seconds : 0 }
+        return (perSecond(previous.received, current.received), perSecond(previous.sent, current.sent))
+    }
+}
+
 public enum ByteText {
     /// "3.1 GB", "640 MB".
     public static func short(_ bytes: UInt64) -> String {
@@ -215,5 +236,14 @@ public enum ByteText {
         if gb >= 10 { return String(format: "%.0f GB", gb) }
         if gb >= 1 { return String(format: "%.1f GB", gb) }
         return String(format: "%.0f MB", Double(bytes) / 1_048_576)
+    }
+
+    /// "1.2 MB/s", "18 MB/s", "340 KB/s".
+    public static func rate(_ bytesPerSecond: Double) -> String {
+        let mb = bytesPerSecond / 1_048_576
+        if mb >= 1024 { return String(format: "%.1f GB/s", mb / 1024) }
+        if mb >= 10 { return String(format: "%.0f MB/s", mb) }
+        if mb >= 1 { return String(format: "%.1f MB/s", mb) }
+        return String(format: "%.0f KB/s", max(0, bytesPerSecond) / 1024)
     }
 }

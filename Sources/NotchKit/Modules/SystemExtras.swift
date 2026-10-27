@@ -156,6 +156,51 @@ final class KeepAwake {
     }
 }
 
+/// Dark mode for the whole Mac. Switched through System Events (macOS asks once whether this
+/// app may control it), in a separate `osascript` so the island never waits on it.
+@MainActor
+enum DarkMode {
+    static var isOn: Bool {
+        CFPreferencesCopyValue("AppleInterfaceStyle" as CFString, kCFPreferencesAnyApplication,
+                               kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? String == "Dark"
+    }
+
+    /// Calls back on the main actor with the state the Mac ended up in.
+    static func set(_ dark: Bool, done: @escaping @MainActor @Sendable (Bool) -> Void) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", "tell application \"System Events\" to tell appearance preferences to set dark mode to \(dark)"]
+        process.terminationHandler = { _ in Task { @MainActor in done(isOn) } }
+        do { try process.run() } catch { done(isOn) }
+    }
+}
+
+/// The icons on the desktop: Finder's own `CreateDesktop` setting. Finder reads it at launch, so
+/// it restarts to apply it (as it does after `defaults write` in Terminal); it comes back by itself.
+@MainActor
+enum DesktopIcons {
+    private static let finder = "com.apple.finder" as CFString
+    private static let key = "CreateDesktop" as CFString
+
+    static var hidden: Bool {
+        CFPreferencesAppSynchronize(finder)
+        let value = CFPreferencesCopyAppValue(key, finder)
+        if let flag = value as? Bool { return !flag }
+        if let text = value as? String { return ["0", "false", "no"].contains(text.lowercased()) }
+        return false
+    }
+
+    static func set(hidden: Bool) {
+        // Showing them again removes the setting: Finder's default is icons on the desktop.
+        CFPreferencesSetAppValue(key, hidden ? kCFBooleanFalse : nil, finder)
+        CFPreferencesAppSynchronize(finder)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        process.arguments = ["Finder"]
+        try? process.run()
+    }
+}
+
 /// Long terminal commands from the zsh snippet (see `ShellActivity`): what runs for 30 s or more,
 /// and what just finished. Reads one small folder every 5 s, only once the snippet is set up.
 @MainActor

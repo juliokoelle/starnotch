@@ -26,6 +26,8 @@ final class MeetingCompanion: NSObject {
     @ObservationIgnored private var panel: NSPanel?
     private static let originKey = "meetingCompanionOrigin"
     private static let size = CGSize(width: 300, height: 260)
+    /// The figure's center, from the window's bottom right corner (padding 8, figure 84 × 80).
+    private static let figure = CGPoint(x: 50, y: 48)
 
     init(cast: AvatarCast) {
         self.cast = cast
@@ -47,6 +49,15 @@ final class MeetingCompanion: NSObject {
         panel.orderFrontRegardless()
         self.panel = panel
         isOpen = true
+    }
+
+    /// Dragged out of the notch: opens under the pointer and follows it until let go.
+    func follow(ended: Bool) {
+        if panel == nil { open() }
+        let mouse = NSEvent.mouseLocation
+        // The figure sits at the bottom right of the window: keep it under the pointer.
+        panel?.setFrameOrigin(CGPoint(x: mouse.x - Self.size.width + Self.figure.x, y: mouse.y - Self.figure.y))
+        if ended { endDrag() }
     }
 
     func close() {
@@ -101,9 +112,10 @@ final class MeetingCompanion: NSObject {
         dragStart = nil
         guard let panel else { return }
         let frame = panel.frame
-        // Let go up at the notch: back into it.
+        // Let go with the figure up at the notch: back into it.
+        let figure = CGPoint(x: frame.maxX - Self.figure.x, y: frame.minY + Self.figure.y)
         if let screen = panel.screen ?? NSScreen.main,
-           frame.maxY >= screen.visibleFrame.maxY - 4, abs(frame.midX - screen.frame.midX) < 260 {
+           figure.y >= screen.visibleFrame.maxY - 30, abs(figure.x - screen.frame.midX) < 260 {
             Haptics.confirm()
             close()
             return

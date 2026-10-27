@@ -165,6 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             companion.open()
             self?.notch.collapse()
         }
+        agents.onFigureDrag = { [weak self] ended in
+            companion.follow(ended: ended)
+            if ended { self?.notch.collapse() }
+        }
         meeting.onListening = { companion.listening = $0 }
         meeting.onCard = { [weak self] entry in
             // Popped out, the bubble beside the character takes the sneak's place.

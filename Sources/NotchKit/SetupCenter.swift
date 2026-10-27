@@ -19,6 +19,8 @@ final class SetupCenter {
     /// Recordings: show the page, never act.
     var preview = false
     @ObservationIgnored weak var state: AppState?
+    /// Switched off before its rule is removed.
+    @ObservationIgnored weak var lidAwake: LidAwakeController?
 
     init(state: AppState?) {
         self.state = state
@@ -66,6 +68,7 @@ final class SetupCenter {
             case .shellHook: (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh").hasSuffix("zsh")
             case .launchAtLogin, .calendar: true
             case .musicAutomation: PlayerBridge.bundleIDs.values.contains { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
+            case .lidAwake: false
             }
         }
     }
@@ -146,6 +149,8 @@ final class SetupCenter {
                 case .musicAutomation:
                     result = .done(Self.askMusicPermission())
                     ledger.record(SetupLedger.Entry(item: .musicAutomation, at: Date(), note: "Asked for running players"))
+                case .lidAwake:
+                    continue
                 }
                 status[item] = result
             }
@@ -182,6 +187,14 @@ final class SetupCenter {
             case .launchAtLogin:
                 state?.setLaunchAtLogin(false)
                 outcome = .success(())
+            case .lidAwake:
+                await lidAwake?.switchOffAndWait()
+                if let failure = Self.runAsAdmin(LidAwakeCommands.removeScript(), prompt: "%@ removes its rule for keeping the Mac awake with the lid closed.") {
+                    // Cancelled in the dialog: nothing changed.
+                    status[item] = failure.isEmpty ? .idle : .failed(failure)
+                    return
+                }
+                outcome = .success(())
             default:
                 outcome = await Task.detached(priority: .userInitiated) {
                     Result {
@@ -207,6 +220,40 @@ final class SetupCenter {
         }
     }
 
+    // MARK: Keep awake with the lid closed
+
+    /// The first time the lid switch is used: macOS asks for the password once, the rule goes in
+    /// (checked by visudo first) and into the ledger. True when `sudo -n` may run pmset now.
+    func installLidRule() async -> Bool {
+        guard !preview, let script = LidAwakeCommands.installScript(user: NSUserName()) else { return false }
+        status[.lidAwake] = .running
+        // One turn first, so the switch shows that it works before the dialog takes over.
+        try? await Task.sleep(for: .milliseconds(120))
+        if let failure = Self.runAsAdmin(script, prompt: "%@ needs your password once to keep the Mac awake with the lid closed. It may then switch sleep off and on, nothing else.") {
+            status[.lidAwake] = failure.isEmpty ? nil : .failed(failure)
+            return false
+        }
+        ledger.record(SetupLedger.Entry(item: .lidAwake, at: Date(),
+                                        note: "\(LidAwakeCommands.ruleFile): pmset -a disablesleep 1 and 0 without a password"))
+        try? ledger.save(paths.ledgerFile)
+        status[.lidAwake] = nil
+        return await Task.detached(priority: .userInitiated) {
+            SetupActions.processRunner(LidAwakeCommands.sudo, LidAwakeCommands.checkArguments, [:]).status == 0
+        }.value
+    }
+
+    /// Runs a shell script as root behind macOS's own password dialog (it names this app). Nil
+    /// when it ran; "" when the user cancelled; the message otherwise.
+    private static func runAsAdmin(_ shell: String, prompt: String) -> String? {
+        let prompt = String(format: Localization.string(prompt), Brand.displayName)
+        guard let script = NSAppleScript(source: LidAwakeCommands.appleScript(shell: shell, prompt: prompt)) else { return "AppleScript" }
+        var error: NSDictionary?
+        script.executeAndReturnError(&error)
+        guard let error else { return nil }
+        if (error[NSAppleScript.errorNumber] as? Int) == -128 { return "" }
+        return error[NSAppleScript.errorMessage] as? String ?? Localization.string("macOS didn't allow it.")
+    }
+
     /// Recordings: the consent page as on a fresh Mac, everything offered and selected.
     func resetForPreview() {
         preview = true
@@ -225,6 +272,7 @@ final class SetupCenter {
             .init(item: .shellHook, at: now, backup: "backups/zshrc-20261024-101500", note: "New terminal windows pick it up."),
             .init(item: .launchAtLogin, at: now),
             .init(item: .calendar, at: now, note: "Allowed"),
+            .init(item: .lidAwake, at: now, note: "\(LidAwakeCommands.ruleFile): pmset -a disablesleep 1 and 0 without a password"),
         ])
     }
 }
@@ -351,7 +399,7 @@ struct SetupLedgerList: View {
         ForEach(center.ledger.entries, id: \.item) { entry in
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.item.title)
+                    Text(Localization.string(entry.item.title))
                     Text(lines(entry)).font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if case .failed(let why) = center.status[entry.item] {

@@ -35,6 +35,16 @@ final class SystemModule: NotchModule {
     /// "Keep awake" holds the display on.
     var keepAwake = false
     @ObservationIgnored var onToggleKeepAwake: (() -> Void)?
+    /// Keep awake's second level on a laptop: also with the lid closed, until a time or until
+    /// unplugged. `lidBusy` while macOS asks for the password or pmset runs.
+    var lidAwake = LidAwake.State.off
+    var lidBusy = false
+    /// The time choice is open in the switches row (closes with the panel).
+    var lidPickerOpen = false
+    /// A time switches it on (or moves the end), nil switches it off.
+    @ObservationIgnored var onLidAwake: ((LidAwakeLimit?) -> Void)?
+    /// The rule isn't installed yet: the first switch asks for the password.
+    @ObservationIgnored var lidNeedsPassword: () -> Bool = { true }
     /// The Mac's appearance and Finder's desktop icons, read again whenever the panel opens.
     private(set) var darkMode = false
     private(set) var desktopHidden = false
@@ -97,6 +107,13 @@ final class SystemModule: NotchModule {
         networkUp = upload
         self.apps = apps
         alertLevel = memory.pressure == .critical ? .critical : memory.pressure == .warn ? .warn : .none
+    }
+
+    /// Previews: keep awake with the lid closed in a given state.
+    func usePreviewLid(_ state: LidAwake.State, picker: Bool = false) {
+        previewMode = true
+        lidAwake = state
+        lidPickerOpen = picker
     }
 
     /// Previews: the camera in use by an app.
@@ -198,15 +215,25 @@ final class SystemModule: NotchModule {
 
     // MARK: NotchModule
 
-    /// A load alert, the camera or microphone in use, or a battery about to run out.
-    var needsAttention: Bool { alertLevel != .none || media.inUse || battery?.isLow == true }
+    /// A load alert, the camera or microphone in use, a battery about to run out, or the Mac
+    /// awake with the lid closed (it shouldn't go into a bag unnoticed).
+    var needsAttention: Bool { alertLevel != .none || media.inUse || battery?.isLow == true || lidAwakeOn }
+
+    var lidAwakeOn: Bool { lidAwake != .off }
+
+    /// Laptops only (a battery means a lid); shown as keep awake's second level.
+    var offersLidAwake: Bool { battery != nil && (keepAwake || lidAwakeOn) }
+
+    /// The panel stays open behind the password dialog, so the result shows where it was asked.
+    var holdsOpen: Bool { lidBusy }
 
     /// The camera or microphone in use wins over everything but dictation; tight memory or a
-    /// long-busy CPU wins over agents at work; full memory over a meeting soon.
+    /// long-busy CPU wins over agents at work; full memory over a meeting soon. Awake with the
+    /// lid closed sits above a failed loop and below music (unplugging ends it anyway).
     var ambientPriority: Int {
         if media.inUse { return 38 }
         switch alertLevel {
-        case .none: return battery?.isLow == true ? 25 : 0
+        case .none: return battery?.isLow == true ? 25 : lidAwakeOn ? 12 : 0
         case .warn: return 22
         case .critical: return 35
         }
@@ -214,6 +241,7 @@ final class SystemModule: NotchModule {
 
     func setExpanded(_ expanded: Bool) {
         self.expanded = expanded
+        if !expanded && !previewMode { lidPickerOpen = false }
         if expanded, !previewMode {
             darkMode = DarkMode.isOn
             desktopHidden = DesktopIcons.hidden
@@ -235,6 +263,12 @@ final class SystemModule: NotchModule {
             }
             return AnyView(mediaDots.help(media.line))
         }
+        if lidAwakeOn && alertLevel == .none {
+            return AnyView(Image(systemName: "laptopcomputer")
+                .font(.system(size: peek ? 12.5 : 11.5, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .help(Text(LidAwakeText.line(lidAwake))))
+        }
         return AnyView(Image(systemName: battery?.isLow == true && alertLevel == .none ? "battery.25percent" : symbol)
             .font(.system(size: peek ? 12.5 : 11.5, weight: .semibold))
             .foregroundStyle(battery?.isLow == true && alertLevel == .none ? Theme.waiting : Theme.textBody))
@@ -248,6 +282,9 @@ final class SystemModule: NotchModule {
                     Text(app).font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody).lineLimit(1)
                 }
             }.help(media.line))
+        }
+        if lidAwakeOn && alertLevel == .none {
+            return AnyView(LidAwakeEar(state: lidAwake).help(Text(LidAwakeText.line(lidAwake))))
         }
         return AnyView(Circle()
             .fill(alertLevel == .critical ? Theme.critical : Theme.waiting)
@@ -319,6 +356,18 @@ private struct SystemPeekLine: View {
                     Text(module.media.line).fixedSize()
                     Text(module.media.shortLine).fixedSize()
                     Text(module.media.app ?? module.media.shortLine)
+                }
+                .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 0)
+            }
+            .font(Theme.font(12.5, .medium))
+            .lineLimit(1)
+        } else if module.lidAwakeOn && module.alertLevel == .none {
+            // The ears carry the laptop and the ring; the line says until when.
+            HStack(spacing: 7) {
+                ViewThatFits(in: .horizontal) {
+                    Text(LidAwakeText.line(module.lidAwake)).fixedSize()
+                    Text(LidAwakeText.short(module.lidAwake))
                 }
                 .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 0)
@@ -663,18 +712,33 @@ private struct AppRow: View {
 
 /// One quiet row: battery, the camera or microphone in use and long terminal commands on the
 /// left; the switches (keep awake, dark mode, desktop icons) on the right. Status gives way first.
+/// While keep awake is on, a laptop gets its second level beside it: also with the lid closed,
+/// chosen for a time in the same row.
 private struct StatusChips: View {
     let module: SystemModule
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            row(labels: true)
-            row(labels: false)
+        ZStack {
+            if module.lidPickerOpen && module.offersLidAwake && !module.lidAwakeOn {
+                LidAwakePicker(module: module) { withAnimation(Theme.snappy) { module.lidPickerOpen = false } }
+                    .transition(.opacity)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    row(.all)
+                    row(.lit)
+                    row(.none)
+                }
+                .transition(.opacity)
+            }
         }
     }
 
-    private func row(labels: Bool) -> some View {
-        HStack(spacing: 8) {
+    /// Which switches keep their title as room runs out: all, the ones that are on, none.
+    private enum Titles { case all, lit, none }
+
+    private func row(_ titles: Titles) -> some View {
+        func labels(_ on: Bool) -> Bool { titles == .all || (titles == .lit && on) }
+        return HStack(spacing: 8) {
             if let battery = module.battery {
                 chip(symbol: battery.charging ? "battery.100percent.bolt" : battery.percent <= 20 ? "battery.25percent" : "battery.75percent",
                      text: battery.charging ? "\(battery.percent) % · charging" : battery.pluggedIn ? "\(battery.percent) % · on power" : "\(battery.percent) %",
@@ -698,15 +762,19 @@ private struct StatusChips: View {
             }
             Spacer(minLength: 0)
             HStack(spacing: 6) {
-                toggle(module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer", labels ? "Keep awake" : nil, on: module.keepAwake,
+                toggle(module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer", labels(module.keepAwake) ? "Keep awake" : nil, on: module.keepAwake,
                        help: module.keepAwake ? "The display stays on until you switch this off" : "Keep the display and the Mac awake") {
                     module.onToggleKeepAwake?()
                 }
-                toggle(module.darkMode ? "moon.fill" : "moon", labels ? "Dark mode" : nil, on: module.darkMode,
+                if module.offersLidAwake {
+                    lidToggle(labels: labels(module.lidAwakeOn))
+                        .transition(.opacity)
+                }
+                toggle(module.darkMode ? "moon.fill" : "moon", labels(module.darkMode) ? "Dark mode" : nil, on: module.darkMode,
                        help: "Switch the whole Mac between light and dark") {
                     module.toggleDarkMode()
                 }
-                toggle(module.desktopHidden ? "eye.slash" : "menubar.dock.rectangle", labels ? "Hide icons" : nil, on: module.desktopHidden,
+                toggle(module.desktopHidden ? "eye.slash" : "menubar.dock.rectangle", labels(module.desktopHidden) ? "Hide icons" : nil, on: module.desktopHidden,
                        help: "Hide the icons on the desktop (Finder restarts to apply it)") {
                     module.toggleDesktopIcons()
                 }
@@ -727,15 +795,43 @@ private struct StatusChips: View {
                     .contentTransition(.symbolEffect(.replace))
                 if let title { Text(title).font(Theme.font(12, .medium)) }
             }
-            .foregroundStyle(on ? Theme.accent : Theme.textSecondary)
-            .padding(.horizontal, title == nil ? 0 : 10)
-            .frame(minWidth: 34)
-            .frame(height: 28)
-            .background(on ? Theme.accent.opacity(0.14) : Color.white.opacity(0.06), in: Capsule())
-            .contentShape(Capsule())
+            .modifier(SwitchCapsule(on: on, titled: title != nil))
         }
         .buttonStyle(PressScale())
         .help(Text(help))
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// Off: opens the time choice in this row. On: what's left (a bolt: until unplugged); a click
+    /// switches it off.
+    private func lidToggle(labels: Bool) -> some View {
+        let on = module.lidAwakeOn
+        return Button {
+            if on { module.onLidAwake?(nil) } else { withAnimation(Theme.snappy) { module.lidPickerOpen = true } }
+        } label: {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                HStack(spacing: 6) {
+                    if module.lidBusy {
+                        ProgressView().controlSize(.mini).frame(width: 12, height: 12)
+                    } else {
+                        Image(systemName: "laptopcomputer").font(.system(size: 11, weight: .semibold))
+                    }
+                    if labels {
+                        let left = on ? LidAwake(state: module.lidAwake).remaining(now: context.date) : nil
+                        (Text("Lid closed") + Text(verbatim: left.map { " · " + Durations.short(max(60, $0)) } ?? ""))
+                            .font(Theme.font(12, .medium).monospacedDigit())
+                        if on && left == nil {
+                            Image(systemName: "bolt.fill").font(.system(size: 9.5, weight: .semibold))
+                        }
+                    }
+                }
+                .modifier(SwitchCapsule(on: on, titled: labels))
+            }
+        }
+        .buttonStyle(PressScale())
+        .disabled(module.lidBusy)
+        .help(on ? Text(LidAwakeText.line(module.lidAwake)) + Text(verbatim: " · ") + Text("Click to switch off")
+                 : Text("Also stay awake with the lid closed, on the power adapter"))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
@@ -748,5 +844,128 @@ private struct StatusChips: View {
         .padding(.horizontal, 10)
         .frame(height: 28)
         .background(Color.white.opacity(0.06), in: Capsule())
+    }
+}
+
+/// The look every switch in the row shares: a capsule, the accent while on.
+private struct SwitchCapsule: ViewModifier {
+    let on: Bool
+    let titled: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(on ? Theme.accent : Theme.textSecondary)
+            .padding(.horizontal, titled ? 10 : 0)
+            .frame(minWidth: 34)
+            .frame(height: 28)
+            .background(on ? Theme.accent.opacity(0.14) : Color.white.opacity(0.06), in: Capsule())
+            .contentShape(Capsule())
+    }
+}
+
+/// The lid's time choice, in place of the switches: 1 h, 3 h or until unplugged. Off the power
+/// adapter it only says so.
+private struct LidAwakePicker: View {
+    let module: SystemModule
+    let close: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "laptopcomputer").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
+                .padding(.leading, 4)
+            if module.battery?.pluggedIn == true {
+                Text("Stay awake with the lid closed for").font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody)
+                    .fixedSize()
+                ForEach(LidAwakeLimit.allCases, id: \.self) { limit in
+                    Button {
+                        module.onLidAwake?(limit)
+                        close()
+                    } label: {
+                        Text(LidAwakeText.title(limit)).font(Theme.font(12, .medium)).foregroundStyle(Theme.textPrimary)
+                            .padding(.horizontal, 12)
+                            .frame(height: 28)
+                            .background(Color.white.opacity(0.08), in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(PressScale())
+                    .fixedSize()
+                }
+                Spacer(minLength: 8)
+                if module.lidNeedsPassword() {
+                    // The words where they fit, else the lock that says it in its tooltip.
+                    ViewThatFits(in: .horizontal) {
+                        Text("Asks for your password once").fixedSize()
+                        Image(systemName: "lock").font(.system(size: 11, weight: .semibold)).frame(width: 28, height: 28)
+                    }
+                    .font(Theme.font(11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .help("Asks for your password once")
+                    .layoutPriority(1)
+                }
+            } else {
+                Text("Only on the power adapter. Plug in, then switch it on.").font(Theme.font(12, .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                Spacer(minLength: 8)
+            }
+            Button(action: close) {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .background(Color.white.opacity(0.06), in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressScale())
+            .help("Cancel")
+        }
+        .lineLimit(1)
+    }
+}
+
+/// The ear while awake with the lid closed: a ring that empties toward the limit, or a bolt
+/// when it lasts until unplugged.
+private struct LidAwakeEar: View {
+    let state: LidAwake.State
+
+    var body: some View {
+        if case .on(let since, let until?) = state {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                let total = max(1, until.timeIntervalSince(since))
+                let left = max(0, min(1, until.timeIntervalSince(context.date) / total))
+                ZStack {
+                    Circle().stroke(Theme.accent.opacity(0.22), lineWidth: 2)
+                    Circle().trim(from: 0, to: left)
+                        .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 11, height: 11)
+            }
+        } else {
+            Image(systemName: "bolt.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.accent)
+        }
+    }
+}
+
+/// The lid's words, in one place (English keys, German in Localizable.strings).
+enum LidAwakeText {
+    static func line(_ state: LidAwake.State) -> LocalizedStringKey {
+        if case .on(_, let until?) = state {
+            return "Awake with the lid closed until \(until.formatted(date: .omitted, time: .shortened))"
+        }
+        return "Awake with the lid closed until you unplug"
+    }
+
+    /// For the narrow peek.
+    static func short(_ state: LidAwake.State) -> LocalizedStringKey {
+        if case .on(_, let until?) = state {
+            return "Lid closed until \(until.formatted(date: .omitted, time: .shortened))"
+        }
+        return "Lid closed until unplugged"
+    }
+
+    static func title(_ limit: LidAwakeLimit) -> LocalizedStringKey {
+        switch limit {
+        case .oneHour: "1 h"
+        case .threeHours: "3 h"
+        case .untilUnplugged: "Until unplugged"
+        }
     }
 }

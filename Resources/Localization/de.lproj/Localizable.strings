@@ -63,3 +63,29 @@
 "Switch the whole Mac between light and dark" = "Den ganzen Mac zwischen hell und dunkel umschalten";
 "Hide icons" = "Icons ausblenden";
 "Hide the icons on the desktop (Finder restarts to apply it)" = "Die Icons auf dem Schreibtisch ausblenden (Finder startet dafür neu)";
+
+/* Keep awake with the lid closed */
+"Lid closed" = "Deckel zu";
+"Also stay awake with the lid closed, on the power adapter" = "Auch mit geschlossenem Deckel wach bleiben, am Netzteil";
+"Click to switch off" = "Klicken zum Ausschalten";
+"Stay awake with the lid closed for" = "Mit geschlossenem Deckel wach für";
+"1 h" = "1 Std.";
+"3 h" = "3 Std.";
+"Until unplugged" = "Bis zum Ausstecken";
+"Asks for your password once" = "Fragt einmal nach deinem Passwort";
+"Only on the power adapter. Plug in, then switch it on." = "Nur am Netzteil. Einstecken, dann einschalten.";
+"Cancel" = "Abbrechen";
+"Awake with the lid closed until %@" = "Mit geschlossenem Deckel wach bis %@";
+"Awake with the lid closed until you unplug" = "Mit geschlossenem Deckel wach, bis du aussteckst";
+"The Mac sleeps again with the lid closed" = "Der Mac schläft wieder mit geschlossenem Deckel";
+"Unplugged" = "Ausgesteckt";
+"Time is up" = "Zeit abgelaufen";
+"Only on the power adapter" = "Nur am Netzteil";
+"Sleep was already switched off elsewhere" = "Ruhezustand war schon anderswo ausgeschaltet";
+"Couldn't keep the Mac awake with the lid closed" = "Mac konnte mit geschlossenem Deckel nicht wach bleiben";
+"Keep awake with the lid closed" = "Mit geschlossenem Deckel wach halten";
+"%@ needs your password once to keep the Mac awake with the lid closed. It may then switch sleep off and on, nothing else." = "%@ braucht einmal dein Passwort, um den Mac mit geschlossenem Deckel wach zu halten. Danach darf es nur den Ruhezustand aus- und einschalten, sonst nichts.";
+"%@ removes its rule for keeping the Mac awake with the lid closed." = "%@ entfernt seine Regel, die den Mac mit geschlossenem Deckel wach hält.";
+"macOS didn't allow it." = "macOS hat es nicht erlaubt.";
+"Lid closed until %@" = "Deckel zu bis %@";
+"Lid closed until unplugged" = "Deckel zu bis zum Ausstecken";

@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var companion: MeetingCompanion?
     private let battery = BatteryMonitor()
     private let keepAwake = KeepAwake()
+    private var lidAwake: LidAwakeController?
     private var shell: ShellMonitor?
     private let updater = Updater()
     private var approvals: ApprovalCenter?
@@ -340,6 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        lidAwake?.quit()
         approvals?.stop()
         meeting?.shutdown()
     }
@@ -383,6 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startExtras(_ system: SystemModule) {
         battery.onChange = { [weak self, weak system] before, now in
             system?.battery = now
+            self?.lidAwake?.powerChanged(now?.pluggedIn ?? false)
             guard let self, let now, let before else { return }
             if now.pluggedIn != before.pluggedIn {
                 self.notch.sneak(Sneak(visual: .symbol(now.pluggedIn ? "bolt.fill" : "battery.75percent", tint: now.pluggedIn ? .ok : .neutral),
@@ -396,8 +399,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         battery.start()
         system.battery = battery.state
-        keepAwake.onChange = { [weak system] on in system?.keepAwake = on }
+        keepAwake.onChange = { [weak self, weak system] on in
+            system?.keepAwake = on
+            // The lid level rests on keep awake: off together.
+            if !on { self?.lidAwake?.switchOff() }
+        }
         system.onToggleKeepAwake = { [weak self] in self?.keepAwake.toggle() }
+        startLidAwake(system)
         let shell = ShellMonitor(folder: setup.paths.shellActivity)
         shell.onChange = { [weak system] running in system?.longCommands = running }
         shell.onFinished = { [weak self] done in
@@ -407,6 +415,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         shell.start()
         self.shell = shell
+    }
+
+    /// Keep awake with the lid closed: the switch in the System tab, the ear while on, a line
+    /// when it ends by itself. Sleep left off by a crash comes back first.
+    private func startLidAwake(_ system: SystemModule) {
+        let lid = LidAwakeController(marker: setup.paths.lidAwakeMarker)
+        lidAwake = lid
+        setup.lidAwake = lid
+        lid.cleanUpAfterLaunch()
+        lid.onPower = { [weak self] in self?.battery.state?.pluggedIn ?? false }
+        lid.installRule = { [weak self] in await self?.setup.installLidRule() ?? false }
+        lid.onChange = { [weak system] state, busy in
+            withAnimation(Theme.snappy) {
+                system?.lidAwake = state
+                system?.lidBusy = busy
+            }
+        }
+        lid.onNotice = { [weak self] notice in
+            let title: String
+            var detail: String?
+            switch notice {
+            case .ended(let reason):
+                title = "The Mac sleeps again with the lid closed"
+                detail = reason == .unplugged ? "Unplugged" : "Time is up"
+            case .needsPower: title = "Only on the power adapter"
+            case .alreadyOff: title = "Sleep was already switched off elsewhere"
+            case .failed: title = "Couldn't keep the Mac awake with the lid closed"
+            }
+            self?.notch.sneak(Sneak(visual: .symbol("laptopcomputer", tint: notice.isEnd ? .neutral : .waiting),
+                                    title: Localization.string(title), detail: detail.map(Localization.string), duration: 3.4),
+                              key: "lid-awake")
+        }
+        system.lidNeedsPassword = { [weak self] in self?.setup.isSetUp(.lidAwake) != true }
+        system.onLidAwake = { [weak self] limit in
+            guard let self else { return }
+            if let limit {
+                self.keepAwake.set(true)
+                self.lidAwake?.switchOn(limit)
+            } else {
+                self.lidAwake?.switchOff()
+            }
+        }
     }
 
     /// The clipboard watcher (only while the module is on) and a line when a focus or break ends.

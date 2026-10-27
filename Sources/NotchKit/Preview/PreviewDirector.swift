@@ -365,6 +365,36 @@ final class PreviewDirector {
             }
             return
         }
+        if name.hasPrefix("lid-awake") {
+            // lid-awake | lid-awake:unplugged | :offer | :picker | :battery | :compact | :peek
+            let parts = name.split(separator: ":").map(String.init)
+            let state = parts.count > 1 ? parts[1] : "on"
+            useSystemSample(tight: false)
+            // Nothing waiting and no failed loop: the first tab would keep the ears at rest.
+            var snapshot = Self.snapshot(agentsActive: false)
+            snapshot.agents = []
+            snapshot.loops = []
+            agents.usePreview(snapshot)
+            let plugged = state != "battery"
+            system?.battery = BatteryState(percent: plugged ? 82 : 64, charging: plugged, pluggedIn: plugged, minutesLeft: plugged ? 35 : 240)
+            system?.keepAwake = true
+            let since = Date().addingTimeInterval(-19 * 60)
+            switch state {
+            case "offer": system?.usePreviewLid(.off)
+            case "picker", "battery": system?.usePreviewLid(.off, picker: true)
+            case "unplugged": system?.usePreviewLid(.on(since: since, until: nil))
+            default: system?.usePreviewLid(.on(since: since, until: since.addingTimeInterval(3 * 3600)))
+            }
+            Task {
+                await pause(0.8)
+                switch state {
+                case "compact": break
+                case "peek": notch.tourPeek()
+                default: notch.expand(.system, pinned: true)
+                }
+            }
+            return
+        }
         if name == "media-compact" || name == "media-peek" {
             agents.usePreview(Self.snapshot(agentsActive: false))
             useSystemSample(tight: false)

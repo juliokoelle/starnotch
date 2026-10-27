@@ -7,6 +7,8 @@ import Foundation
 /// What the consent page can set up.
 public enum SetupItem: String, CaseIterable, Codable, Sendable {
     case claudePlugin, codexHook, statusLine, mcpServer, shellHook, launchAtLogin, calendar, musicAutomation
+    /// Not on the consent page: set up the first time the user switches it on (System tab).
+    case lidAwake
 
     public var title: String {
         switch self {
@@ -18,6 +20,7 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
         case .launchAtLogin: "Open at login"
         case .calendar: "Calendar access"
         case .musicAutomation: "Music and Spotify control"
+        case .lidAwake: "Keep awake with the lid closed"
         }
     }
 
@@ -37,6 +40,7 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
         case .launchAtLogin: "Starts \(Brand.displayName) when you log in (System Settings › General › Login Items)."
         case .calendar: "macOS asks once: your next meeting, its countdown and Join."
         case .musicAutomation: "macOS asks once per player: play, pause and skip from the notch."
+        case .lidAwake: "Adds \(LidAwakeCommands.ruleFile): lets you run pmset -a disablesleep 1 and 0 without a password, nothing else."
         }
     }
 
@@ -73,6 +77,8 @@ public struct SetupPaths: Sendable {
     public var installedBridge: URL { support.appending(path: "bin/statusline-bridge.sh") }
     public var shellSnippet: URL { support.appending(path: "shell/starnotch.zsh") }
     public var shellActivity: URL { support.appending(path: "shell") }
+    /// Exists while Starnotch keeps the Mac awake with the lid closed.
+    public var lidAwakeMarker: URL { support.appending(path: "lid-awake") }
 
     /// Where `claude` usually lives; the first executable wins.
     public var claudeCandidates: [String] {

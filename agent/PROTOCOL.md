@@ -234,10 +234,11 @@ stdout:
 One `synced` line per meeting, in the order they finish (several are fetched at once). `unchanged: true`: Jamie
 reports nothing new for it since the last sync, so the file wasn't touched. `partial: true`: only the start of
 the transcript could be read (get_meeting cuts long ones; the full read failed); the next sync tries again.
-`warning` lines don't stop the sync; a meeting whose details can't be fetched keeps its stored copy.
+`stale: true`: Jamie couldn't give the whole meeting this time (`get_meeting` or `list_tasks` failed), so the stored
+copy stays as it was. `warning` lines don't stop the sync.
 
-The last line counts the meetings that are now in the memory (`meetings`), how many were written (`updated`) and
-skipped (`unchanged`). When an unfiltered sync (no `--since`, no `--query`) finds no meetings at all, it says so,
+The last line counts the meetings that are now in the memory (`meetings`), how many were written (`updated`),
+skipped (`unchanged`) and kept from last time (`stale`, only when there are some): `meetings` is their sum. When an unfiltered sync (no `--since`, no `--query`) finds no meetings at all, it says so,
 so the app can offer to sign in with another Jamie account:
 
 ```json
@@ -246,7 +247,8 @@ so the app can offer to sign in with another Jamie account:
 
 What is fetched: `list_meetings` page by page (`cursor`/`nextCursor`) until `--limit` meetings (default 50, newest
 first); for each, `get_meeting`, and when its `transcriptInfo.truncated` is true, every page of
-`get_meeting_transcript` until `isFinal`. `list_tasks` once (the newest 100). Re-syncs are fast: Jamie has no
+`get_meeting_transcript` until `isFinal`. `list_tasks` page by page, all of them (a task belongs to its meeting's
+fingerprint, so a cut list would rewrite older meetings without their tasks). Re-syncs are fast: Jamie has no
 `updatedAt`, so each meeting's `get_meeting` answer (summary, participants, tasks, transcript size) is
 fingerprinted into `<memory>/jamie-sync.state`; an unchanged meeting costs one `get_meeting` and no transcript
 pages. `--force` writes every meeting again.
@@ -266,7 +268,8 @@ neither section, so most meetings carry none.
 `login` appears only when no valid token is stored and it can't be refreshed: the script has opened the browser at
 `url` and waits (up to 5 minutes) for the redirect to `http://127.0.0.1:47791/callback`. Tokens are kept in
 `~/Library/Application Support/Starnotch/jamie-oauth.json` (mode 0600) with the time they run out, so an expired
-access token is refreshed without the browser. Exit code 0 on success, 1 on error.
+access token is refreshed without the browser. Each sync first reads the authorization server's metadata (two small
+GETs), so a token that runs out during a long sync is refreshed at Jamie's `/oauth/token` too. Exit code 0 on success, 1 on error.
 Send `{"cmd": "reload"}` to a running `agent.py` afterwards.
 
 `--logout` deletes that file and prints `{"type": "status", "state": "logged_out", "removed": true}` (`false` when

@@ -189,6 +189,8 @@ class Jamie:
         self.page, self.cut, self.chunk = page, cut, chunk
         self.calls: list[tuple[str, dict]] = []
         self.broken: set[str] = set()
+        self.tasks: list[dict] = []  # served in pages of `page`
+        self.tasks_broken = False
 
     def server(self) -> MCPServer:
         server = MCPServer("jamie")
@@ -226,9 +228,14 @@ class Jamie:
                     "nextCursor": str(end) if end < len(text) else None}
 
         @server.tool()
-        def list_tasks(limit: int = 50) -> dict:
-            """No tasks."""
-            return {"tasks": [], "nextCursor": None}
+        def list_tasks(limit: int = 50, cursor: str = "") -> dict:
+            """Tasks, newest first, with a cursor."""
+            self.calls.append(("list_tasks", {"limit": limit, "cursor": cursor}))
+            if self.tasks_broken:
+                raise ValueError("tasks hiccup")
+            start = int(cursor or 0)
+            end = start + min(limit, self.page)
+            return {"tasks": self.tasks[start:end], "nextCursor": str(end) if end < len(self.tasks) else None}
 
         return server
 
@@ -303,6 +310,27 @@ async def test_a_failed_get_meeting_keeps_the_stored_copy(tmp_path):
     saved, logged = await run(jamie, tmp_path)
     assert len(saved[0].transcript) == 4  # not overwritten by the bare list entry
     assert logged[0]["state"] == "warning" and logged[0]["message"].startswith("get_meeting j0:")
+    assert logged[1]["type"] == "synced" and logged[1]["stale"] is True  # counted like any other meeting
+    assert logged[-1] == {"type": "status", "state": "synced", "meetings": 1, "updated": 0, "unchanged": 0, "stale": 1}
+
+
+async def test_every_page_of_tasks_is_read(tmp_path):
+    jamie = Jamie(count=2, page=2)
+    jamie.tasks = [{"text": f"Aufgabe {n}", "meetingId": "j1", "assignee": {"name": "Lisa"}} for n in range(5)]
+    saved, _ = await run(jamie, tmp_path)
+    assert [c.what for c in saved[1].commitments] == [f"Aufgabe {n}" for n in range(5)]
+    assert [c["cursor"] for n, c in jamie.calls if n == "list_tasks"] == ["", "2", "4"]
+
+
+async def test_unreadable_tasks_keep_stored_meetings(tmp_path):
+    jamie = Jamie(count=1)
+    jamie.tasks = [{"text": "Folien", "meetingId": "j0"}]
+    await run(jamie, tmp_path)
+    jamie.tasks_broken = True
+    saved, logged = await run(jamie, tmp_path)
+    assert [c.what for c in saved[0].commitments] == ["Folien"]  # not rewritten without its tasks
+    assert Memory(tmp_path).get("jamie-j0").commitments[0].what == "Folien"
+    assert logged[-1]["stale"] == 1
 
 
 async def test_empty_account_says_so(tmp_path):

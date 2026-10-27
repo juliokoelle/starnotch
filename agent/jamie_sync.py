@@ -8,8 +8,8 @@
 
 Jamie's tools (list_meetings, get_meeting, get_meeting_transcript, search_meetings, list_tasks) are called with
 whatever argument names their input schemas declare, and their answers are mapped onto memory.py's schema field by
-field, so small differences in Jamie's JSON don't break the sync. list_meetings is paged until --limit; a transcript
-that get_meeting cuts short is read in full through get_meeting_transcript. A meeting whose Jamie data didn't change
+field, so small differences in Jamie's JSON don't break the sync. list_meetings is paged until --limit, list_tasks
+to its end; a transcript that get_meeting cuts short is read in full through get_meeting_transcript. A meeting whose Jamie data didn't change
 since the last sync is skipped (fingerprints in <memory>/jamie-sync.state). Prints one JSON line per meeting, then a
 summary line.
 """
@@ -37,7 +37,7 @@ TOKEN_FILE = DEFAULT_DIR.parent / "jamie-oauth.json"
 CALLBACK_PORT = 47791  # next to the app's ports; 8765 is a common dev-server port
 STATE_FILE = "jamie-sync.state"  # in the memory folder; not *.json, so Memory doesn't take it for a meeting
 MAPPING = 3  # raise when meeting_of maps differently: every meeting is then written again on the next sync
-PAGE_SIZE = 100  # list_meetings takes at most 100 per page
+PAGE_SIZE = 100  # list_meetings and list_tasks take at most 100 per page
 MAX_PAGES = 500  # against a server that never says a list or transcript is finished
 PARALLEL = 4  # meetings fetched at the same time
 
@@ -398,12 +398,22 @@ async def sync(session: Any, memory: Memory, limit: int = 50, since: str | None 
                 break
             cursor = following
         listed = listed[:limit]
-    tasks: list[Any] = []
+    # Every page of tasks: they belong to the fingerprint, so a cut list would rewrite older meetings without theirs.
+    # None when they couldn't be read: stored meetings then stay as they are, new ones are written and redone next time.
+    tasks: list[Any] | None = []
     if "list_tasks" in tools:
         try:
-            tasks = as_list(await call("list_tasks", limit=100))  # Jamie allows at most 100
+            cursor = None
+            for _ in range(MAX_PAGES):
+                page = await call("list_tasks", limit=PAGE_SIZE, cursor=cursor)
+                tasks += as_list(page)
+                following = first(page, "nextCursor", "next_cursor")
+                if not following or following == cursor or not takes("list_tasks", "cursor"):
+                    break
+                cursor = following
         except Exception as error:  # tasks are a bonus; meetings still sync
             log({"type": "status", "state": "warning", "message": f"list_tasks: {error}"})
+            tasks = None
 
     async def full_transcript(meeting_id: str) -> Any:
         """Every page of get_meeting_transcript, joined (a page may end in the middle of a line)."""
@@ -421,7 +431,15 @@ async def sync(session: Any, memory: Memory, limit: int = 50, since: str | None 
 
     seen = load_state(memory)
     gate = asyncio.Semaphore(PARALLEL)
-    updated = unchanged = 0
+    updated = unchanged = stale = 0
+
+    def keep(stored: Meeting) -> Meeting:
+        """The copy from last time, counted and logged, when Jamie couldn't give the whole meeting now."""
+        nonlocal stale
+        stale += 1
+        log({"type": "synced", "meeting_id": stored.id, "title": stored.title, "date": stored.date,
+             "lines": len(stored.transcript), "path": str(memory.path_for(stored.id)), "stale": True})
+        return stored
 
     async def bring(entry: Any) -> Meeting | None:
         nonlocal updated, unchanged
@@ -432,6 +450,8 @@ async def sync(session: Any, memory: Memory, limit: int = 50, since: str | None 
             return None
         memory_id, detail = f"jamie-{meeting_id}", {}
         stored = memory.get(memory_id) if memory.path_for(memory_id).exists() else None
+        if stored and tasks is None:
+            return keep(stored)
         async with gate:
             if "get_meeting" in tools:
                 try:
@@ -439,12 +459,13 @@ async def sync(session: Any, memory: Memory, limit: int = 50, since: str | None 
                 except Exception as error:
                     log({"type": "status", "state": "warning", "message": f"get_meeting {meeting_id}: {error}"})
                     if stored:  # keep the full copy from last time rather than overwrite it with the list entry
-                        return stored
+                        return keep(stored)
                     detail = None
             if isinstance(detail, dict) and isinstance(detail.get("meeting"), dict):
                 detail = {**detail["meeting"], **{k: v for k, v in detail.items() if k != "meeting"}}
             merged = {**entry, **detail} if isinstance(detail, dict) else dict(entry)
-            stamp = fingerprint(merged, tasks_for(tasks, str(meeting_id))) if detail is not None else None
+            stamp = fingerprint(merged, tasks_for(tasks, str(meeting_id))) \
+                if detail is not None and tasks is not None else None
             if stored and stamp and not force and seen.get(memory_id) == stamp:
                 unchanged += 1
                 log({"type": "synced", "meeting_id": memory_id, "title": stored.title, "date": stored.date,
@@ -462,7 +483,7 @@ async def sync(session: Any, memory: Memory, limit: int = 50, since: str | None 
             if note and not merged.get("transcript"):
                 log({"type": "status", "state": "warning", "message": f"{meeting_id}: {text_of(note)}"})
         try:
-            meeting = meeting_of(merged, tasks)
+            meeting = meeting_of(merged, tasks or [])
         except ValueError as error:
             log({"type": "status", "state": "warning", "message": f"skipped: {error}"})
             return None
@@ -483,7 +504,8 @@ async def sync(session: Any, memory: Memory, limit: int = 50, since: str | None 
     if not meetings and not listed and not since and not query:
         log({"type": "status", "state": "synced", "meetings": 0, "hint": "empty_account"})
     else:
-        log({"type": "status", "state": "synced", "meetings": len(meetings), "updated": updated, "unchanged": unchanged})
+        done = {"type": "status", "state": "synced", "meetings": len(meetings), "updated": updated, "unchanged": unchanged}
+        log({**done, "stale": stale} if stale else done)
     return meetings
 
 
@@ -603,13 +625,12 @@ def oauth_provider(url: str, port: int = CALLBACK_PORT):
 
 
 async def discover_token_endpoint(provider, http) -> None:
-    """Before the SDK refreshes an expired token: the authorization server's metadata. Without it the SDK posts
-    to <origin>/token, which Jamie doesn't serve (its endpoint is /oauth/token), and falls back to a browser login."""
+    """The authorization server's metadata, before the SDK may refresh a token: when it starts expired, runs out
+    during a long sync, or has no known expiry. Without it the SDK posts to <origin>/token, which Jamie doesn't
+    serve (its endpoint is /oauth/token), and falls back to a browser login. Two small GETs per sync."""
     from mcp.shared.auth import OAuthMetadata
 
     context = provider.context
-    if context.token_expiry_time is None or time.time() <= context.token_expiry_time:
-        return
     base = context.get_authorization_base_url(context.server_url)
     try:
         resource = (await http.get(f"{base}/.well-known/oauth-protected-resource")).json()

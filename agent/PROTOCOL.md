@@ -15,8 +15,13 @@ Shared rules:
 - stdout carries only protocol lines. stderr is free-text logging; show it in a debug log, don't parse it.
 - Ignore fields and `type`s you don't know. New fields may appear; existing ones keep their meaning.
 - Dates are `YYYY-MM-DD`. `t` is seconds from the start of the meeting (a number).
-- Keys come from the environment the app starts the process with: `ANTHROPIC_API_KEY` for `agent.py`,
-  `RESON8_API_KEY` for `transcribe.py`. Jamie needs no key (browser login, see below).
+- Keys come from the environment the app starts the process with: `ANTHROPIC_API_KEY` for `agent.py` (only with
+  `STARNOTCH_BRAIN=api`, or `auto` without Claude Code), `RESON8_API_KEY` for `transcribe.py`. Jamie needs no key
+  (browser login, see below).
+- `STARNOTCH_BRAIN` picks what `agent.py` thinks with: `auto` (default), `claude-code`, `api` or `rules`
+  (see [README.md](README.md#taras-brain)). `auto` is Claude Code when a `claude` binary is found (`PATH`,
+  `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), else the API when `ANTHROPIC_API_KEY` is set, else rules.
+  Claude Code that isn't signed in to a Claude plan falls back to rules, never to the API.
 
 ## Starting
 
@@ -49,11 +54,14 @@ During a meeting the app reads `transcribe.py`'s stdout and writes each `utteran
 ### First line
 
 ```json
-{"type": "ready", "meetings": 2, "memory": "/Users/…/memory", "model": "claude-sonnet-5-5", "errors": []}
+{"type": "ready", "meetings": 2, "memory": "/Users/…/memory", "brain": "claude-code", "model": "sonnet", "errors": []}
 ```
 
-`model` is `null` when the agent runs on rules only (no key, or `--offline`). `errors` lists meeting files
-that couldn't be read. Wait for `ready` before sending commands.
+`brain` is what the agent thinks with: `claude-code` (the user's Claude plan, `model` is Claude Code's alias
+`sonnet`), `api` (`model` is the API model id, e.g. `claude-sonnet-5-5`) or `rules` (`model` is `null`: `--offline`,
+`STARNOTCH_BRAIN=rules`, no Claude Code and no key, or Claude Code not signed in; the reason comes as a `status`
+`offline` line just before `ready`). `errors` lists meeting files that couldn't be read. Wait for `ready` before
+sending commands.
 
 ### stdin
 
@@ -174,7 +182,7 @@ today. `captures` are quick-capture tasks and questions that tag or name a parti
 
 | `state` | Extra fields | When |
 |---|---|---|
-| `offline` | `message` | Claude isn't reachable; the agent continues on rules (sent once) |
+| `offline` | `message` | Claude isn't reachable (no key, Claude Code not signed in or not on a Claude plan, a timeout, an error); the agent continues on rules (sent once) |
 | `saved` | `meeting_id`, `path` | after `save` |
 | `reset` | | after `reset` |
 | `reloaded` | `meetings` | after `reload` |

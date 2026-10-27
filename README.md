@@ -118,10 +118,10 @@ The Meeting module runs a small Python sidecar in [`agent/`](agent/README.md): R
 
 ```sh
 cd agent && uv sync
-export ANTHROPIC_API_KEY=…   # and RESON8_API_KEY for live audio
+export RESON8_API_KEY=…   # for live audio
 ```
 
-Keys stay in your environment; nothing is stored in the repository.
+Claude thinks on your own Claude plan through Claude Code when it's installed and signed in; otherwise it uses `ANTHROPIC_API_KEY` if set, else simple rules (`STARNOTCH_BRAIN` picks, see [agent/README.md](agent/README.md#taras-brain)). Keys stay in your environment; nothing is stored in the repository.
 
 ## Configuration
 

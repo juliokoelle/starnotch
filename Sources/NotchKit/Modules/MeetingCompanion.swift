@@ -51,13 +51,40 @@ final class MeetingCompanion: NSObject {
         isOpen = true
     }
 
-    /// Dragged out of the notch: opens under the pointer and follows it until let go.
-    func follow(ended: Bool) {
+    /// Pulled out of the notch: opens under the pointer and follows it until the button comes up,
+    /// anywhere on screen (the notch's own window stops getting the drag once the pointer leaves it).
+    func beginFollow() {
+        guard followMonitors.isEmpty else { return }
         if panel == nil { open() }
+        moveToPointer()
+        let mask: NSEvent.EventTypeMask = [.leftMouseDragged, .leftMouseUp]
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.followed(event) }
+            return event
+        }) {
+            followMonitors.append(local)
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.followed(event) }
+        }) {
+            followMonitors.append(global)
+        }
+    }
+
+    @ObservationIgnored private var followMonitors: [Any] = []
+
+    private func followed(_ event: NSEvent) {
+        guard !followMonitors.isEmpty else { return }
+        guard event.type == .leftMouseUp else { return moveToPointer() }
+        followMonitors.forEach(NSEvent.removeMonitor)
+        followMonitors = []
+        endDrag()
+    }
+
+    private func moveToPointer() {
         let mouse = NSEvent.mouseLocation
         // The figure sits at the bottom right of the window: keep it under the pointer.
         panel?.setFrameOrigin(CGPoint(x: mouse.x - Self.size.width + Self.figure.x, y: mouse.y - Self.figure.y))
-        if ended { endDrag() }
     }
 
     func close() {
@@ -117,7 +144,17 @@ final class MeetingCompanion: NSObject {
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? panel.screen,
            mouse.y >= screen.visibleFrame.maxY - 24, abs(mouse.x - screen.frame.midX) < 260 {
             Haptics.confirm()
-            close()
+            // She slips up into the notch and fades, so the way back is seen to the end.
+            let target = CGPoint(x: screen.frame.midX - Self.size.width + Self.figure.x,
+                                 y: screen.frame.maxY - Self.figure.y + 30)
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = Theme.reduceMotion ? 0 : 0.28
+                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                panel.animator().setFrameOrigin(target)
+                panel.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated { self?.close() }
+            })
             return
         }
         UserDefaults.standard.set([Double(frame.origin.x), Double(frame.origin.y)], forKey: Self.originKey)

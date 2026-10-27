@@ -27,8 +27,8 @@ final class AgentsModule: NotchModule {
     static let finishedWindow: TimeInterval = 3.2
     /// Called when a session finishes its turn (busy -> idle).
     @ObservationIgnored var onFinished: ((AgentSnapshot.Agent) -> Void)?
-    /// The figure pulled down out of the notch: called while it follows the pointer, and once with `true` when let go.
-    @ObservationIgnored var onFigureDrag: ((_ ended: Bool) -> Void)?
+    /// The figure pulled down out of the open notch (the companion then follows the pointer by itself).
+    @ObservationIgnored var onFigurePull: (() -> Void)?
     /// Loop detail card in the panel (`nil` = list or sessions).
     var selectedLoop: String?
     /// Loops view: list (default) or today's timeline.
@@ -764,17 +764,12 @@ private struct MainFigure: View {
         figure
             .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
                 .onChanged { value in
-                    guard let drag = module.onFigureDrag else { return }
                     // Pulled down past the notch: the figure leaves it and follows the pointer.
-                    if draggingOut || value.translation.height > 24 {
-                        draggingOut = true
-                        drag(false)
-                    }
+                    guard !draggingOut, value.translation.height > 24 else { return }
+                    draggingOut = true
+                    module.onFigurePull?()
                 }
-                .onEnded { _ in
-                    if draggingOut { module.onFigureDrag?(true) }
-                    draggingOut = false
-                })
+                .onEnded { _ in draggingOut = false })
     }
 
     @ViewBuilder private var figure: some View {

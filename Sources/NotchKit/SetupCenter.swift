@@ -45,9 +45,6 @@ final class SetupCenter {
         var list: [Found] = []
         if FileManager.default.fileExists(atPath: paths.home.appending(path: ".claude").path) { list.append(Found(name: "Claude Code", symbol: "terminal")) }
         if CodexProvider.detect() { list.append(Found(name: "Codex", symbol: "chevron.left.forwardslash.chevron.right")) }
-        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.claudeAppID) != nil {
-            list.append(Found(name: "Claude Desktop", symbol: "macwindow"))
-        }
         list.append(Found(name: "Calendar", symbol: "calendar"))
         let players = PlayerBridge.bundleIDs.sorted(by: { $0.value < $1.value })
             .filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.value) != nil }
@@ -59,9 +56,8 @@ final class SetupCenter {
         return list
     }
 
-    static let claudeAppID = "com.anthropic.claudefordesktop"
-    /// The agents among what was found (onboarding's "Your agents").
-    var foundAgents: [Found] { found.filter { ["Claude Code", "Codex", "Claude Desktop"].contains($0.name) } }
+    /// The agents among what was found (onboarding's "Your agents"): the ones the setup connects.
+    var foundAgents: [Found] { found.filter { ["Claude Code", "Codex"].contains($0.name) } }
 
     /// The items this Mac can use, in page order.
     var offered: [SetupItem] {

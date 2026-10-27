@@ -620,7 +620,7 @@ struct MainCharacterPicker: View {
                     }
                 }
             } else {
-                Text("\(library.character(current)?.name ?? "This character") keeps its own colours.")
+                Text("\(library.character(current)?.name ?? Localization.string("This character")) keeps its own colours.")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
                     .frame(height: 36, alignment: .center)
             }
@@ -851,7 +851,7 @@ private struct ColourScaleView: View {
                         }
                         .buttonStyle(PressScale())
                         .disabled(fixed)
-                        .help(fixed ? "\(cast.library.character(cast.main)?.name ?? "This character") keeps its colours; the effort shows in its look" : "")
+                        .help(fixed ? "\(cast.library.character(cast.main)?.name ?? Localization.string("This character")) keeps its colours; the effort shows in its look" : "")
                         .popover(isPresented: Binding(get: { editing == level }, set: { if !$0 { editing = nil } }), arrowEdge: .bottom) {
                             ColorwayPicker(level: level, selected: cast.isCustomized(level) ? key : nil, character: cast.main,
                                            own: cast.variant(of: cast.main, level: level)) { picked in

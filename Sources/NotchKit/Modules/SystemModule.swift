@@ -25,6 +25,8 @@ final class SystemModule: NotchModule {
     var battery: BatteryState?
     /// Camera or microphone in use right now, and by which app.
     private(set) var media = MediaUse()
+    /// The main character, who listens in the ear while the camera or microphone is in use.
+    @ObservationIgnored var cast: AvatarCast?
     /// "Keep awake" holds the display on.
     var keepAwake = false
     @ObservationIgnored var onToggleKeepAwake: (() -> Void)?
@@ -180,11 +182,14 @@ final class SystemModule: NotchModule {
 
     func leadingEar(peek: Bool) -> AnyView {
         if media.inUse {
-            // The system's own colours: green camera, amber microphone.
-            return AnyView(HStack(spacing: 3) {
-                if media.camera { Circle().fill(Theme.ok).frame(width: 7, height: 7) }
-                if media.microphone { Circle().fill(Theme.waiting).frame(width: 7, height: 7) }
-            }.help(media.line))
+            // The main character listens (whole, the handle to pull it out); the dots go right.
+            if let cast {
+                return AnyView(AvatarView(character: cast.main, mood: .listening, height: peek ? 28 : 25,
+                                          colorway: cast.colorway, sink: peek ? 0 : 0.25)
+                    .frame(height: 32, alignment: .bottom)
+                    .help(media.line))
+            }
+            return AnyView(mediaDots.help(media.line))
         }
         return AnyView(Image(systemName: battery?.isLow == true && alertLevel == .none ? "battery.25percent" : symbol)
             .font(.system(size: peek ? 12.5 : 11.5, weight: .semibold))
@@ -192,14 +197,27 @@ final class SystemModule: NotchModule {
     }
 
     func trailingEar(peek: Bool) -> AnyView {
-        if media.inUse, peek, let app = media.app {
-            return AnyView(Text(app).font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody).lineLimit(1))
+        if media.inUse {
+            return AnyView(HStack(spacing: 5) {
+                if cast != nil { mediaDots }
+                if peek, let app = media.app {
+                    Text(app).font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody).lineLimit(1)
+                }
+            }.help(media.line))
         }
         return AnyView(Circle()
             .fill(alertLevel == .critical ? Theme.critical : Theme.waiting)
             .frame(width: 7, height: 7)
             .opacity(alertLevel == .none ? 0 : 1)
             .help(alertLevel == .none ? "" : "Your Mac is under load"))
+    }
+
+    /// The system's own colours: green camera, amber microphone.
+    private var mediaDots: some View {
+        HStack(spacing: 3) {
+            if media.camera { Circle().fill(Theme.ok).frame(width: 7, height: 7) }
+            if media.microphone { Circle().fill(Theme.waiting).frame(width: 7, height: 7) }
+        }
     }
 
     func peekLine() -> AnyView {

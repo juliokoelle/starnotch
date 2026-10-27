@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let todayProvider: (any TodayProvider)? = samples ?? reminders
         let today = agendaPreview?.today ?? todayProvider.map { TodayModule(provider: $0, agenda: agenda) }
         let system = SystemModule()
+        system.cast = cast
         self.system = system
         let meeting = MeetingModule()
         self.meeting = meeting

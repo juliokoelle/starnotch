@@ -72,4 +72,44 @@ import TestSupport
         #expect(settings.disabledModules.contains(.agents))
         #expect(!ToolSwitches.gallery.contains(.module(.tools)))
     }
+
+    @Test func everyTabHasASwitch() {
+        // A tab missing from the gallery would be off on a fresh install with no way to turn it on.
+        #expect(Set(ToolSwitches.tabs + [.tools]) == Set(ModuleKind.allCases))
+        #expect(ToolSwitches.tabs.count == Set(ToolSwitches.tabs).count)
+        #expect(ToolSwitches.known.count == ModuleKind.allCases.count + ToolFeature.allCases.count)
+    }
+
+    @Test func toolsAddedInALaterVersionStartOff() {
+        let isolated = IsolatedSettings()
+        var everything = SwitcherSettings()
+        everything.disabledModules = []
+        everything.disabledFeatures = []
+        isolated.store.save(everything)
+        // The same version: nothing changes.
+        for item in ToolSwitches.gallery { #expect(ToolSwitches.isOn(item, in: isolated.store.load())) }
+        // Saved by a version without System and Quick capture.
+        isolated.editSaved { $0["knownTools"] = ToolSwitches.known.filter { $0 != "module.system" && $0 != "feature.quickCapture" } }
+        let loaded = isolated.store.load()
+        #expect(!ToolSwitches.isOn(.module(.system), in: loaded))
+        #expect(!ToolSwitches.isOn(.quickCapture, in: loaded))
+        #expect(ToolSwitches.isOn(.module(.meeting), in: loaded))
+        #expect(ToolSwitches.isOn(.clipboard, in: loaded))
+        #expect(loaded.knownTools == ToolSwitches.known)
+    }
+
+    @Test func wheelOffersOnlyTabsThatAreOn() {
+        var settings = SwitcherSettings()
+        // The default layout has Dictation and Today, both off on a fresh install.
+        for slot in SlotPosition.allCases {
+            if case .module(let kind) = settings.wheelItem(at: slot) {
+                #expect(ToolSwitches.isOn(.module(kind), in: settings))
+            }
+        }
+        #expect(settings.wheelItem(at: .top) == .module(.agents))
+        #expect(settings.wheelSlots == [.top, .bottom])
+        ToolSwitches.set(.module(.today), on: true, in: &settings)
+        #expect(settings.wheelItem(at: .left) == .module(.today))
+        #expect(settings.wheelSlots == [.top, .bottom, .left])
+    }
 }

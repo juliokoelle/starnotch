@@ -34,7 +34,8 @@ public enum ToolItem: Hashable, Sendable {
 /// What the Tools gallery switches. Tabs stay in `disabledModules`, the small tools in
 /// `disabledFeatures`; the Tools tab itself has no row and shows while one of its tools is on.
 /// A fresh install starts with the core on and everything else off; settings saved before the
-/// gallery existed keep every tool the user had.
+/// gallery existed keep every tool the user had. The settings also keep which tools existed when
+/// they were saved (`known`), so a tool a later version adds starts off for everyone.
 public enum ToolSwitches {
     /// On from the start.
     public static let core: [ModuleKind] = [.agents, .calendar, .nowPlaying]
@@ -46,6 +47,18 @@ public enum ToolSwitches {
     /// A fresh install: everything but the core is off.
     public static let offModules: [ModuleKind] = ModuleKind.allCases.filter { !core.contains($0) }
     public static let offFeatures: [ToolFeature] = ToolFeature.allCases
+
+    /// Every tab and small tool of this version, as saved in `SwitcherSettings.knownTools`.
+    public static var known: [String] {
+        ModuleKind.allCases.map { "module.\($0.rawValue)" } + ToolFeature.allCases.map { "feature.\($0.rawValue)" }
+    }
+
+    /// Settings saved by a version that knew only `known`: what came since starts off.
+    public static func switchOffNew(since known: [String], in settings: inout SwitcherSettings) {
+        let known = Set(known)
+        for kind in ModuleKind.allCases where !known.contains("module.\(kind.rawValue)") { setModule(kind, on: false, in: &settings) }
+        for feature in ToolFeature.allCases where !known.contains("feature.\(feature.rawValue)") { disable(feature, in: &settings) }
+    }
 
     public static func isOn(_ item: ToolItem, in settings: SwitcherSettings) -> Bool {
         switch item {

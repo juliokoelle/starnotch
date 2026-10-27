@@ -351,12 +351,16 @@ private struct SlotRow: View {
                 .accessibilityLabel(position.label)
 
             if let module = state.settings[module: position] {
+                // Switched off in Tools (or not on this Mac): the wheel leaves the slot empty.
+                let on = ModuleAvailability.isShown(module, settings: state.settings)
                 Image(systemName: ModuleSymbols.symbol(module))
                     .font(.system(size: 13, weight: .semibold))
                     .frame(width: 26, height: 26)
                     .background(Color.primary.opacity(0.08), in: Circle())
-                Text(module.title)
-                Text("Module")
+                    .opacity(on ? 1 : 0.5)
+                Text(LocalizedStringKey(module.title))
+                    .foregroundStyle(on ? .primary : .secondary)
+                Text(on ? "Module" : "Not in the notch")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if let app {

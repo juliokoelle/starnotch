@@ -108,6 +108,9 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public var disabledModules: [ModuleKind]
     /// Small tools switched off (clipboard, timers, keep awake …), off on a fresh install.
     public var disabledFeatures: [ToolFeature]
+    /// The tabs and small tools this version knows (`ToolSwitches.known`), saved with the switches:
+    /// one added later is off on load instead of on.
+    public private(set) var knownTools: [String]
     /// How the meeting agent thinks (onboarding or Settings › Meeting agent).
     public var brain: TaraBrain
     /// The open panel stays until a click outside (or Esc), not when the pointer leaves.
@@ -169,6 +172,7 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         self.islandDisplay = islandDisplay
         self.disabledModules = disabledModules
         self.disabledFeatures = disabledFeatures
+        self.knownTools = ToolSwitches.known
         self.brain = brain
         self.keepOpenUntilClick = keepOpenUntilClick
         self.earsMode = earsMode
@@ -200,6 +204,16 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public func item(at slot: SlotPosition) -> SlotItem? {
         if let module = modules[slot.rawValue] { return .module(module) }
         return slots[slot.rawValue].map(SlotItem.app)
+    }
+
+    /// What the wheel offers in a slot: its item, unless that is a tab switched off in Tools.
+    public func wheelItem(at slot: SlotPosition) -> SlotItem? {
+        if case .module(let kind) = item(at: slot), !ToolSwitches.isOn(.module(kind), in: self) { return nil }
+        return item(at: slot)
+    }
+
+    public var wheelSlots: Set<SlotPosition> {
+        Set(SlotPosition.allCases.filter { wheelItem(at: $0) != nil })
     }
 
     public func position(of module: ModuleKind) -> SlotPosition? {
@@ -267,6 +281,11 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             remindersInToday: (try? c.decodeIfPresent(Bool.self, forKey: .remindersInToday)) ?? false,
             moduleOrder: (try? c.decodeIfPresent([ModuleKind].self, forKey: .moduleOrder)) ?? []
         )
+        // Saved by an older version: tools added since start off. Without the stamp the settings
+        // come from before it, and every tool of this version counts as known.
+        if let known = try? c.decodeIfPresent([String].self, forKey: .knownTools) {
+            ToolSwitches.switchOffNew(since: known, in: &self)
+        }
     }
 }
 

@@ -30,18 +30,15 @@ final class Onboarding {
     let state: AppState
     let cast: AvatarCast
     let setup: SetupCenter
-    let jamie = JamieConnect()
+    /// The Meeting module's sync: it keeps going when the window closes.
+    let jamie: JamieConnect
     @ObservationIgnored var onFinish: () -> Void = {}
 
-    init(state: AppState, cast: AvatarCast, setup: SetupCenter) {
+    init(state: AppState, cast: AvatarCast, setup: SetupCenter, jamie: JamieConnect) {
         self.state = state
         self.cast = cast
         self.setup = setup
-        // Meetings came in from Jamie: the Meeting agent goes on, it has something to work with.
-        jamie.onSynced = { [weak state] _ in
-            guard let state else { return }
-            ToolSwitches.set(.module(.meeting), on: true, in: &state.settings)
-        }
+        self.jamie = jamie
     }
 
     static var motion: Animation { Theme.reduceMotion ? .easeOut(duration: 0.12) : .spring(duration: 0.28, bounce: 0.1) }
@@ -104,7 +101,6 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        model.jamie.cancel()
         onClose?()
     }
 }
@@ -445,7 +441,7 @@ private struct MeetingsStep: View {
 }
 
 /// A row's symbol in its small square.
-private struct RowSymbol: View {
+struct RowSymbol: View {
     let name: String
     var active = false
 
@@ -458,7 +454,9 @@ private struct RowSymbol: View {
     }
 }
 
-private struct JamieRow: View {
+/// Jamie in one row: connect, the sync as it runs, and what to do when it came back empty.
+/// Onboarding and Settings › Meeting agent show the same row.
+struct JamieRow: View {
     let jamie: JamieConnect
     @State private var copied = false
 
@@ -477,6 +475,12 @@ private struct JamieRow: View {
                 Spacer(minLength: 12)
                 action(phase)
             }
+            if phase.isRunning {
+                Text("Keeps going when you close this window.")
+                    .font(.system(size: 11.5)).foregroundStyle(.tertiary)
+                    .padding(.leading, 40)
+                    .transition(.opacity)
+            }
             if phase.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Signed in with another Jamie account? Sign out of it on meetjamie.ai in your browser first, then use the other account here.")
@@ -489,6 +493,14 @@ private struct JamieRow: View {
             }
         }
         .animation(Onboarding.motion, value: phase)
+        // uv installed in Terminal meanwhile: the row turns into Connect by itself.
+        .task {
+            jamie.checkBlocker()
+            while jamie.blocker == .noUV && !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                jamie.checkBlocker()
+            }
+        }
     }
 
     private func synced(_ phase: JamieConnect.Phase) -> Bool {
@@ -517,7 +529,7 @@ private struct JamieRow: View {
             Label(meetings == 1 ? "1 meeting from Jamie" as LocalizedStringKey : "\(meetings) meetings from Jamie", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(Theme.ok)
         case (_, .failed(let why)):
-            Text(why).foregroundStyle(Theme.waiting)
+            Text(Localization.string(why)).foregroundStyle(Theme.waiting)
         }
     }
 
@@ -621,7 +633,8 @@ private struct BrainRow: View {
             if brain == .api && selected {
                 SecureField("Anthropic API key", text: $key, prompt: Text("sk-ant-…"))
                     .textFieldStyle(.roundedBorder)
-                    .onChange(of: key) { _, value in MeetingAgentSetup.setKey("ANTHROPIC_API_KEY", value) }
+                    // Previews never write the real agent.env.
+                    .onChange(of: key) { _, value in if model.state.persists { MeetingAgentSetup.setKey("ANTHROPIC_API_KEY", value) } }
                     .padding(.leading, 40)
                     .transition(.opacity)
             }

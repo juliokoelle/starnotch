@@ -37,10 +37,8 @@ final class MeetingModule: NotchModule {
     /// One line about the agent: ready, offline, saved, an error.
     private(set) var message: String?
     private(set) var utterances = 0
-    /// `jamie_sync.py` runs: Jamie's meetings come into the memory.
-    private(set) var syncing = false
-    /// Jamie's login page while the sync waits for it; the browser may have opened it behind other windows.
-    private(set) var jamieLogin: URL?
+    /// Jamie's meetings into the memory: the app's one sync, also shown in onboarding and Settings.
+    let jamie = JamieConnect()
     /// Scrolled to and outlined (a click on a sneak).
     var focused: Int?
 
@@ -52,15 +50,21 @@ final class MeetingModule: NotchModule {
     @ObservationIgnored var onListening: (Bool) -> Void = { _ in }
     /// The next calendar event: its title names the saved meeting, its attendees the prep.
     @ObservationIgnored var nextEvent: () -> (title: String, attendees: [String])? = { nil }
+    /// Meetings came in from Jamie (the app switches the Meeting agent on).
+    @ObservationIgnored var onJamieSynced: (Int) -> Void = { _ in }
 
     @ObservationIgnored private var agent: MeetingProcess?
     @ObservationIgnored private var agentIsDemo = false
+    /// How the running agent thinks; it reads the brain only when it starts.
+    @ObservationIgnored private var agentBrain: TaraBrain?
     /// Counts agents started, so an old one ending after Save or Close is told apart.
     @ObservationIgnored private var agentGeneration = 0
     @ObservationIgnored private var source: MeetingProcess?
-    @ObservationIgnored private var jamie: MeetingProcess?
-    @ObservationIgnored private var syncedCount = 0
     @ObservationIgnored private var nextID = 0
+
+    init() {
+        jamie.onPhase = { [weak self] phase in self?.jamieChanged(phase) }
+    }
 
     private var directory: URL { Runtime.meetingAgentDir }
     private var log: URL { Brand.supportFolder.appending(path: "meeting-agent.log") }
@@ -71,6 +75,15 @@ final class MeetingModule: NotchModule {
     }
 
     var agentAlive: Bool { agent != nil }
+
+    /// `jamie_sync.py` runs: Jamie's meetings come into the memory.
+    var syncing: Bool { jamie.phase.isRunning }
+
+    /// Jamie's login page while the sync waits for it; the browser may have opened it behind other windows.
+    var jamieLogin: URL? {
+        if case .login(let url) = jamie.phase { return url }
+        return nil
+    }
 
     // MARK: Actions
 
@@ -83,7 +96,8 @@ final class MeetingModule: NotchModule {
             message = "The meeting agent needs uv: Settings › Meeting agent › Install uv"
             return
         }
-        if agent != nil, agentIsDemo != demo { endAgent() }
+        // Another mode, or the brain changed since the agent started: a fresh one.
+        if agent != nil, agentIsDemo != demo || agentBrain != MeetingAgentSetup.brain { endAgent() }
         if let agent {
             agent.write(Data(#"{"cmd":"reset"}"#.utf8 + [0x0A]))
         } else {
@@ -153,48 +167,47 @@ final class MeetingModule: NotchModule {
     /// Pulls meetings from Jamie over its MCP server into the memory, then has a running agent
     /// re-read it. The first run opens the browser for Jamie's login.
     func syncJamie() {
-        guard jamie == nil else { return }
-        try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
-        syncedCount = 0
-        jamie = MeetingProcess(command: "exec uv run python jamie_sync.py", directory: directory, log: log, onLine: { [weak self] line in
-            Task { @MainActor in self?.jamieLine(line) }
-        }, onExit: { [weak self] in
-            Task { @MainActor in self?.jamieEnded() }
-        })
-        syncing = jamie != nil
-        message = jamie == nil ? "Couldn't start the Jamie sync" : "Jamie: connecting…"
-        Haptics.tick()
-    }
-
-    private func jamieLine(_ line: Data) {
-        switch MeetingLine.parse(line) {
-        case .status("login", let url):
-            jamieLogin = url.flatMap(URL.init(string:))
-            message = "Jamie: sign in in your browser (Sign in opens it again)"
-        case .synced(let title):
-            jamieLogin = nil
-            syncedCount += 1
-            message = "Jamie: \(syncedCount) · \(title)"
-        case .syncDone(let meetings, _):
-            message = "Jamie: \(meetings) meeting\(meetings == 1 ? "" : "s") synced into the memory"
-            agent?.write(MeetingCommand.reload)
-        case .error(let text):
-            message = text
-        default:
-            break
+        jamie.checkBlocker()
+        switch jamie.blocker {
+        case .noAgent: message = "agent.py not found in \(directory.path); set [meeting] agent_dir in config.toml"
+        case .noUV: message = "Jamie needs uv: Settings › Meeting agent › Install uv"
+        case nil: jamie.connect()
         }
     }
 
-    private func jamieEnded() {
-        jamie = nil
-        jamieLogin = nil
-        syncing = false
+    /// The brain changed in Settings: an idle agent ends now and the next use starts one that
+    /// thinks the new way; during a meeting, the next meeting does.
+    func brainChanged() {
+        guard agent != nil, phase == .idle else { return }
+        endAgent()
+    }
+
+    private func jamieChanged(_ phase: JamieConnect.Phase) {
+        switch phase {
+        case .idle:
+            break
+        case .connecting:
+            message = "Jamie: connecting…"
+        case .login:
+            message = "Jamie: sign in in your browser (Sign in opens it again)"
+        case .syncing(let count, let title):
+            message = "Jamie: \(count) · \(title)"
+        case .done:
+            agent?.write(MeetingCommand.reload)
+            if phase.isEmpty {
+                message = "Jamie: no meetings in this account"
+            } else if case .done(let meetings, _) = phase {
+                message = "Jamie: \(meetings) meeting\(meetings == 1 ? "" : "s") synced into the memory"
+                onJamieSynced(meetings)
+            }
+        case .failed(let why):
+            message = Localization.string(why)
+        }
     }
 
     /// The app quits: end everything now.
     func shutdown() {
-        jamie?.terminate()
-        jamie = nil
+        jamie.cancel()
         source?.terminate()
         agent?.terminate()
         source = nil
@@ -217,6 +230,7 @@ final class MeetingModule: NotchModule {
         })
         agent = process
         agentIsDemo = demo
+        agentBrain = MeetingAgentSetup.brain
         message = process == nil ? "Couldn't start the agent" : "Starting the agent…"
     }
 
@@ -546,7 +560,7 @@ private struct MeetingCardView: View {
     }
 }
 
-/// Sync from Jamie; a spinner while it runs.
+/// Sync from Jamie; a spinner while it runs; another account when this one came back empty.
 private struct JamieButton: View {
     let module: MeetingModule
 
@@ -556,6 +570,11 @@ private struct JamieButton: View {
                           help: "Open Jamie's login in the browser") { NSWorkspace.shared.open(login) }
         } else if module.syncing {
             ProgressView().controlSize(.small).padding(.horizontal, 8)
+        } else if module.jamie.phase.isEmpty {
+            MeetingButton(title: "Other account", symbol: "person.2",
+                          help: "Signed in with another Jamie account? Sign out of it on meetjamie.ai in your browser first, then sign in here with the other one") {
+                module.jamie.useAnotherAccount()
+            }
         } else {
             MeetingButton(title: "Jamie", symbol: "arrow.triangle.2.circlepath",
                           help: "Bring your meetings from Jamie into the memory") { module.syncJamie() }

@@ -75,6 +75,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.system = system
         let meeting = MeetingModule()
         self.meeting = meeting
+        meeting.jamie.simulated = sample
+        // Meetings came in from Jamie: the Meeting agent goes on, it has something to work with.
+        meeting.onJamieSynced = { [weak self] _ in
+            guard let self else { return }
+            ToolSwitches.set(.module(.meeting), on: true, in: &self.state.settings)
+        }
+        state.onBrainChanged = { [weak meeting] in meeting?.brainChanged() }
         let tools = ToolsModule()
         self.tools = tools
         allModules = [agents, agenda, music, system, dictation, meeting, tools]
@@ -211,7 +218,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setup = SetupCenter(state: state)
         if preview { setup.usePreviewLedger() }
-        settingsWindow = SettingsWindowController(state: state, cast: cast, setup: setup) { [weak self] in self?.showSetup(at: .agents) }
+        settingsWindow = SettingsWindowController(state: state, cast: cast, setup: setup, jamie: meeting.jamie) { [weak self] in
+            self?.showSetup(at: .agents)
+        }
         statusItem = StatusItemController(
             state: state,
             onToggleNotch: { [weak self] in self?.notch.toggleFromKeyboard() },
@@ -344,7 +353,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        onboarding?.model.jamie.cancel()
         approvals?.stop()
         meeting?.shutdown()
     }
@@ -479,7 +487,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Onboarding: first launch, "Set up…" in the menu, and "Set up more…" in Settings.
     func showSetup(at step: Onboarding.Step? = nil) {
         if onboarding == nil {
-            let window = OnboardingWindowController(model: Onboarding(state: state, cast: cast, setup: setup))
+            let window = OnboardingWindowController(model: Onboarding(state: state, cast: cast, setup: setup,
+                                                                      jamie: meeting?.jamie ?? JamieConnect()))
             window.onClose = { [weak self] in self?.state.settings.didOnboard = true }
             onboarding = window
         }

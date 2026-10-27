@@ -94,9 +94,12 @@ enum MeetingAgentSetup {
         for (name, value) in keys() { list.append("STARNOTCH_KEY_\(name)=\(value)") }
         // How Tara thinks (onboarding or Settings › Meeting agent): claude-code, api, rules or auto.
         list.removeAll { $0.hasPrefix("STARNOTCH_BRAIN=") }
-        list.append("STARNOTCH_BRAIN=\(SettingsStore().load().brain.rawValue)")
+        list.append("STARNOTCH_BRAIN=\(brain.rawValue)")
         return list
     }
+
+    /// The saved brain choice, as a starting agent gets it.
+    static var brain: TaraBrain { SettingsStore().load().brain }
 
     /// Runs before every agent command in the login shell: the keys from Settings, and the usual
     /// places of `uv` on the PATH in case `~/.zshrc` doesn't add them.

@@ -2,9 +2,10 @@ import AppKit
 import NotchCore
 import Observation
 
-/// Connects Jamie from onboarding: runs the bundled agent's `jamie_sync.py` through the same
-/// login shell and `uv` as the Meeting module, and turns its lines into one state to show. The
-/// first run opens the browser for Jamie's login.
+/// Connects Jamie: runs the bundled agent's `jamie_sync.py` through the same login shell and `uv`
+/// as the Meeting module, and turns its lines into one state to show. The first run opens the
+/// browser for Jamie's login. The Meeting module owns the one sync of the app, so onboarding,
+/// Settings and the notch show the same, and closing a window doesn't stop it.
 @MainActor
 @Observable
 final class JamieConnect {
@@ -32,23 +33,33 @@ final class JamieConnect {
     }
 
     private(set) var phase = Phase.idle
-    /// Meetings came in (the app switches the Meeting agent on).
-    @ObservationIgnored var onSynced: ((Int) -> Void)?
+    /// What stops the sync before it starts: no agent in this build, or no `uv` (`checkBlocker`).
+    private(set) var blocker: Blocker?
+    /// Every new phase (the Meeting module mirrors it in its line and reloads the agent when done).
+    @ObservationIgnored var onPhase: ((Phase) -> Void)?
+    /// Previews and sample data: a connect plays the phases without running anything.
+    @ObservationIgnored var simulated = false { didSet { checkBlocker() } }
     @ObservationIgnored private var process: MeetingProcess?
     @ObservationIgnored private var count = 0
 
     private var directory: URL { Runtime.meetingAgentDir }
     private var log: URL { Brand.supportFolder.appending(path: "meeting-agent.log") }
 
-    /// What stops the sync before it starts: no agent in this build, or no `uv`.
-    var blocker: Blocker? {
-        if MeetingAgentSetup.bundled == nil && !FileManager.default.fileExists(atPath: directory.appending(path: "jamie_sync.py").path) {
-            return .noAgent
-        }
-        return MeetingAgentSetup.uvPath == nil ? .noUV : nil
-    }
-
     enum Blocker { case noAgent, noUV }
+
+    init() { checkBlocker() }
+
+    /// Looks again (uv may have been installed in Terminal meanwhile).
+    func checkBlocker() {
+        let found: Blocker? = if simulated {
+            nil
+        } else if MeetingAgentSetup.bundled == nil && !FileManager.default.fileExists(atPath: directory.appending(path: "jamie_sync.py").path) {
+            .noAgent
+        } else {
+            MeetingAgentSetup.uvPath == nil ? .noUV : nil
+        }
+        if found != blocker { blocker = found }
+    }
 
     func connect() { run("exec uv run python jamie_sync.py") }
 
@@ -68,32 +79,53 @@ final class JamieConnect {
     /// Screenshots: a state without running anything.
     func preview(_ phase: Phase) { self.phase = phase }
 
+    private func set(_ next: Phase) {
+        guard next != phase else { return }
+        phase = next
+        onPhase?(next)
+    }
+
     private func run(_ command: String) {
-        guard process == nil, blocker == nil else { return }
+        checkBlocker()
+        guard process == nil, !phase.isRunning, blocker == nil else { return }
+        Haptics.tick()
+        if simulated { return simulate() }
         try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
         count = 0
-        phase = .connecting
+        set(.connecting)
         process = MeetingProcess(command: command, directory: directory, log: log, onLine: { [weak self] line in
             Task { @MainActor in self?.handle(line) }
         }, onExit: { [weak self] in
             Task { @MainActor in self?.ended() }
         })
-        if process == nil { phase = .failed("Couldn't start the Jamie sync") }
-        Haptics.tick()
+        // A key, not a sentence: the row looks it up in the app's language.
+        if process == nil { set(.failed("Couldn't start the Jamie sync")) }
+    }
+
+    /// The phases of a short sync, with made-up meetings; nothing runs, nothing is written.
+    private func simulate() {
+        set(.connecting)
+        Task { [weak self] in
+            for (index, title) in ["Kickoff", "Weekly with Lena", "Pricing review"].enumerated() {
+                try? await Task.sleep(for: .milliseconds(700))
+                self?.set(.syncing(count: index + 1, title: title))
+            }
+            try? await Task.sleep(for: .milliseconds(700))
+            self?.set(.done(meetings: 3, hint: nil))
+        }
     }
 
     private func handle(_ line: Data) {
         switch MeetingLine.parse(line) {
         case .status("login", let url):
-            phase = .login(url.flatMap(URL.init(string:)))
+            set(.login(url.flatMap(URL.init(string:))))
         case .synced(let title):
             count += 1
-            phase = .syncing(count: count, title: title)
+            set(.syncing(count: count, title: title))
         case .syncDone(let meetings, let hint):
-            phase = .done(meetings: meetings, hint: hint)
-            if meetings > 0 { onSynced?(meetings) }
+            set(.done(meetings: meetings, hint: hint))
         case .error(let text):
-            phase = .failed(text.replacingOccurrences(of: "jamie sync: ", with: ""))
+            set(.failed(text.replacingOccurrences(of: "jamie sync: ", with: "")))
         default:
             break
         }
@@ -102,6 +134,6 @@ final class JamieConnect {
     private func ended() {
         process = nil
         // Ended without a summary line or an error: say so instead of spinning on.
-        if phase.isRunning { phase = .failed("The sync stopped early; details in meeting-agent.log") }
+        if phase.isRunning { set(.failed("The sync stopped early; details in meeting-agent.log")) }
     }
 }

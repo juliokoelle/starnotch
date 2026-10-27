@@ -20,6 +20,7 @@ final class AppState {
             if settings.islandDisplay != oldValue.islandDisplay { onDisplayChanged?() }
             if settings.earsMode != oldValue.earsMode { onEarsModeChanged?(settings.earsMode) }
             if settings.disabledProviders != oldValue.disabledProviders { onProvidersChanged?(Set(settings.disabledProviders)) }
+            if settings.brain != oldValue.brain { onBrainChanged?() }
         }
     }
     /// Previews and sample data change settings in memory only.
@@ -29,6 +30,7 @@ final class AppState {
     @ObservationIgnored var onModulesChanged: (() -> Void)?
     @ObservationIgnored var onDisplayChanged: (() -> Void)?
     @ObservationIgnored var onEarsModeChanged: ((EarsMode) -> Void)?
+    @ObservationIgnored var onBrainChanged: (() -> Void)?
     private(set) var isAccessibilityTrusted = AXIsProcessTrusted()
     private(set) var loginItemStatus = SMAppService.mainApp.status
     private(set) var loginItemError: String?

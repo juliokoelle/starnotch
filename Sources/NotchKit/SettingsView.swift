@@ -8,6 +8,7 @@ struct SettingsView: View {
     let catalog: AppCatalog
     let cast: AvatarCast
     var setup: SetupCenter?
+    var jamie: JamieConnect?
     var openSetup: () -> Void = {}
 
     var body: some View {
@@ -157,7 +158,7 @@ struct SettingsView: View {
             }
 
             Section {
-                MeetingAgentSettings(state: state)
+                MeetingAgentSettings(state: state, jamie: jamie)
             } header: {
                 Text("Meeting agent")
             } footer: {
@@ -219,6 +220,8 @@ struct SettingsView: View {
 /// Compact: the Anthropic key and uv only.
 struct MeetingAgentSettings: View {
     @Bindable var state: AppState
+    /// Jamie's sync, the same row as in onboarding.
+    var jamie: JamieConnect?
     var compact = false
     @State private var anthropic = MeetingAgentSetup.keys()["ANTHROPIC_API_KEY"] ?? ""
     @State private var reson8 = MeetingAgentSetup.keys()["RESON8_API_KEY"] ?? ""
@@ -226,6 +229,9 @@ struct MeetingAgentSettings: View {
     @State private var copied = false
 
     var body: some View {
+        if !compact, let jamie {
+            JamieRow(jamie: jamie)
+        }
         if !compact {
             Picker("How Tara thinks", selection: $state.settings.brain) {
                 ForEach(TaraBrain.allCases, id: \.self) { brain in
@@ -233,11 +239,12 @@ struct MeetingAgentSettings: View {
                 }
             }
         }
+        // Previews and sample data never write the real agent.env.
         SecureField("Anthropic API key", text: $anthropic, prompt: Text("sk-ant-…"))
-            .onChange(of: anthropic) { _, value in MeetingAgentSetup.setKey("ANTHROPIC_API_KEY", value) }
+            .onChange(of: anthropic) { _, value in if state.persists { MeetingAgentSetup.setKey("ANTHROPIC_API_KEY", value) } }
         if !compact {
             SecureField("Reson8 API key", text: $reson8, prompt: Text("for live transcription"))
-                .onChange(of: reson8) { _, value in MeetingAgentSetup.setKey("RESON8_API_KEY", value) }
+                .onChange(of: reson8) { _, value in if state.persists { MeetingAgentSetup.setKey("RESON8_API_KEY", value) } }
         }
         LabeledContent("uv") {
             if uvFound {
@@ -252,7 +259,14 @@ struct MeetingAgentSettings: View {
                 .help(MeetingAgentSetup.uvInstallCommand)
             }
         }
-        .onAppear { uvFound = MeetingAgentSetup.uvPath != nil }
+        // Installed in Terminal meanwhile: the row notices without reopening Settings.
+        .task {
+            uvFound = MeetingAgentSetup.uvPath != nil
+            while !uvFound && !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                uvFound = MeetingAgentSetup.uvPath != nil
+            }
+        }
         if !compact, let url = URL(string: "https://console.anthropic.com/settings/keys") {
             Link("Get an Anthropic key", destination: url)
         }

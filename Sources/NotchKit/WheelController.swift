@@ -21,6 +21,7 @@ final class WheelController {
     private var phase = Phase.idle
     private var monitors: [Any] = []
     private var pressTask: Task<Void, Never>?
+    private var pressStart: CGPoint = .zero
     private var dismissTask: Task<Void, Never>?
     /// Wheel center in global AppKit coordinates.
     private var wheelCenter = CGPoint.zero
@@ -75,6 +76,11 @@ final class WheelController {
             cancelPress()
             onTapNotch?()
             return false
+        case (.leftMouseDragged, .pressing):
+            // Pulled away before the wheel opens: a drag (the figure out of the notch), not a hold or a tap.
+            let mouse = NSEvent.mouseLocation
+            if hypot(mouse.x - pressStart.x, mouse.y - pressStart.y) > 8 { cancelPress() }
+            return false
         case (.leftMouseDragged, .holding), (.mouseMoved, .clicking):
             updateHighlight()
             return phase == .clicking
@@ -110,6 +116,7 @@ final class WheelController {
         let location = NSEvent.mouseLocation
         guard let screen = NSScreen.withHotZone(containing: location) else { return }
         phase = .pressing
+        pressStart = location
         let delay = state.settings.holdDuration
         pressTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))

@@ -112,10 +112,10 @@ final class MeetingCompanion: NSObject {
         dragStart = nil
         guard let panel else { return }
         let frame = panel.frame
-        // Let go with the figure up at the notch: back into it.
-        let figure = CGPoint(x: frame.maxX - Self.figure.x, y: frame.minY + Self.figure.y)
-        if let screen = panel.screen ?? NSScreen.main,
-           figure.y >= screen.visibleFrame.maxY - 30, abs(figure.x - screen.frame.midX) < 260 {
+        // Let go up at the notch (the pointer in the menu bar, near the middle): back into it.
+        let mouse = NSEvent.mouseLocation
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? panel.screen,
+           mouse.y >= screen.visibleFrame.maxY - 24, abs(mouse.x - screen.frame.midX) < 260 {
             Haptics.confirm()
             close()
             return

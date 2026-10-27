@@ -32,6 +32,9 @@ final class WheelController {
     var onTapNotch: (() -> Void)?
     /// A press on the notch pulled down: the main character comes out.
     var onPullDown: (() -> Void)?
+    /// The island around the notch (peek, dictation): a press there may pull too, without the wheel.
+    var canPull: ((CGPoint) -> Bool)?
+    private var pullArmed = false
     var onWillOpen: (() -> Void)?
     var onDidClose: (() -> Void)?
     /// A module slot was chosen.
@@ -73,6 +76,20 @@ final class WheelController {
         switch (event.type, phase) {
         case (.leftMouseDown, .idle):
             beginPress()
+            // Outside the notch's hot zone but on the open-ish island: only a pull, never the wheel.
+            if phase == .idle, canPull?(NSEvent.mouseLocation) == true {
+                pullArmed = true
+                pressStart = NSEvent.mouseLocation
+            }
+            return false
+        case (.leftMouseDragged, .idle) where pullArmed:
+            if pressStart.y - NSEvent.mouseLocation.y > 24 {
+                pullArmed = false
+                onPullDown?()
+            }
+            return false
+        case (.leftMouseUp, .idle) where pullArmed:
+            pullArmed = false
             return false
         case (.leftMouseUp, .pressing):
             cancelPress()

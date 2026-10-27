@@ -188,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wheel = WheelController(state: state, switcher: AppSwitcher())
         wheel.onTapNotch = { [weak self] in self?.notch.tapNotch() }
         wheel.onPullDown = pull
+        wheel.canPull = { [weak self] in self?.notch.canPullFigure(at: $0) ?? false }
         wheel.onWillOpen = { [weak self] in self?.notch.wheelWillOpen() }
         wheel.onDidClose = { [weak self] in self?.notch.wheelDidClose() }
         wheel.onSelectModule = { [weak self] kind in self?.notch.show(kind) }

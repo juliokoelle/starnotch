@@ -160,6 +160,12 @@ final class NotchController {
         return CGRect(x: midX - size.width / 2, y: screen.frame.maxY - size.height, width: size.width, height: size.height)
     }
 
+    /// Where a press may pull the main character out: the island while it isn't open (closed,
+    /// peeking, dictating), wider than the notch's own hot zone.
+    func canPullFigure(at point: CGPoint) -> Bool {
+        model.interaction != .expanded && islandRect.insetBy(dx: -4, dy: -4).contains(point)
+    }
+
     // MARK: Pointer
 
     func startMonitoring() {

@@ -165,11 +165,15 @@ class Memory:
     def get(self, meeting_id: str) -> Meeting | None:
         return next((m for m in self.meetings if m.id == meeting_id), None)
 
+    def path_for(self, meeting_id: str) -> Path:
+        """<folder>/<id>.json, with the id made safe for a file name."""
+        safe = re.sub(r"[^\w.-]+", "-", meeting_id).strip("-") or "meeting"
+        return self.folder / f"{safe}.json"
+
     def save(self, meeting: Meeting) -> Path:
         """Writes atomically to <folder>/<id>.json and updates the in-memory list."""
         self.folder.mkdir(parents=True, exist_ok=True)
-        safe = re.sub(r"[^\w.-]+", "-", meeting.id).strip("-") or "meeting"
-        path = self.folder / f"{safe}.json"
+        path = self.path_for(meeting.id)
         fd, tmp = tempfile.mkstemp(dir=self.folder, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(meeting.to_dict(), handle, ensure_ascii=False, indent=2)

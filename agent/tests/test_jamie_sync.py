@@ -1,6 +1,8 @@
 """jamie_sync against a fake Jamie: a real MCP server in-process, plus the field mapping on its own."""
 
 import json
+import os
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult, TextContent
 
 import jamie_sync
-from jamie_sync import as_list, meeting_of, result_data, tool_args, transcript_of
+from jamie_sync import FileTokenStorage, as_list, meeting_of, result_data, tool_args, transcript_of
 from memory import Memory
 
 MEETINGS = {
@@ -67,7 +69,8 @@ async def test_sync_against_fake_server(tmp_path):
     async with Client(fake_jamie()) as client:
         saved = await jamie_sync.sync(client.session, Memory(tmp_path), limit=10, log=logged.append)
     assert [m.id for m in saved] == ["jamie-m1", "jamie-m2"]
-    assert [x["type"] for x in logged] == ["synced", "synced"]
+    assert [x["type"] for x in logged] == ["synced", "synced", "status"]
+    assert logged[-1] == {"type": "status", "state": "synced", "meetings": 2, "updated": 2, "unchanged": 0}
 
     memory = Memory(tmp_path)
     m1 = memory.get("jamie-m1")
@@ -137,3 +140,222 @@ def test_meeting_needs_id():
 
 def test_transcript_dict_wrapper():
     assert [l.text for l in transcript_of({"segments": [{"speaker": "A", "text": "x"}]})] == ["x"]
+
+
+# A fake shaped like the real Jamie (argument names, cursors, truncation as `--list-tools` shows them)
+
+def jamie_text(blocks: list[tuple[str, str, str]]) -> str:
+    """Jamie's transcript text: speaker, blank line, '###### start - end', blank line, what was said."""
+    return "\n\n".join(f"{speaker}\n\n###### {start} - 00:00\n\n{text}" for speaker, start, text in blocks) + "\n"
+
+
+LONG = jamie_text([("Speaker 0", "00:00", "Hallo zusammen."), ("Speaker -1", "00:08", "Ja?"),
+                   ("Speaker 1", "00:10", "Wir bleiben bei 30 Euro. " * 4), ("Speaker 0", "01:02", "Gut, so machen wir es.")])
+SUMMARY = """## Executive Summary
+
+- **Preis** bleibt bei ****30 Euro****.
+
+## Full Summary
+
+### Preis
+
+- Lange Diskussion.
+    - Details.
+
+## Key Decisions
+
+- Preis bleibt bei 30 Euro
+- Launch im November
+
+## Action Items
+
+- **Lisa**: Folien schicken bis 2026-10-30
+- [x] Raum buchen
+"""
+
+
+class Jamie:
+    """Paged meetings, a truncating get_meeting and a paged get_meeting_transcript; counts the calls."""
+
+    def __init__(self, count: int = 5, page: int = 2, cut: int = 60, chunk: int = 50):
+        self.meetings = [{"id": f"j{i}", "title": f"Meeting {i}", "startTime": f"2026-10-{20 - i:02d}T09:00:00.000Z",
+                          "transcript": LONG, "summary": {"markdown": SUMMARY, "short": "Preis bestätigt."},
+                          "participants": [{"id": "0", "name": "Max", "email": "max@example.com"},
+                                           {"id": "1", "name": "Speaker 1", "email": None},
+                                           {"id": "2", "name": "Julio", "email": "julio@example.com"}],
+                          "user": {"id": "u", "email": "julio@example.com"},
+                          "event": {"attendees": [{"name": "Lisa", "email": "lisa@example.com"}]},
+                          "tasks": []} for i in range(count)]
+        self.page, self.cut, self.chunk = page, cut, chunk
+        self.calls: list[tuple[str, dict]] = []
+        self.broken: set[str] = set()
+
+    def server(self) -> MCPServer:
+        server = MCPServer("jamie")
+
+        @server.tool()
+        def list_meetings(limit: int = 50, cursor: str = "", startDate: str | None = None) -> dict:
+            """Meetings, newest first, with a cursor."""
+            self.calls.append(("list_meetings", {"limit": limit, "cursor": cursor, "startDate": startDate}))
+            start = int(cursor or 0)
+            end = start + min(limit, self.page)
+            entries = [{k: m[k] for k in ("id", "title", "startTime")} for m in self.meetings[start:end]]
+            return {"meetings": entries, "nextCursor": str(end) if end < len(self.meetings) else None}
+
+        @server.tool()
+        def get_meeting(meetingId: str) -> dict:
+            """One meeting; long transcripts cut at `cut` bytes."""
+            self.calls.append(("get_meeting", {"meetingId": meetingId}))
+            if meetingId in self.broken:
+                raise ValueError("server hiccup")
+            m = next(m for m in self.meetings if m["id"] == meetingId)
+            data = m["transcript"].encode()
+            if len(data) <= self.cut:
+                return dict(m)
+            info = {"truncated": True, "totalBytes": len(data), "returnedBytes": self.cut, "nextCursor": "x"}
+            return {**m, "transcript": data[:self.cut].decode(errors="ignore"), "transcriptInfo": info}
+
+        @server.tool()
+        def get_meeting_transcript(meetingId: str, cursor: str | None = None) -> dict:
+            """The transcript in pages of `chunk` characters; a page may end mid-line."""
+            self.calls.append(("get_meeting_transcript", {"meetingId": meetingId, "cursor": cursor}))
+            text = next(m for m in self.meetings if m["id"] == meetingId)["transcript"]
+            start = int(cursor or 0)
+            end = min(start + self.chunk, len(text))
+            return {"meetingId": meetingId, "transcript": text[start:end], "isFinal": end >= len(text),
+                    "nextCursor": str(end) if end < len(text) else None}
+
+        @server.tool()
+        def list_tasks(limit: int = 50) -> dict:
+            """No tasks."""
+            return {"tasks": [], "nextCursor": None}
+
+        return server
+
+    def count(self, name: str) -> int:
+        return sum(1 for n, _ in self.calls if n == name)
+
+
+async def run(jamie: Jamie, folder, **kwargs) -> tuple[list, list]:
+    logged: list = []
+    async with Client(jamie.server()) as client:
+        saved = await jamie_sync.sync(client.session, Memory(folder), log=logged.append, **kwargs)
+    return saved, logged
+
+
+async def test_list_meetings_is_paged_until_the_limit(tmp_path):
+    jamie = Jamie(count=5, page=2)
+    saved, _ = await run(jamie, tmp_path, limit=3)
+    assert [m.id for m in saved] == ["jamie-j0", "jamie-j1", "jamie-j2"]
+    assert [c["cursor"] for n, c in jamie.calls if n == "list_meetings"] == ["", "2"]
+
+    jamie = Jamie(count=5, page=2)
+    saved, _ = await run(jamie, tmp_path / "all", limit=50, since="2026-10-01")
+    assert len(saved) == 5
+    pages = [c for n, c in jamie.calls if n == "list_meetings"]
+    assert [c["cursor"] for c in pages] == ["", "2", "4"]  # stops when nextCursor is null
+    assert pages[0]["startDate"] == "2026-10-01T00:00:00Z"  # Jamie's filter takes a date-time
+
+
+async def test_truncated_transcript_is_read_in_full(tmp_path):
+    jamie = Jamie(count=1, cut=60, chunk=50)
+    saved, logged = await run(jamie, tmp_path)
+    lines = [(l.speaker, l.t, l.text) for l in saved[0].transcript]
+    assert lines == [("Max", 0.0, "Hallo zusammen."), ("", 8.0, "Ja?"),
+                     ("Speaker 1", 10.0, ("Wir bleiben bei 30 Euro. " * 4).strip()), ("Max", 62.0, "Gut, so machen wir es.")]
+    assert jamie.count("get_meeting_transcript") == -(-len(LONG) // 50)  # every page, joined across mid-line cuts
+    assert "partial" not in logged[0] and logged[0]["lines"] == 4
+    assert Memory(tmp_path).get("jamie-j0").transcript[-1].text == "Gut, so machen wir es."
+
+
+async def test_short_transcript_needs_no_paging(tmp_path):
+    jamie = Jamie(count=1, cut=10_000)
+    saved, _ = await run(jamie, tmp_path)
+    assert len(saved[0].transcript) == 4 and jamie.count("get_meeting_transcript") == 0
+
+
+async def test_resync_skips_unchanged_meetings(tmp_path):
+    jamie = Jamie(count=2)
+    await run(jamie, tmp_path)
+    first_pages = jamie.count("get_meeting_transcript")
+    written = {p.name: p.stat().st_mtime_ns for p in tmp_path.glob("*.json")}
+
+    saved, logged = await run(jamie, tmp_path)
+    assert [m.id for m in saved] == ["jamie-j0", "jamie-j1"]
+    assert jamie.count("get_meeting_transcript") == first_pages  # nothing read again
+    assert {p.name: p.stat().st_mtime_ns for p in tmp_path.glob("*.json")} == written
+    assert all(x.get("unchanged") for x in logged if x["type"] == "synced")
+    assert logged[-1] == {"type": "status", "state": "synced", "meetings": 2, "updated": 0, "unchanged": 2}
+
+    jamie.meetings[1]["transcript"] += "Speaker 0\n\n###### 02:00 - 02:05\n\nNoch etwas.\n"
+    saved, logged = await run(jamie, tmp_path)
+    assert [x["meeting_id"] for x in logged if x["type"] == "synced" and not x.get("unchanged")] == ["jamie-j1"]
+    assert saved[1].transcript[-1].text == "Noch etwas."
+
+    _, logged = await run(jamie, tmp_path, force=True)
+    assert logged[-1]["updated"] == 2
+
+
+async def test_a_failed_get_meeting_keeps_the_stored_copy(tmp_path):
+    jamie = Jamie(count=1)
+    await run(jamie, tmp_path)
+    jamie.broken.add("j0")
+    saved, logged = await run(jamie, tmp_path)
+    assert len(saved[0].transcript) == 4  # not overwritten by the bare list entry
+    assert logged[0]["state"] == "warning" and logged[0]["message"].startswith("get_meeting j0:")
+
+
+async def test_empty_account_says_so(tmp_path):
+    saved, logged = await run(Jamie(count=0), tmp_path)
+    assert saved == []
+    assert logged == [{"type": "status", "state": "synced", "meetings": 0, "hint": "empty_account"}]
+    _, logged = await run(Jamie(count=0), tmp_path, since="2026-10-01")  # a filter that matches nothing isn't that
+    assert "hint" not in logged[-1]
+
+
+async def test_summary_participants_decisions_and_action_items(tmp_path):
+    saved, _ = await run(Jamie(count=1), tmp_path)
+    m = saved[0]
+    assert m.participants == ["Max", "Lisa"]  # no "Speaker 1", not the Jamie user, plus calendar attendees
+    assert m.summary == "- Preis bleibt bei 30 Euro."
+    assert [d.text for d in m.decisions] == ["Preis bleibt bei 30 Euro", "Launch im November"]
+    assert [(c.who, c.what, c.due, c.status) for c in m.commitments] == [
+        ("Lisa", "Folien schicken bis 2026-10-30", "2026-10-30", "open"), ("", "Raum buchen", None, "done")]
+
+
+def test_jamie_tasks_win_over_summary_action_items():
+    raw = {"id": "x", "summary": {"markdown": SUMMARY},
+           "tasks": [{"text": "Folien schicken", "assignee": {"name": "Lisa"}, "dueDate": "2026-10-30", "completed": False}]}
+    assert [(c.who, c.what) for c in meeting_of(raw).commitments] == [("Lisa", "Folien schicken")]
+
+
+def test_summary_falls_back_to_short_then_markdown():
+    assert meeting_of({"id": "a", "summary": {"markdown": "Nur Text **fett**.", "short": "Kurz."}}).summary == "Kurz."
+    assert meeting_of({"id": "b", "summary": "Nur Text **fett**."}).summary == "Nur Text fett."
+
+
+def test_logout_removes_the_token_file(tmp_path, monkeypatch, capsys):
+    token = tmp_path / "jamie-oauth.json"
+    token.write_text("{}")
+    monkeypatch.setattr(jamie_sync, "TOKEN_FILE", token)
+    assert jamie_sync.main(["--logout"]) == 0
+    assert not token.exists()
+    assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "logged_out", "removed": True}
+    jamie_sync.main(["--logout"])
+    assert json.loads(capsys.readouterr().out)["removed"] is False
+
+
+async def test_token_storage_remembers_when_the_token_runs_out(tmp_path):
+    from mcp.shared.auth import OAuthToken
+
+    storage = FileTokenStorage(tmp_path / "t.json")
+    assert storage.expires_at() is None
+    await storage.set_tokens(OAuthToken(access_token="a", refresh_token="r", expires_in=3600))
+    assert abs(storage.expires_at() - (time.time() + 3600)) < 5
+    assert (await storage.get_tokens()).refresh_token == "r"
+    assert oct((tmp_path / "t.json").stat().st_mode & 0o777) == "0o600"
+
+    old = tmp_path / "old.json"  # written before expires_at was kept: file time + expires_in
+    old.write_text(json.dumps({"tokens": {"access_token": "a", "token_type": "Bearer", "expires_in": 3600}}))
+    os.utime(old, (1_000_000, 1_000_000))
+    assert FileTokenStorage(old).expires_at() == 1_003_600

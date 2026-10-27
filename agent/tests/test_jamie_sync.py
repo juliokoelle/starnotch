@@ -318,6 +318,8 @@ async def test_summary_participants_decisions_and_action_items(tmp_path):
     m = saved[0]
     assert m.participants == ["Max", "Lisa"]  # no "Speaker 1", not the Jamie user, plus calendar attendees
     assert m.summary == "- Preis bleibt bei 30 Euro."
+    assert m.notes == SUMMARY.strip()  # the whole summary is kept; the memory is the only copy
+    assert "### Preis" in Memory(tmp_path).as_context()
     assert [d.text for d in m.decisions] == ["Preis bleibt bei 30 Euro", "Launch im November"]
     assert [(c.who, c.what, c.due, c.status) for c in m.commitments] == [
         ("Lisa", "Folien schicken bis 2026-10-30", "2026-10-30", "open"), ("", "Raum buchen", None, "done")]
@@ -332,6 +334,8 @@ def test_jamie_tasks_win_over_summary_action_items():
 def test_summary_falls_back_to_short_then_markdown():
     assert meeting_of({"id": "a", "summary": {"markdown": "Nur Text **fett**.", "short": "Kurz."}}).summary == "Kurz."
     assert meeting_of({"id": "b", "summary": "Nur Text **fett**."}).summary == "Nur Text fett."
+    assert meeting_of({"id": "a", "summary": {"markdown": "Nur Text **fett**.", "short": "Kurz."}}).notes == "Nur Text **fett**."
+    assert meeting_of({"id": "b", "summary": "Nur Text **fett**."}).notes == ""  # the summary is already all of it
 
 
 def test_logout_removes_the_token_file(tmp_path, monkeypatch, capsys):

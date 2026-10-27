@@ -62,6 +62,13 @@ at one (`CLAUDE_CODE_MAX_RETRIES=1`), so an overloaded or throttled API fails in
 timeout. The system prompt file sits in the brain folder and is deleted after the call (also when the app ends the
 agent with SIGTERM; one left by a hard kill is swept on the next start). stderr logs each call's tokens and duration.
 
+The meeting memory in the system prompt is at most 60,000 characters: the summary, decisions and commitments of every
+meeting always, then notes and transcripts in equal parts per meeting (what a short one doesn't need goes to the
+others); a longer transcript keeps its lines with numbers first, then its earliest, with `…` for the gaps. The up to
+six transcript lines that share the most words with what was just said (or with a question) come along in the
+prompt, so the parts the excerpt left out still count. The system prompt only changes when the memory does, so it
+stays cacheable.
+
 ## Demo
 
 ```sh

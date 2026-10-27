@@ -1,6 +1,6 @@
 import json
 
-from memory import Meeting, Memory, _seconds
+from memory import Commitment, Decision, Line, Meeting, Memory, _seconds
 
 
 def test_loads_demo_meetings_sorted(memory_dir):
@@ -76,3 +76,29 @@ def test_context_has_ids_and_quotes(memory_dir):
     text = Memory(memory_dir).as_context()
     assert "id=2026-10-12-kickoff" in text and "30 Euro" in text
     assert text.index("2026-10-19-weekly") < text.index("2026-10-12-kickoff")
+
+
+def test_context_keeps_every_meetings_facts_and_shares_the_rest(tmp_path):
+    memory = Memory(tmp_path)
+    for i in range(6):  # six long meetings, far more than the budget
+        memory.save(Meeting(
+            id=f"m{i}", date=f"2026-10-0{i + 1}", summary=f"Summary {i}",
+            decisions=[Decision(text=f"Price {i} is {30 + i} Euro")],
+            commitments=[Commitment(who="Lisa", what=f"slides {i}")],
+            notes="## Full Summary\n" + f"Topic {i}.\n" * 20,
+            transcript=[Line("Max", ("we said %d Euro" % n) if n % 50 == 0 else "small talk " * 8, n) for n in range(400)],
+        ))
+    text = memory.as_context(max_chars=20_000)
+    assert len(text) <= 20_000
+    for i in range(6):  # even the oldest meeting keeps its facts and notes
+        assert f"Price {i} is {30 + i} Euro" in text and f"slides {i}" in text and f"Topic {i}." in text
+    assert text.count("we said") == 6 * 8  # lines with numbers are kept first
+    assert "…" in text and text.index("id=m5") < text.index("id=m0")
+
+
+def test_context_gives_short_meetings_room_to_the_long_one(tmp_path):
+    memory = Memory(tmp_path)
+    memory.save(Meeting(id="short", date="2026-10-01", transcript=[Line("Max", "Kurz.")]))
+    memory.save(Meeting(id="long", date="2026-10-02", transcript=[Line("Max", f"Satz {n}.", n) for n in range(300)]))
+    text = memory.as_context(max_chars=60_000)
+    assert "Satz 299." in text and "Kurz." in text and "…" not in text  # all fits: nothing cut

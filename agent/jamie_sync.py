@@ -36,7 +36,7 @@ JAMIE_URL = "https://mcp.meetjamie.ai/mcp"
 TOKEN_FILE = DEFAULT_DIR.parent / "jamie-oauth.json"
 CALLBACK_PORT = 47791  # next to the app's ports; 8765 is a common dev-server port
 STATE_FILE = "jamie-sync.state"  # in the memory folder; not *.json, so Memory doesn't take it for a meeting
-MAPPING = 2  # raise when meeting_of maps differently: every meeting is then written again on the next sync
+MAPPING = 3  # raise when meeting_of maps differently: every meeting is then written again on the next sync
 PAGE_SIZE = 100  # list_meetings takes at most 100 per page
 MAX_PAGES = 500  # against a server that never says a list or transcript is finished
 PARALLEL = 4  # meetings fetched at the same time
@@ -303,6 +303,8 @@ def meeting_of(raw: dict[str, Any], tasks: list[Any] = ()) -> Meeting:
     overview = next((clean_markdown("\n".join(lines)) for h, lines in sections if _heading_is(h, SUMMARY_HEAD)), "")
     summary_text = overview or (text_of(first(summary, "short", "overview")) if isinstance(summary, dict) else "") \
         or clean_markdown(markdown) or text_of(summary)
+    # The summary is its short part, for the prep card; the whole summary is kept as notes (the memory is the only copy).
+    notes = markdown.strip() if clean_markdown(markdown) != summary_text else ""
 
     decisions = [Decision(text=text_of(d)) if not isinstance(d, dict) else
                  Decision(text=text_of(first(d, "text", "title", "decision", "description", default="")),
@@ -330,6 +332,7 @@ def meeting_of(raw: dict[str, Any], tasks: list[Any] = ()) -> Meeting:
         summary=summary_text,
         decisions=[d for d in decisions if d.text],
         commitments=commitments,
+        notes=notes,
     )
 
 

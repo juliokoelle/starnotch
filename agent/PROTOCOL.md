@@ -256,8 +256,10 @@ become one line each with `speaker` and `t`; a speaker label becomes the partici
 `Speaker -1` (no speaker detected) becomes `""`. `participants` are the named participants and calendar
 attendees, without unnamed voices (`Speaker 2`) and without the Jamie user. `summary` is the summary's
 "Executive Summary" (or "Summary", "Overview", "Zusammenfassung") section, else Jamie's short summary, else the
-whole summary. `decisions` come from a "Decisions"/"Key Decisions"/"Entscheidungen" section, `commitments` from
-Jamie's tasks (assignee, due date, done), or, when the meeting has none, from an "Action Items"/"Next
+whole summary; it is what the prep card shows. `notes` keeps Jamie's whole summary as Markdown (Full Summary and its
+topic sections) whenever `summary` is only part of it: the memory is the only copy, and Claude reads the notes.
+`decisions` come from a "Decisions"/"Key Decisions"/"Entscheidungen" section, `commitments` from Jamie's tasks
+(assignee, due date, done), or, when the meeting has none, from an "Action Items"/"Next
 Steps"/"Aufgaben" section (`**Lisa**: …`, `[x] …`, an ISO date as `due`). Jamie's default summary template has
 neither section, so most meetings carry none.
 

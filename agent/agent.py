@@ -25,6 +25,7 @@ import captures as quick
 from memory import Commitment, Line, Meeting, Memory
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
+RECALL = 6  # earlier transcript lines that share words with the new ones, for transcripts the memory had to shorten
 REST = 60  # seconds on the rules after a failed Claude call: better a rule now than Claude late, batch after batch
 
 SYSTEM = """You listen along to a live meeting and compare it with the team's meeting memory below.
@@ -247,8 +248,10 @@ class Agent:
             return {"type": "error", "message": "ask: empty question"}
         result = None
         if self._thinking():
+            recall = self._recall(question)
+            prompt = question + ("\n\n# Earlier lines with the same words\n" + "\n".join(recall) if recall else "")
             try:
-                result = self.llm.json(ASK_SYSTEM.format(memory=self.context()), question, ASK_SCHEMA, 2000)
+                result = self.llm.json(ASK_SYSTEM.format(memory=self.context()), prompt, ASK_SCHEMA, 2000)
             except Exception as error:
                 self._warn(error)
         if result is None:
@@ -312,6 +315,9 @@ class Agent:
         lines = [f"Today is {today.strftime('%A')}, {today.isoformat()}.", "", "# Live meeting so far"]
         lines += [f"{u.speaker}: {u.text}" for u in before] or ["(nothing yet)"]
         lines += ["", "# New utterances"] + [f"{u.speaker}: {u.text}" for u in new]
+        recall = self._recall(" ".join(u.text for u in new))
+        if recall:
+            lines += ["", "# Earlier lines with the same words"] + recall
         lines += ["", "# Already reported"] + (self.reported_text[-20:] or ["(nothing)"])
         return "\n".join(lines)
 
@@ -376,6 +382,12 @@ class Agent:
     @staticmethod
     def _source(meeting: Meeting) -> dict[str, Any]:
         return {"meeting": meeting.title or meeting.id, "meeting_id": meeting.id, "date": meeting.date}
+
+    def _recall(self, text: str) -> list[str]:
+        """Transcript lines from the memory sharing two or more words with `text`: the system prompt may only
+        carry an excerpt of a long transcript, so the lines that matter now come along in the prompt."""
+        return [f"[{h.meeting.id} | {h.meeting.date}] {h.line.speaker}: {h.line.text}"
+                for h in self.memory.search(text, RECALL) if h.score >= 2]
 
     def _thinking(self) -> bool:
         return self.llm is not None and time.monotonic() >= self.resting_until

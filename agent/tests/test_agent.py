@@ -132,6 +132,14 @@ def test_a_failed_call_rests_claude_for_a_while(memory_dir, monkeypatch):
     assert len(llm.calls) == 2
 
 
+def test_earlier_lines_with_the_same_words_come_along(memory_dir):
+    llm = FakeLLM()
+    agent, _ = make(memory_dir, llm)
+    agent.handle(utter("Max", "Die Landingpage geht diese Woche live, oder?"))
+    user = llm.calls[0].user
+    assert "# Earlier lines with the same words" in user and "[2026-10-19-weekly | 2026-10-19]" in user
+
+
 def test_auth_error_stops_calling_claude(memory_dir):
     class AuthenticationError(Exception):
         pass

@@ -24,6 +24,9 @@ enum ModuleAvailability {
                 return Status(available: true, detail: "From \(type(of: today).displayName)\(reminders ? " and Reminders" : "")")
             }
             if reminders { return Status(available: true, detail: "From Apple Reminders") }
+            if EKEventStore.authorizationStatus(for: .reminder) == .denied {
+                return Status(available: false, detail: "Reminders access is off in System Settings")
+            }
             return Status(available: false, detail: "Needs Apple Reminders or a connector")
         case .calendar:
             switch EKEventStore.authorizationStatus(for: .event) {
@@ -157,9 +160,10 @@ struct ToolRow: View {
         return ModuleAvailability.status(kind, settings: state.settings)
     }
 
-    /// Today without a connector: switching it on asks for Apple Reminders, here, on the click.
+    /// Today without a connector: switching it on turns on Apple Reminders, asking macOS on the
+    /// click, or opens the switch in System Settings when access was declined before.
     private var canAsk: Bool {
-        item == .module(.today) && Runtime.today == nil && EKEventStore.authorizationStatus(for: .reminder) == .notDetermined
+        item == .module(.today) && Runtime.today == nil && EKEventStore.authorizationStatus(for: .reminder) != .restricted
     }
 
     private func switchTo(_ on: Bool) {

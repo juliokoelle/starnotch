@@ -678,6 +678,8 @@ final class AgentsModule: NotchModule {
         return min(330, CGFloat(snapshot.loops.count) * 40 + 56)
     }
 
+    var earShowsFigure: Bool { true }
+
     func leadingEar(peek: Bool) -> AnyView {
         AnyView(AgentsLeadingEar(module: self, peek: peek))
     }

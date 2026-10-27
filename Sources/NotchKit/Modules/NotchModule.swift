@@ -57,6 +57,8 @@ extension NotchModule {
     func handleKey(_ press: KeyPress) -> Bool { false }
     var holdsOpen: Bool { false }
     var needsAttention: Bool { false }
+    /// The leading ear already shows the main character (the handle to pull it out of the notch).
+    var earShowsFigure: Bool { false }
 }
 
 /// Shared between the shell and modules: the namespace for figures that travel between the

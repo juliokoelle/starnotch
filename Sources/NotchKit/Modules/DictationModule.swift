@@ -117,6 +117,7 @@ final class DictationModule: NotchModule {
 
     var ambientPriority: Int { isActive ? 40 : 0 }
     var needsAttention: Bool { isActive }
+    var earShowsFigure: Bool { true }
     var bodyHeight: CGFloat { 120 }
 
     /// The main character puts its headphones on while listening.

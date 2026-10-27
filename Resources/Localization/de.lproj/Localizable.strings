@@ -47,3 +47,8 @@
 "Modules hide themselves when what they need isn't on this Mac." = "Module blenden sich aus, wenn auf diesem Mac fehlt, was sie brauchen.";
 "On a display without a notch, the island is a small pill at the top center." = "Auf einem Bildschirm ohne Notch ist die Insel eine kleine Pille oben in der Mitte.";
 "Quit" = "Beenden";
+
+/* Music */
+"Nothing playing" = "Gerade läuft nichts";
+"Play something in Spotify or Music and it shows up here." = "Spiel etwas in Spotify oder Musik ab, dann erscheint es hier.";
+

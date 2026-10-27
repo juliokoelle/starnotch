@@ -18,6 +18,7 @@ final class NowPlayingModule: NotchModule {
         var color: Color
         var cover: NSImage
         var source: PlayerStatus.Source?
+        var album = ""
     }
 
     let kind = ModuleKind.nowPlaying
@@ -104,7 +105,7 @@ final class NowPlayingModule: NotchModule {
         guard changed else { return }
         let cover = await PlayerBridge.artwork(for: status) ?? MockCovers.placeholder()
         let new = Track(id: status.trackID, title: status.title, artist: status.artist, duration: status.duration,
-                        color: DominantColor.of(cover), cover: cover, source: status.source)
+                        color: DominantColor.of(cover), cover: cover, source: status.source, album: status.album)
         let hadTrack = track != nil
         withAnimation(Theme.open) { track = new }
         if hadTrack { onTrackChange?(new) }
@@ -120,6 +121,16 @@ final class NowPlayingModule: NotchModule {
 
     func next() { step(1) }
     func previous() { step(-1) }
+
+    /// Jumps within the track (the scrubber); the next poll confirms the player's position.
+    func seek(to seconds: TimeInterval) {
+        guard let track else { return }
+        let target = min(max(0, seconds), track.duration)
+        if live, let source = track.source {
+            PlayerBridge.send("set player position to \(Int(target.rounded()))", to: source)
+        }
+        position = target
+    }
 
     private func step(_ delta: Int) {
         Haptics.tick()
@@ -215,100 +226,118 @@ private struct NowPlayingBody: View {
         Group {
             if let track = module.track {
                 player(track)
-                    .frame(height: 156)
-                    .overlayPreferenceValue(OutputButtonAnchor.self) { anchor in
-                        GeometryReader { proxy in
-                            if module.showsOutputs, let anchor {
-                                OutputPopover(output: module.output, button: proxy[anchor], in: proxy.size) {
-                                    withAnimation(Theme.snappy) { module.showsOutputs = false }
-                                }
-                            }
-                        }
-                    }
-                    .frame(maxHeight: .infinity, alignment: .top)
             } else {
-                HStack(spacing: 14) {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 56, height: 56)
-                        .background(Theme.cardHover, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Nothing playing").font(Theme.font(14, .semibold)).foregroundStyle(Theme.textPrimary)
-                        Text("Play something in Spotify or Music and it shows up here.")
-                            .font(Theme.font(12)).foregroundStyle(Theme.textSecondary)
+                idle
+            }
+        }
+        .overlayPreferenceValue(OutputButtonAnchor.self) { anchor in
+            GeometryReader { proxy in
+                if module.showsOutputs, let anchor {
+                    OutputPopover(output: module.output, button: proxy[anchor], in: proxy.size) {
+                        withAnimation(Theme.snappy) { module.showsOutputs = false }
                     }
-                    Spacer()
                 }
-                .padding(.horizontal, 22)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
         }
     }
 
+    /// Nothing playing: the same layout with an empty cover; the output and its volume still work.
+    private var idle: some View {
+        HStack(alignment: .center, spacing: 22) {
+            RoundedRectangle(cornerRadius: Self.cover * 0.22, style: .continuous)
+                .fill(Theme.cardHover)
+                .frame(width: Self.cover, height: Self.cover)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Nothing playing").font(Theme.font(18, .semibold)).foregroundStyle(Theme.textPrimary)
+                    Text("Play something in Spotify or Music and it shows up here.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                outputRow
+            }
+            .frame(maxHeight: Self.cover)
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    /// Volume across, the output device at the end; a click on it opens the list.
+    private var outputRow: some View {
+        HStack(spacing: 12) {
+            VolumeSlider(output: module.output, width: nil)
+            OutputButton(output: module.output, open: Binding(get: { module.showsOutputs },
+                                                              set: { module.showsOutputs = $0 }))
+                .layoutPriority(1)
+        }
+    }
+
+    /// The full panel: a large cover, then title, artist and album, the scrubber, the controls,
+    /// and the output with its volume along the bottom.
     private func player(_ track: NowPlayingModule.Track) -> some View {
         ZStack(alignment: .topTrailing) {
-            // Sized for the narrow panel: cover, text and controls fit without clipping.
-            HStack(alignment: .center, spacing: 14) {
+            HStack(alignment: .center, spacing: 22) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(track.color.opacity(0.55))
-                        .frame(width: 80, height: 80)
-                        .blur(radius: 22)
-                    CoverView(track: track, size: 80, badge: true)
-                        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+                    RoundedRectangle(cornerRadius: 40, style: .continuous)
+                        .fill(track.color.opacity(0.5))
+                        .frame(width: Self.cover, height: Self.cover)
+                        .blur(radius: 30)
+                    CoverView(track: track, size: Self.cover, badge: true)
+                        .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
                 }
                 .id(track.id)
                 .transition(.blurSlide(x: 40 * module.direction, scale: 0.92))
 
                 VStack(alignment: .leading, spacing: 0) {
-                    Group {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(track.title)
-                            .font(Theme.font(16, .semibold))
+                            .font(Theme.font(18, .semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text(track.artist)
+                        Text(track.album.isEmpty ? track.artist : "\(track.artist) · \(track.album)")
                             .font(Theme.font(13))
                             .foregroundStyle(Theme.textSecondary)
-                            .padding(.top, 2)
                     }
                     .lineLimit(1)
                     // Room for the character in the corner: long titles end in … before it.
-                    .padding(.trailing, 58)
+                    .padding(.trailing, 64)
                     .id(track.id)
                     .transition(.blurSlide(x: 24 * module.direction))
 
-                    Scrubber(position: module.position, duration: track.duration)
-                        .padding(.top, 14)
+                    Spacer(minLength: 12)
 
-                    HStack(spacing: 6) {
-                        control("backward.fill", size: 13, label: "Previous") { module.previous() }
-                        control(module.isPlaying ? "pause.fill" : "play.fill", size: 17,
+                    Scrubber(position: module.position, duration: track.duration) { module.seek(to: $0) }
+
+                    HStack(spacing: 10) {
+                        control("backward.fill", size: 15, label: "Previous") { module.previous() }
+                        control(module.isPlaying ? "pause.fill" : "play.fill", size: 21,
                                 label: module.isPlaying ? "Pause" : "Play") { module.togglePlay() }
                             .contentTransition(.symbolEffect(.replace))
-                        control("forward.fill", size: 13, label: "Next") { module.next() }
-                        Spacer(minLength: 8)
-                        VolumeSlider(output: module.output)
-                        OutputButton(output: module.output, open: Binding(get: { module.showsOutputs },
-                                                                          set: { module.showsOutputs = $0 }))
+                        control("forward.fill", size: 15, label: "Next") { module.next() }
                     }
                     .padding(.top, 8)
-                    .padding(.leading, -8)
-                }
-                .frame(maxWidth: 300, alignment: .leading)
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 16)
-            .padding(.trailing, 12)
-            .frame(maxHeight: .infinity)
+                    .padding(.leading, -7)
 
-            // The main character listens along with headphones, in the top corner beside the
-            // title, so it never covers the controls in the narrow panel.
+                    outputRow
+                        .padding(.top, 10)
+                }
+                .frame(maxHeight: Self.cover)
+            }
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+
+            // The main character listens along with headphones, in the top corner beside the title.
             AvatarView(character: module.cast.main, mood: .music, height: 54,
                        colorway: module.cast.colorway, emergeOnAppear: false)
                 .frame(width: 62, alignment: .top)
-                .padding(.top, 12)
-                .padding(.trailing, 10)
+                .padding(.top, 14)
+                .padding(.trailing, 14)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -316,12 +345,14 @@ private struct NowPlayingBody: View {
         .animation(Theme.open, value: track.id)
     }
 
+    static let cover: CGFloat = 200
+
     private func control(_ symbol: String, size: CGFloat, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressScale())
@@ -330,29 +361,50 @@ private struct NowPlayingBody: View {
 }
 
 /// Thin scrubber: the played part in white, times small and quiet, remaining time negative.
+/// A click or drag anywhere along it (the times included, about 30 pt tall) jumps there.
 private struct Scrubber: View {
     let position: TimeInterval
     let duration: TimeInterval
+    var onSeek: ((TimeInterval) -> Void)?
+    /// While dragging: the fraction under the pointer, shown before the player catches up.
+    @State private var dragged: Double?
 
     var body: some View {
-        VStack(spacing: 5) {
-            GeometryReader { proxy in
-                let fraction = duration > 0 ? min(1, position / duration) : 0
+        let fraction = dragged ?? (duration > 0 ? min(1, position / duration) : 0)
+        let shown = dragged.map { $0 * duration } ?? position
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.14))
                     Capsule().fill(Color.white.opacity(0.85)).frame(width: proxy.size.width * fraction)
                 }
+                .frame(height: 3)
+                .scaleEffect(x: 1, y: dragged == nil ? 1 : 1.7)
+                .frame(height: 13)
+                HStack {
+                    Text(Self.time(shown))
+                    Spacer()
+                    Text("-" + Self.time(max(0, duration - shown)))
+                }
+                .font(Theme.font(11.5).monospacedDigit())
+                .foregroundStyle(Theme.textTertiary)
             }
-            .frame(height: 3)
-            HStack {
-                Text(Self.time(position))
-                Spacer()
-                Text("-" + Self.time(max(0, duration - position)))
-            }
-            .font(Theme.font(11.5).monospacedDigit())
-            .foregroundStyle(Theme.textTertiary)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    guard onSeek != nil, duration > 0 else { return }
+                    dragged = min(1, max(0, value.location.x / max(1, proxy.size.width)))
+                }
+                .onEnded { _ in
+                    if let dragged { onSeek?(dragged * duration) }
+                    dragged = nil
+                })
         }
-        .animation(.linear(duration: 0.5), value: position)
+        .frame(height: 29)
+        .animation(dragged == nil ? .linear(duration: 0.5) : nil, value: position)
+        .animation(Theme.snappy, value: dragged == nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Position")
     }
 
     static func time(_ seconds: TimeInterval) -> String {
@@ -376,11 +428,13 @@ struct CoverView: View {
             .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
             .overlay(alignment: .bottomTrailing) {
                 if badge, let source = track.source, let icon = PlayerBridge.icon(for: source) {
+                    // Small at every cover size: a hint of the source, not a second cover.
+                    let side = min(28, max(12, size * 0.24))
                     Image(nsImage: icon)
                         .resizable()
-                        .frame(width: max(12, size * 0.24), height: max(12, size * 0.24))
+                        .frame(width: side, height: side)
                         .shadow(color: .black.opacity(0.5), radius: 2)
-                        .offset(x: size * 0.06, y: size * 0.06)
+                        .offset(x: side * 0.25, y: side * 0.25)
                 }
             }
     }
@@ -412,7 +466,7 @@ enum PlayerBridge {
         tell application "\(app)"
             if player state is stopped then return "stopped"
             set t to current track
-            return (player state as string) & "||" & (name of t) & "||" & (artist of t) & "||" & (duration of t) & "||" & (player position) & "||" & \(artwork) & "||" & \(id)
+            return (player state as string) & "||" & (name of t) & "||" & (artist of t) & "||" & (duration of t) & "||" & (player position) & "||" & \(artwork) & "||" & \(id) & "||" & (album of t)
         end tell
         """
         guard let reply = run(script) else { return nil }
@@ -484,10 +538,12 @@ enum MockCovers {
         [
             NowPlayingModule.Track(id: "t1", title: "Low Tide Lights", artist: "Ola Brenn", duration: 214,
                                    color: Color(hex: 0xFF7A45),
-                                   cover: draw(base: (0xFF7A45, 0x7B2FF7), accent: 0xFFD166, seed: 1), source: .spotify),
+                                   cover: draw(base: (0xFF7A45, 0x7B2FF7), accent: 0xFFD166, seed: 1), source: .spotify,
+                                   album: "Night Ferries"),
             NowPlayingModule.Track(id: "t2", title: "Glass Harbour", artist: "Nuri Kaas", duration: 188,
                                    color: Color(hex: 0x2EC4B6),
-                                   cover: draw(base: (0x2EC4B6, 0x1B3A8C), accent: 0xB8F2E6, seed: 2), source: .music),
+                                   cover: draw(base: (0x2EC4B6, 0x1B3A8C), accent: 0xB8F2E6, seed: 2), source: .music,
+                                   album: "Coastlines"),
         ]
     }
 

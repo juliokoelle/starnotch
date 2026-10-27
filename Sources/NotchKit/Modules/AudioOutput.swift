@@ -124,7 +124,7 @@ struct OutputButtonAnchor: PreferenceKey {
     }
 }
 
-/// The small output button in the music card: the current device's symbol; a click opens a
+/// The output button in the music card: the current device's symbol and name; a click opens a
 /// small list floating over the card (the island keeps its size, no popover window).
 struct OutputButton: View {
     let output: AudioOutput
@@ -135,11 +135,21 @@ struct OutputButton: View {
             output.reload()
             withAnimation(Theme.snappy) { open.toggle() }
         } label: {
-            Image(systemName: output.currentDevice?.kind.symbol ?? "speaker.wave.2")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(open ? Theme.accent : Theme.textSecondary)
-                .frame(width: 30, height: 30)
-                .contentShape(Rectangle())
+            HStack(spacing: 6) {
+                Image(systemName: output.currentDevice?.kind.symbol ?? "speaker.wave.2")
+                    .font(.system(size: 12, weight: .semibold))
+                if let name = output.currentDevice?.name {
+                    Text(name).font(Theme.font(12, .medium)).lineLimit(1)
+                }
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .foregroundStyle(open ? Theme.accent : Theme.textSecondary)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: 200)
+            .frame(height: 28)
+            .background(Color.white.opacity(open ? 0.1 : 0.06), in: Capsule())
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressScale())
         .help("Output: \(output.currentDevice?.name ?? "unknown")")
@@ -331,9 +341,10 @@ private struct AirPlayPicker: NSViewRepresentable {
     }
 }
 
-/// A thin volume line for the current output.
+/// A thin volume line for the current output; `width` nil stretches it to the room it gets.
 struct VolumeSlider: View {
     let output: AudioOutput
+    var width: CGFloat? = 92
 
     var body: some View {
         if let volume = output.volume {
@@ -342,7 +353,7 @@ struct VolumeSlider: View {
                 Slider(value: Binding(get: { volume }, set: { output.setVolume($0) }), in: 0...1)
                     .controlSize(.mini)
                     .tint(Color.white.opacity(0.8))
-                    .frame(width: 92)
+                    .frame(width: width)
                 Image(systemName: "speaker.wave.3.fill").font(.system(size: 9)).foregroundStyle(Theme.textTertiary)
             }
             .accessibilityLabel("Volume")

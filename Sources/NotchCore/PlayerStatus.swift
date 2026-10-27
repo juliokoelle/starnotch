@@ -1,7 +1,7 @@
 import Foundation
 
 /// What Spotify or Music reports through AppleScript, one `||`-separated line:
-/// `state||title||artist||duration||position||artworkURL||id`.
+/// `state||title||artist||duration||position||artworkURL||id||album`.
 public struct PlayerStatus: Equatable, Sendable {
     public enum Source: String, Sendable { case spotify, music }
 
@@ -14,6 +14,8 @@ public struct PlayerStatus: Equatable, Sendable {
     public var position: Double
     public var artworkURL: URL?
     public var trackID: String
+    /// Empty when the player doesn't say (older replies end after the id).
+    public var album = ""
 
     public static let separator = "||"
 
@@ -34,7 +36,8 @@ public struct PlayerStatus: Equatable, Sendable {
             duration: duration,
             position: number(parts[4]),
             artworkURL: URL(string: parts[5]).flatMap { $0.scheme == "https" ? $0 : nil },
-            trackID: parts[6].isEmpty ? "\(title)|\(parts[2])" : parts[6]
+            trackID: parts[6].isEmpty ? "\(title)|\(parts[2])" : parts[6],
+            album: parts.count > 7 ? parts[7].trimmingCharacters(in: .whitespaces) : ""
         )
     }
 }

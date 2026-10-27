@@ -9,6 +9,13 @@ import Testing
         #expect(status.position == 47.5)
         #expect(status.artworkURL?.host == "i.scdn.co")
         #expect(status.trackID == "spotify:track:1")
+        #expect(status.album.isEmpty)
+    }
+
+    @Test func album() throws {
+        let status = try #require(PlayerStatus.parse("playing||Low Tide||Ola Brenn||214000||1||||spotify:track:1||Harbour Lights ", source: .spotify))
+        #expect(status.album == "Harbour Lights")
+        #expect(status.trackID == "spotify:track:1")
     }
 
     @Test func music() throws {

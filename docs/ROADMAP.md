@@ -15,7 +15,7 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 | | Item | Notes |
 |---|---|---|
 | ✅ | One-click Claude usage connection | Setup page: "Claude plan limits and context" installs the status line bridge, with backup and Remove. Onboarding should lead there |
-| ⬜ | First-run onboarding | Pick an avatar, connect Claude, set up the Meeting Agent (key, folder) in one flow |
+| ✅ | First-run onboarding | Four skippable steps: Tara (character and colour), your agents (one-click setup), meetings and Tara's brain (Jamie, Claude subscription, API key or rules), tools |
 | ✅ | Meeting Agent switch does nothing without setup | The agent ships in the app; keys and uv in Settings › Meeting agent |
 | ✅ | Watch mode toggle | Switching off now holds while a video or fullscreen app keeps it on |
 | ✅ | Calendar | Day before and after (arrows, ⌘← ⌘→, week strip), Today, open Calendar |
@@ -84,7 +84,7 @@ Feature level only: Vorssaint is GPL-3.0, so none of its code comes into Starnot
 - System: network up and down next to CPU, GPU and memory
 - Music: synced lyrics and the play queue
 - Agents: OpenCode and GitHub Copilot next to Claude Code and Codex, with plan limits, tokens and the API value of a session
-- A Tools gallery in Settings: each tool with one line and a switch, off by default; the notch shows only the ones switched on
+- ✅ A Tools gallery in Settings and onboarding: each tool with one line and a switch, off by default except Agents, Calendar and Music; the notch shows only the ones switched on
 
 ## Console (later)
 

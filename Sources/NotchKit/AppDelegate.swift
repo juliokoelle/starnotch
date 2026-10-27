@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
+        state.persists = options.preview == nil && !options.sampleData
         if options.demoSlots { applyDemoSlots() }
 
         let cast = AvatarCast(state: state)

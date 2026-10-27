@@ -11,7 +11,7 @@ final class AppState {
 
     var settings: SwitcherSettings {
         didSet {
-            if settings != oldValue { store.save(settings) }
+            if settings != oldValue && persists { store.save(settings) }
             if settings.localAPIEnabled != oldValue.localAPIEnabled { onLocalAPIToggle?(settings.localAPIEnabled) }
             if settings.disabledModules != oldValue.disabledModules || settings.disabledFeatures != oldValue.disabledFeatures
                 || settings.remindersInToday != oldValue.remindersInToday {
@@ -22,6 +22,8 @@ final class AppState {
             if settings.disabledProviders != oldValue.disabledProviders { onProvidersChanged?(Set(settings.disabledProviders)) }
         }
     }
+    /// Previews and sample data change settings in memory only.
+    @ObservationIgnored var persists = true
     @ObservationIgnored var onProvidersChanged: ((Set<String>) -> Void)?
     @ObservationIgnored var onLocalAPIToggle: ((Bool) -> Void)?
     @ObservationIgnored var onModulesChanged: (() -> Void)?

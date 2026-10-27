@@ -60,7 +60,7 @@ On first launch a setup page lists what it found (Claude Code, Codex, calendars,
 | none | The island, hover, click, swipes, ⌃⌥Space, quick capture | — |
 | Calendars | The calendar module | The module hides |
 | Automation (Spotify, Music) | Now playing, asked the first time music plays | The module stays quiet |
-| Accessibility (optional) | Escape cancels the wheel while you hold the notch over other apps | Release in the center to cancel |
+| Accessibility (optional) | Escape cancels the wheel while you hold the notch over other apps; the open island ends between two menu bar icons instead of cutting one | Release in the center to cancel; the island keeps its fixed width |
 
 ## Privacy
 

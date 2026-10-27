@@ -66,6 +66,8 @@ final class NotchController {
     var isLocked = false
     /// Quick capture's destination (queue file, hub).
     let inbox = CaptureInbox()
+    /// The menu bar icons, so the open island ends between them.
+    private let menuBar = MenuBarExtras()
 
     /// For our own screenshots and recordings (`--capturable`); otherwise the island stays out
     /// of screen sharing and captures.
@@ -104,6 +106,7 @@ final class NotchController {
         let hosting = NSHostingView(rootView: root)
         hosting.safeAreaRegions = []
         panel.contentView = hosting
+        menuBar.onChange = { [weak self] in self?.fitToMenuBar() }
         place()
         panel.orderFrontRegardless()
 
@@ -150,6 +153,29 @@ final class NotchController {
             CGRect(x: notch.rect.midX - size.width / 2, y: screen.frame.maxY - size.height, width: size.width, height: size.height),
             display: true
         )
+        fitToMenuBar()
+        menuBar.refresh(full: true)
+    }
+
+    /// Hands the layout the menu bar icons beside this screen's notch, so the open island ends
+    /// between two of them. A display without a notch keeps the island's own widths.
+    private func fitToMenuBar() {
+        guard let screen else { return }
+        let notch = screen.notch
+        var items: [ClosedRange<CGFloat>] = []
+        if notch.hasNotch {
+            let height = max(notch.rect.height, screen.frame.maxY - screen.visibleFrame.maxY)
+            let bar = CGRect(x: screen.frame.minX, y: screen.frame.maxY - height, width: screen.frame.width, height: height)
+            items = menuBar.frames
+                .filter { bar.contains(CGPoint(x: $0.midX, y: $0.midY)) }
+                .map { ($0.minX - notch.rect.midX) ... ($0.maxX - notch.rect.midX) }
+        }
+        guard items != model.menuBarItems else { return }
+        if model.interaction == .expanded || model.interaction == .capture {
+            withAnimation(Theme.snappy) { model.menuBarItems = items }
+        } else {
+            model.menuBarItems = items
+        }
     }
 
     /// The island in global AppKit coordinates for the current state.
@@ -368,6 +394,7 @@ final class NotchController {
         }
         self.pinned = pinned
         if model.interaction != .expanded {
+            menuBar.refresh()
             Haptics.open()
             set(.expanded, animation: Theme.open)
         }
@@ -475,6 +502,7 @@ final class NotchController {
         let capture = QuickCapture()
         capture.people = inbox.people
         model.capture = capture
+        menuBar.refresh()
         Haptics.open()
         set(.capture, animation: Theme.open)
         model.keyboardFocus = true

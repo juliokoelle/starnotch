@@ -91,10 +91,15 @@ final class NotchModel {
         }
     }
 
+    /// Menu bar icons beside the notch, as extents from its centre (set by `NotchController`);
+    /// empty without Accessibility permission or on a display without a notch.
+    var menuBarItems: [ClosedRange<CGFloat>] = []
+
     var layout: NotchLayout {
         NotchLayout(presentation: presentation, notch: notchSize,
                     bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? NotchLayout.panelHeight,
-                    earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom)
+                    earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom,
+                    menuBarItems: menuBarItems)
     }
 }
 
@@ -103,6 +108,12 @@ struct NotchLayout: Equatable {
     /// Every tab opens in one panel size, so switching tabs never resizes the island; a module
     /// fills it, and what is longer scrolls inside. Only an approval card asks for less.
     static let expandedWidth: CGFloat = 640
+    /// The open panel narrows or widens within these bounds so its edges end between two menu
+    /// bar icons instead of cutting one in half (`MenuBarFit`).
+    static let minExpandedWidth: CGFloat = 592
+    static let maxExpandedWidth: CGFloat = expandedWidth + 24
+    /// Quick capture, fitted the same way.
+    static let captureWidth: CGFloat = 520
     /// The middle between the old Agents (about 180) and Calendar (about 386) panels.
     static let panelHeight: CGFloat = 280
     /// Compact ears stay inside the gap between the hardware notch and the first menu extra
@@ -121,6 +132,8 @@ struct NotchLayout: Equatable {
     /// What the island may take of the menu bar beside the notch, per side, flare included.
     /// Peek, sneak and compact never grow past it, so menu bar extras stay uncovered.
     var menuBarRoom: CGFloat = 30
+    /// Menu bar icons beside the notch, relative to its centre: the open island ends between them.
+    var menuBarItems: [ClosedRange<CGFloat>] = []
 
     var topRadius: CGFloat {
         switch presentation {
@@ -146,8 +159,11 @@ struct NotchLayout: Equatable {
         case .closed: notch.width
         case .compact: notch.width + 2 * min(earWidth, besideNotch)
         case .peek, .sneak: notch.width + 2 * besideNotch
-        case .expanded: Self.expandedWidth
-        case .capture: 520
+        // The straight sides are what runs through the icons; the flares only touch the top rows.
+        case .expanded:
+            MenuBarFit.width(preferred: Self.expandedWidth, in: Self.minExpandedWidth ... Self.maxExpandedWidth, items: menuBarItems)
+        case .capture:
+            MenuBarFit.width(preferred: Self.captureWidth, in: Self.captureWidth - 48 ... Self.captureWidth + 24, items: menuBarItems)
         }
     }
 
@@ -168,7 +184,7 @@ struct NotchLayout: Equatable {
 
     /// Largest island, for the panel frame.
     static func maxSize(notch: CGSize) -> CGSize {
-        CGSize(width: expandedWidth + 2 * 14, height: notch.height + bodyTop + panelHeight + bodyBottom)
+        CGSize(width: maxExpandedWidth + 2 * 14, height: notch.height + bodyTop + panelHeight + bodyBottom)
     }
 }
 

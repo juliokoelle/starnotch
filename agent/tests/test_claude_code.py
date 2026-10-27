@@ -127,8 +127,28 @@ def test_answer_parsing(fake, tmp_path, monkeypatch):
 
 def test_timeout(fake, tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE", "slow")
-    with pytest.raises(subprocess.TimeoutExpired):
+    with pytest.raises(ClaudeCodeError) as error:
         code(tmp_path, timeout=0.5).json("s", "u", {})
+    assert str(error.value) == "Claude Code took longer than 0.5 s"  # not the command line with the whole schema
+    assert not isinstance(error.value, ClaudeCodeUnavailable)
+    assert list((tmp_path / "brain").glob("starnotch-system-*")) == []
+
+
+def test_retries_are_capped(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_MAX_RETRIES", "10")
+    code(tmp_path).json("s", "u", {})
+    assert fake()[0]["env"]["CLAUDE_CODE_MAX_RETRIES"] == "1"  # an overloaded API fails in seconds, not minutes
+
+
+def test_leftover_system_prompts_are_swept(fake, tmp_path):
+    folder = tmp_path / "brain"
+    folder.mkdir()
+    old, fresh = folder / "starnotch-system-old.md", folder / "starnotch-system-fresh.md"
+    old.write_text("private transcript")
+    fresh.write_text("a call running in another agent")
+    os.utime(old, (1_000_000, 1_000_000))
+    code(tmp_path)
+    assert not old.exists() and fresh.exists()
 
 
 def test_login_is_checked_up_front(fake, tmp_path, monkeypatch):
@@ -175,7 +195,11 @@ def test_agent_falls_back_to_rules(fake, tmp_path, memory_dir, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE", "slow")
     agent.handle({"type": "utterance", "speaker": "Max", "text": "Wir waren doch bei 25 Euro im Monat, oder?"})
     assert out[0]["state"] == "offline" and out[1]["type"] == "contradiction"
+    assert out[0]["message"] == "Claude unavailable, using rules: Claude Code took longer than 0.5 s"
     assert agent.llm is not None  # a slow answer isn't a lost login
+    agent.handle({"type": "utterance", "speaker": "Max", "text": "Weiter"})
+    assert len(fake()) == 1  # resting on the rules: the next batch doesn't wait for Claude again
+    agent.resting_until = 0
     monkeypatch.setenv("FAKE_CLAUDE", "not-logged-in")
     agent.handle({"type": "utterance", "speaker": "Max", "text": "Weiter"})
     assert agent.llm is None

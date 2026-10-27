@@ -121,6 +121,17 @@ def test_reworded_contradiction_is_not_repeated(memory_dir):
     assert [o["type"] for o in out] == ["contradiction"]
 
 
+def test_a_failed_call_rests_claude_for_a_while(memory_dir, monkeypatch):
+    llm = FakeLLM(RuntimeError("overloaded"))
+    agent, out = make(memory_dir, llm)
+    agent.handle(utter("Jonas", "Hallo"))
+    agent.handle(utter("Jonas", "Weiter"))
+    assert len(llm.calls) == 1 and agent.llm is llm  # rules for now, Claude again later
+    monkeypatch.setattr("agent.time.monotonic", lambda: agent.resting_until + 1)
+    agent.handle(utter("Jonas", "Und jetzt?"))
+    assert len(llm.calls) == 2
+
+
 def test_auth_error_stops_calling_claude(memory_dir):
     class AuthenticationError(Exception):
         pass

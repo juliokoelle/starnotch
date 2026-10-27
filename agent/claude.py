@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -32,6 +33,10 @@ BRAIN_FOLDER = Path.home() / "Library" / "Application Support" / "Starnotch" / "
 BILLING_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
                "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 PLAN_LOGINS = ("claude.ai", "oauth_token")  # `claude auth status`: a Pro/Max/Team login, or `claude setup-token`
+# Claude Code retries an overloaded (529) or throttled (429) API for a minute and more; one retry, as the API backend
+# does, fails within seconds, so a live batch falls to the rules instead of waiting out TIMEOUT.
+CODE_RETRIES = "1"
+SYSTEM_FILES = "starnotch-system-*"  # system prompts handed to claude -p; they carry the meeting memory
 
 
 class JSONModel(Protocol):
@@ -100,8 +105,9 @@ def find_claude() -> str | None:
 
 
 def plan_env(environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment for Claude Code without anything that would bill outside the user's plan."""
-    return {k: v for k, v in (os.environ if environ is None else environ).items() if k not in BILLING_ENV}
+    """The environment for Claude Code without anything that would bill outside the user's plan, retries capped."""
+    env = {k: v for k, v in (os.environ if environ is None else environ).items() if k not in BILLING_ENV}
+    return {**env, "CLAUDE_CODE_MAX_RETRIES": CODE_RETRIES}
 
 
 class ClaudeCode:
@@ -122,7 +128,17 @@ class ClaudeCode:
         self.folder = Path(folder or BRAIN_FOLDER)
         self.timeout = timeout
         self.folder.mkdir(parents=True, exist_ok=True)
+        self.sweep()
         self.check_login()
+
+    def sweep(self, older_than: float = 300) -> None:
+        """Removes system prompt files a killed agent left behind (a running call's file is minutes younger)."""
+        for path in self.folder.glob(SYSTEM_FILES):
+            try:
+                if path.stat().st_mtime < time.time() - older_than:
+                    path.unlink()
+            except OSError:
+                pass
 
     def check_login(self) -> None:
         """Raises ClaudeCodeUnavailable unless Claude Code is signed in to a Claude plan (no tokens spent)."""
@@ -155,12 +171,17 @@ class ClaudeCode:
 
     def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000) -> dict[str, Any] | None:
         # max_tokens has no CLI flag; the answers here are short. The prompt goes in on stdin and the system prompt
-        # (it carries the whole meeting memory) through a file, so neither hits the argument length limit.
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix="starnotch-system-") as file:
+        # (it carries the whole meeting memory) through a file, so neither hits the argument length limit. The file
+        # lives in the brain folder, not $TMPDIR, so one a killed agent leaves behind is swept on the next start.
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix=SYSTEM_FILES[:-1],
+                                         dir=self.folder) as file:
             file.write(system)
             file.flush()
-            proc = subprocess.run(self.args(file.name, schema), input=user, capture_output=True, text=True,
-                                  encoding="utf-8", timeout=self.timeout, cwd=self.folder, env=plan_env())
+            try:
+                proc = subprocess.run(self.args(file.name, schema), input=user, capture_output=True, text=True,
+                                      encoding="utf-8", timeout=self.timeout, cwd=self.folder, env=plan_env())
+            except subprocess.TimeoutExpired:  # its text lists the whole command line: not for the notch
+                raise ClaudeCodeError(f"Claude Code took longer than {self.timeout:g} s") from None
         try:
             result = json.loads(proc.stdout)
         except ValueError:

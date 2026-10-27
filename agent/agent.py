@@ -13,6 +13,7 @@ import datetime as dt
 import json
 import queue
 import re
+import signal
 import sys
 import threading
 import time
@@ -24,6 +25,7 @@ import captures as quick
 from memory import Commitment, Line, Meeting, Memory
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
+REST = 60  # seconds on the rules after a failed Claude call: better a rule now than Claude late, batch after batch
 
 SYSTEM = """You listen along to a live meeting and compare it with the team's meeting memory below.
 Report, as JSON, only what helps the people in the meeting right now:
@@ -167,6 +169,7 @@ class Agent:
         self.reported: set[str] = set()
         self.reported_text: list[str] = []
         self.warned = False
+        self.resting_until = 0.0  # time.monotonic() until which Claude isn't asked
 
     # Commands
 
@@ -243,7 +246,7 @@ class Agent:
         if not question.strip():
             return {"type": "error", "message": "ask: empty question"}
         result = None
-        if self.llm is not None:
+        if self._thinking():
             try:
                 result = self.llm.json(ASK_SYSTEM.format(memory=self.context()), question, ASK_SCHEMA, 2000)
             except Exception as error:
@@ -294,7 +297,7 @@ class Agent:
         before = self.live[-WINDOW:]
         self.live += new
         result = None
-        if self.llm is not None:
+        if self._thinking():
             try:
                 result = self.llm.json(SYSTEM.format(memory=self.context()),
                                        self._analysis_prompt(before, new), ANALYSIS_SCHEMA)
@@ -374,9 +377,14 @@ class Agent:
     def _source(meeting: Meeting) -> dict[str, Any]:
         return {"meeting": meeting.title or meeting.id, "meeting_id": meeting.id, "date": meeting.date}
 
+    def _thinking(self) -> bool:
+        return self.llm is not None and time.monotonic() >= self.resting_until
+
     def _warn(self, error: Exception) -> None:
         if type(error).__name__ in ("AuthenticationError", "PermissionDeniedError", "TypeError", "ClaudeCodeUnavailable"):
             self.llm = None  # no or bad credentials: stop waiting on Claude for every line
+        else:  # slow, overloaded or throttled: the rules for a while, then Claude again
+            self.resting_until = time.monotonic() + REST
         if not self.warned:
             self.emit({"type": "status", "state": "offline", "message": f"Claude unavailable, using rules: {error}"})
             self.warned = True
@@ -503,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="answer questions typed into quick capture as they arrive")
     args = parser.parse_args(argv)
 
+    # The app ends a meeting with SIGTERM; as an exception it lets a running Claude call clean up its prompt file.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
     emit = make_emit(sys.stdout)
     memory = Memory(args.memory)
     brain, llm = "rules", None

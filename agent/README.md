@@ -56,8 +56,11 @@ system prompt comes from a file (`--system-prompt-file`), the prompt on stdin, t
 validated against `--json-schema`. That is about 1,100 tokens of Claude Code's own on top of our prompt (a plain
 `claude -p` loads about 220,000 here); a live analysis of the demo meetings reads about 3,000. `--bare` would trim
 further but reads only `ANTHROPIC_API_KEY`, never the plan login, so it isn't used. A call that takes longer than
-30 seconds, fails or is refused falls back to rules for those lines; a lost login switches the rest of the session
-to rules. stderr logs each call's tokens and duration.
+30 seconds, fails or is refused falls back to rules for those lines, and the next minute stays on rules before
+Claude is asked again; a lost login switches the rest of the session to rules. Claude Code's own retries are capped
+at one (`CLAUDE_CODE_MAX_RETRIES=1`), so an overloaded or throttled API fails in seconds rather than after the
+timeout. The system prompt file sits in the brain folder and is deleted after the call (also when the app ends the
+agent with SIGTERM; one left by a hard kill is swept on the next start). stderr logs each call's tokens and duration.
 
 ## Demo
 

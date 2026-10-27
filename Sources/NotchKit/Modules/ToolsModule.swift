@@ -235,9 +235,6 @@ final class ToolsModule: NotchModule {
     var ambientPriority: Int { timerActive ? 25 : 0 }
     var needsAttention: Bool { timerActive }
 
-    var bodyHeight: CGFloat { 310 }
-    var bodyWidth: CGFloat { NotchLayout.minExpandedWidth }
-
     func leadingEar(peek: Bool) -> AnyView {
         AnyView(TimelineView(.periodic(from: .now, by: 1)) { context in
             if let face = self.face(at: context.date) {

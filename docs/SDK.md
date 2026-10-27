@@ -125,7 +125,7 @@ A module is a class adopting `NotchModule` (`Sources/NotchKit/Modules/NotchModul
 | `ambientPriority` | How much it wants the ears at rest (dictation 40, a meeting soon 30, agents at work 20, music 15) |
 | `leadingEar(peek:)`, `trailingEar(peek:)` | Beside the hardware notch, 24 pt wide at rest |
 | `peekLine()` | One line under the notch on hover |
-| `body()`, `bodyHeight` | The expanded panel |
+| `body()` | The expanded panel: one size for every tab (`NotchLayout.expandedWidth` by `NotchLayout.panelHeight`); fill it and scroll what is longer |
 | `primaryAction()`, `handleKey(_:)`, `handleBack()` | Return, arrow keys, Escape |
 | `setExpanded(_:)` | Start or stop expensive work |
 

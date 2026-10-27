@@ -267,24 +267,6 @@ final class AgendaModule: NotchModule {
         return next.start.timeIntervalSince(now) <= 5 * 60 && next.end > now
     }
 
-    /// Variant A: the band above the meeting and prep cards. Variant B sizes to its content:
-    /// header, the band (one row per lane), and the agenda list or the briefing, whichever is taller.
-    var bodyHeight: CGFloat {
-        guard variant == .b else { return 400 }
-        switch span {
-        case .week: return 300
-        case .month: return min(NotchLayout.maxBodyHeight, 32 + 8 + 22 + CGFloat(spanDays.count / 7) * 40 + 24)
-        case .day: break
-        }
-        let list = AgendaList.height(module: self, now: viewNow(now)) + 20
-        let lower = showsDetail ? max(236, list) : list
-        return min(NotchLayout.maxBodyHeight, 32 + 8 + DayBand.height(lanes: laneCount) + 16 + 8 + lower)
-    }
-
-    /// Compact (the agenda's width) until a detail opens; then the full panel.
-    /// The full width: the header carries the day, the arrows, Day/Week/Month and the week strip.
-    var bodyWidth: CGFloat { NotchLayout.expandedWidth }
-
     var holdsOpen: Bool { selectedID != nil }
 
     func handleBack() -> Bool {
@@ -793,7 +775,19 @@ private struct AgendaBodyB: View {
 
                 HStack(alignment: .top, spacing: 10) {
                     NotchCard(padding: 10) {
-                        AgendaList(module: module, now: now)
+                        // A full day scrolls inside the card. It opens on the now line (or the
+                        // open event) and follows the selection when ↑↓ walk the list.
+                        ScrollViewReader { proxy in
+                            ScrollView(.vertical) {
+                                AgendaList(module: module, now: now)
+                            }
+                            .scrollIndicators(.never)
+                            .onAppear { proxy.scrollTo(module.selected?.id ?? "now", anchor: .center) }
+                            .onChange(of: module.selected?.id) { _, id in
+                                guard let id else { return }
+                                withAnimation(Theme.snappy) { proxy.scrollTo(id) }
+                            }
+                        }
                     }
                     .frame(width: module.showsDetail ? 256 : nil)
 
@@ -871,7 +865,7 @@ private struct WeekView: View {
                                 .padding(.horizontal, isToday ? 5 : 0)
                                 .background { if isToday { Capsule().fill(Theme.accent) } }
                         }
-                        ForEach(events.prefix(5)) { event in
+                        ForEach(events.prefix(4)) { event in
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(TimeText.clock(event.start)).font(Theme.font(9.5).monospacedDigit()).foregroundStyle(Theme.textTertiary)
                                 Text(event.title).font(Theme.font(10.5, .medium)).foregroundStyle(Theme.textBody).lineLimit(2)
@@ -880,8 +874,8 @@ private struct WeekView: View {
                             .overlay(alignment: .leading) { Rectangle().fill(event.calendar.color).frame(width: 2) }
                             .opacity(event.end <= now ? 0.5 : 1)
                         }
-                        if events.count > 5 {
-                            Text("+\(events.count - 5)").font(Theme.font(10)).foregroundStyle(Theme.textTertiary)
+                        if events.count > 4 {
+                            Text("+\(events.count - 4)").font(Theme.font(10)).foregroundStyle(Theme.textTertiary)
                         }
                         Spacer(minLength: 0)
                     }
@@ -893,19 +887,27 @@ private struct WeekView: View {
                 .buttonStyle(PressScale())
             }
         }
-        .frame(height: 248)
+        .frame(maxHeight: .infinity)
     }
 }
 
 /// The month as a grid, Monday first: a dot per meeting (up to three); a click opens the day.
+/// The rows share the panel's height, so five or six weeks fit without scrolling.
 private struct MonthView: View {
     let module: AgendaModule
     let now: Date
     private let letters = ["M", "T", "W", "T", "F", "S", "S"]
 
     var body: some View {
+        GeometryReader { proxy in
+            let weeks = max(1, module.spanDays.count / 7)
+            grid(cell: min(44, max(26, (proxy.size.height - 22 - CGFloat(weeks - 1) * 4) / CGFloat(weeks))))
+        }
+    }
+
+    private func grid(cell: CGFloat) -> some View {
         let month = Calendar.current.component(.month, from: module.shownDate)
-        VStack(spacing: 4) {
+        return VStack(spacing: 4) {
             HStack(spacing: 4) {
                 ForEach(0..<7, id: \.self) { index in
                     Text(letters[index]).font(Theme.font(10, .medium)).foregroundStyle(Theme.textTertiary).frame(maxWidth: .infinity)
@@ -932,7 +934,7 @@ private struct MonthView: View {
                             .frame(height: 4)
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 36)
+                        .frame(height: cell)
                         .background(Theme.card.opacity(inMonth ? 1 : 0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .contentShape(Rectangle())
                     }
@@ -1073,18 +1075,6 @@ private struct AgendaList: View {
     let module: AgendaModule
     let now: Date
 
-    /// The list's height, for the panel: events 24, free stretches 20, the now line 12, 1 between.
-    static func height(module: AgendaModule, now: Date) -> CGFloat {
-        let rows = AgendaList(module: module, now: now).rows
-        return rows.reduce(0) { total, row in
-            switch row {
-            case .event: total + 25
-            case .gap: total + 21
-            case .now: total + 13
-            }
-        }
-    }
-
     /// Next to the briefing the list is narrow: durations only.
     var narrow: Bool { module.showsDetail }
 
@@ -1122,29 +1112,32 @@ private struct AgendaList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             ForEach(rows) { row in
-                switch row {
-                case .event(let event): eventRow(event)
-                case .gap(let gap):
-                    HStack(spacing: 8) {
-                        Text(TimeText.clockMinutes(gap.start)).frame(width: 36, alignment: .leading)
-                        Rectangle().fill(Color.white.opacity(0.08)).frame(width: 2.5, height: 10)
-                        Text("\(DayGaps.label(gap)) · \(DayGaps.duration(gap.minutes))")
+                Group {
+                    switch row {
+                    case .event(let event): eventRow(event)
+                    case .gap(let gap):
+                        HStack(spacing: 8) {
+                            Text(TimeText.clockMinutes(gap.start)).frame(width: 36, alignment: .leading)
+                            Rectangle().fill(Color.white.opacity(0.08)).frame(width: 2.5, height: 10)
+                            Text("\(DayGaps.label(gap)) · \(DayGaps.duration(gap.minutes))")
+                        }
+                        .font(Theme.font(11).monospacedDigit())
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.horizontal, 6)
+                        .frame(height: 20)
+                    case .now:
+                        HStack(spacing: 6) {
+                            Text(TimeText.clock(now)).font(Theme.font(10.5, .semibold).monospacedDigit()).foregroundStyle(Theme.accent)
+                                .frame(width: 36, alignment: .leading)
+                            Circle().fill(Theme.accent).frame(width: 5, height: 5)
+                            Rectangle().fill(Theme.accent.opacity(0.7)).frame(height: 1)
+                        }
+                        .shadow(color: Theme.accent.opacity(0.8), radius: 3)
+                        .padding(.horizontal, 6)
+                        .frame(height: 12)
                     }
-                    .font(Theme.font(11).monospacedDigit())
-                    .foregroundStyle(Theme.textTertiary)
-                    .padding(.horizontal, 6)
-                    .frame(height: 20)
-                case .now:
-                    HStack(spacing: 6) {
-                        Text(TimeText.clock(now)).font(Theme.font(10.5, .semibold).monospacedDigit()).foregroundStyle(Theme.accent)
-                            .frame(width: 36, alignment: .leading)
-                        Circle().fill(Theme.accent).frame(width: 5, height: 5)
-                        Rectangle().fill(Theme.accent.opacity(0.7)).frame(height: 1)
-                    }
-                    .shadow(color: Theme.accent.opacity(0.8), radius: 3)
-                    .padding(.horizontal, 6)
-                    .frame(height: 12)
                 }
+                .id(row.id)
             }
         }
     }
@@ -1197,7 +1190,7 @@ private struct Briefing: View {
     let now: Date
 
     var body: some View {
-        NotchCard(padding: 14) {
+        NotchCard(padding: 12) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1222,23 +1215,25 @@ private struct Briefing: View {
                         .lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    Circle().fill(event.calendar.color).frame(width: 7, height: 7).padding(.top, 6)
-                        .help(event.calendar.rawValue)
-                }
-                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1).padding(.vertical, 12)
-                PrepList(module: module, event: event, avatarSize: 30, maxPeople: 3, maxItems: 4, noteLines: 2)
-                Spacer(minLength: 8)
-                HStack {
-                    if module.hasNote(for: event) {
-                        QuietLink(title: "Open note") { module.openNote(for: event) }
-                    }
-                    Spacer()
-                    Text("↑↓ events").font(Theme.font(11)).foregroundStyle(Theme.textTertiary)
+                    // Join stays in reach at the top; the prep below scrolls in the fixed panel.
                     if let link = event.link, event.end > now {
                         JoinPill(link: link) { module.open(event) }
+                    } else {
+                        Circle().fill(event.calendar.color).frame(width: 7, height: 7).padding(.top, 6)
+                            .help(event.calendar.rawValue)
                     }
                 }
-                .frame(height: 26)
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1).padding(.vertical, 10)
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        PrepList(module: module, event: event, avatarSize: 30, maxPeople: 3, maxItems: 4, noteLines: 2)
+                        if module.hasNote(for: event) {
+                            QuietLink(title: "Open note") { module.openNote(for: event) }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollIndicators(.never)
             }
         }
     }

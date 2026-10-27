@@ -298,7 +298,6 @@ final class MeetingModule: NotchModule {
     var count: Int? { entries.isEmpty ? nil : entries.count }
     var ambientPriority: Int { isRunning ? 35 : 0 }
     var needsAttention: Bool { isRunning }
-    var bodyHeight: CGFloat { 380 }
 
     func handleBack() -> Bool {
         guard focused != nil else { return false }

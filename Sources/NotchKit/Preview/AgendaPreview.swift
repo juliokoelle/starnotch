@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Recordings of the calendar (agenda with the day band) and Today with sample data:
 ///
-///     --preview cal | cal:compact | cal:peek | cal:keys | cal:note
+///     --preview cal | cal:compact | cal:peek | cal:keys | cal:note | cal:week | cal:month
 ///     --preview today | today:compact | today:peek | today:hover
 ///     --preview agenda-tour    both, about 26 s, then quits
 ///
@@ -56,6 +56,10 @@ final class AgendaPreview {
             }
         case "compact": break
         case "peek": notch.tourPeek()
+        case "week", "month":
+            notch.expand(module, pinned: true)
+            await pause(0.6)
+            agenda.setSpan(state == "week" ? .week : .month)
         case "keys":
             notch.expand(module, pinned: true)
             await pause(0.6)

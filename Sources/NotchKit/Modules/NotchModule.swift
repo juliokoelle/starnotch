@@ -16,11 +16,6 @@ protocol NotchModule: AnyObject {
     /// 0 = not at all, higher wins. Dictation 40, meeting soon 30, agents at work 20,
     /// music 15, a failed loop 10.
     var ambientPriority: Int { get }
-    /// Height of the expanded body.
-    var bodyHeight: CGFloat { get }
-    /// Width of the expanded panel: modules ask for what their content needs and the island
-    /// animates between sizes. Default `NotchLayout.expandedWidth`, the largest.
-    var bodyWidth: CGFloat { get }
 
     /// Left of the hardware notch, at rest and in the peek. `peek` is true while hovered.
     func leadingEar(peek: Bool) -> AnyView
@@ -28,7 +23,8 @@ protocol NotchModule: AnyObject {
     func trailingEar(peek: Bool) -> AnyView
     /// The one line under the notch while hovered.
     func peekLine() -> AnyView
-    /// The expanded panel body.
+    /// The expanded panel body. Every tab gets the same size (`NotchLayout.expandedWidth` by
+    /// `NotchLayout.panelHeight`); the body fills it and scrolls what is longer.
     func body() -> AnyView
     /// Return key, or selection from the wheel.
     func primaryAction()
@@ -53,7 +49,6 @@ extension NotchModule {
     func setExpanded(_ expanded: Bool) {}
     func handleBack() -> Bool { false }
     var compactEarWidth: CGFloat { NotchLayout.earWidth }
-    var bodyWidth: CGFloat { NotchLayout.minExpandedWidth }
     func handleKey(_ press: KeyPress) -> Bool { false }
     var holdsOpen: Bool { false }
     var needsAttention: Bool { false }

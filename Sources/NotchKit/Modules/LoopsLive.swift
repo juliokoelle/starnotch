@@ -272,7 +272,12 @@ struct LoopsCard: View {
                     if module.loops.isEmpty {
                         LoopsEmpty().transition(.opacity)
                     } else if module.loopsAsTimeline {
-                        LoopTimelineView(module: module).transition(.blurSlide(x: 14))
+                        // More loops than the panel holds scroll; the axis follows the last row.
+                        ScrollView(.vertical) {
+                            LoopTimelineView(module: module)
+                        }
+                        .scrollIndicators(.never)
+                        .transition(.blurSlide(x: 14))
                     } else {
                         // Scrolls inside the card; a soft fade says there is more below.
                         ScrollView(.vertical) {

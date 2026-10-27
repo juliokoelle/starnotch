@@ -143,8 +143,6 @@ final class NowPlayingModule: NotchModule {
     /// Beside the notch while music plays; agents at work keep the ears (they show a small
     /// equalizer next to their count instead).
     var ambientPriority: Int { isPlaying && track != nil ? 15 : 0 }
-    /// The output list floats over the card, so the island keeps its height.
-    var bodyHeight: CGFloat { 156 }
 
     func setExpanded(_ expanded: Bool) {
         if !expanded { showsOutputs = false }

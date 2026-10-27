@@ -168,7 +168,6 @@ final class SystemModule: NotchModule {
         case .critical: return 35
         }
     }
-    var bodyHeight: CGFloat { 312 + 44 }
 
     func setExpanded(_ expanded: Bool) {
         self.expanded = expanded

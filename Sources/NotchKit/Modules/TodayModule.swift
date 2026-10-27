@@ -134,7 +134,6 @@ final class TodayModule: NotchModule {
 
     var count: Int? { tasks.isEmpty ? nil : tasks.count }
     var ambientPriority: Int { ambientOverride }
-    var bodyHeight: CGFloat { 330 }
 
     func setExpanded(_ expanded: Bool) {
         if expanded { reload() }
@@ -237,38 +236,50 @@ private struct TodayBody: View {
                             Text(module.feed.emptyText)
                                 .font(Theme.font(12.5)).foregroundStyle(Theme.textSecondary).padding(.horizontal, 6)
                         }
-                        ForEach(module.tasks.prefix(4)) { item in
-                            ItemRow(module: module, item: item)
-                                .transition(.blurSlide(y: -4, scale: 0.98))
+                        // The list scrolls inside the panel instead of stopping at four.
+                        ScrollView(.vertical) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(module.tasks) { item in
+                                    ItemRow(module: module, item: item)
+                                        .transition(.blurSlide(y: -4, scale: 0.98))
+                                }
+                            }
                         }
+                        .scrollIndicators(.never)
                     }
                 }
             }
             .frame(maxWidth: .infinity)
 
-            VStack(alignment: .leading, spacing: 12) {
-                if let brief = module.feed.brief { BriefCard(brief: brief) }
-                VStack(alignment: .leading, spacing: 4) {
-                    SectionLabel(title: module.feed.followUpTitle)
-                    ForEach(module.followUps) { item in
-                        ItemRow(module: module, item: item, compact: true)
-                            .transition(.blurSlide(y: -4, scale: 0.98))
-                    }
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    if module.confirmations.isEmpty {
-                        if let link = module.feed.confirmationsLink {
-                            LinkRow(title: link.title, detail: link.detail) { module.open(link) }
+            VStack(alignment: .leading, spacing: 8) {
+                // Brief, follow-ups and confirmations scroll; the footer stays put.
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let brief = module.feed.brief { BriefCard(brief: brief) }
+                        VStack(alignment: .leading, spacing: 4) {
+                            SectionLabel(title: module.feed.followUpTitle)
+                            ForEach(module.followUps) { item in
+                                ItemRow(module: module, item: item, compact: true)
+                                    .transition(.blurSlide(y: -4, scale: 0.98))
+                            }
                         }
-                    } else {
-                        SectionLabel(title: module.feed.confirmTitle, trailing: "\(module.confirmations.count)")
-                        ForEach(module.confirmations.prefix(2)) { item in
-                            ItemRow(module: module, item: item, compact: true)
-                                .transition(.blurSlide(y: -4, scale: 0.98))
+                        VStack(alignment: .leading, spacing: 4) {
+                            if module.confirmations.isEmpty {
+                                if let link = module.feed.confirmationsLink {
+                                    LinkRow(title: link.title, detail: link.detail) { module.open(link) }
+                                }
+                            } else {
+                                SectionLabel(title: module.feed.confirmTitle, trailing: "\(module.confirmations.count)")
+                                ForEach(module.confirmations.prefix(2)) { item in
+                                    ItemRow(module: module, item: item, compact: true)
+                                        .transition(.blurSlide(y: -4, scale: 0.98))
+                                }
+                            }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Spacer(minLength: 0)
+                .scrollIndicators(.never)
                 Footer(module: module)
             }
             .padding(.horizontal, 4)

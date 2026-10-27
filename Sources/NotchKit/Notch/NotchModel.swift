@@ -93,18 +93,18 @@ final class NotchModel {
 
     var layout: NotchLayout {
         NotchLayout(presentation: presentation, notch: notchSize,
-                    bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? current.bodyHeight,
-                    bodyWidth: approvals?.current != nil ? NotchLayout.expandedWidth : current.bodyWidth,
+                    bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? NotchLayout.panelHeight,
                     earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom)
     }
 }
 
 /// Sizes of the island per presentation. The width includes the two concave flares at the top.
 struct NotchLayout: Equatable {
+    /// Every tab opens in one panel size, so switching tabs never resizes the island; a module
+    /// fills it, and what is longer scrolls inside. Only an approval card asks for less.
     static let expandedWidth: CGFloat = 640
-    /// The narrowest panel: the module tabs and the status beside the notch still fit.
-    static let minExpandedWidth: CGFloat = 460
-    static let maxBodyHeight: CGFloat = 410
+    /// The middle between the old Agents (about 180) and Calendar (about 386) panels.
+    static let panelHeight: CGFloat = 280
     /// Compact ears stay inside the gap between the hardware notch and the first menu extra
     /// (about 30 pt on a 14" MacBook Pro: measured 21.10.); with the 6 pt flare, 24 pt fits.
     static let earWidth: CGFloat = 24
@@ -114,9 +114,8 @@ struct NotchLayout: Equatable {
 
     var presentation: NotchModel.Presentation
     var notch: CGSize
-    var bodyHeight: CGFloat
-    /// The module's panel width (clamped to what the header and the screen allow).
-    var bodyWidth: CGFloat = NotchLayout.expandedWidth
+    /// The panel body: `panelHeight` for every tab, less for an approval card.
+    var bodyHeight: CGFloat = NotchLayout.panelHeight
     /// Width of each ear at rest (the ear module may ask for more than the default).
     var earWidth: CGFloat = NotchLayout.earWidth
     /// What the island may take of the menu bar beside the notch, per side, flare included.
@@ -147,7 +146,7 @@ struct NotchLayout: Equatable {
         case .closed: notch.width
         case .compact: notch.width + 2 * min(earWidth, besideNotch)
         case .peek, .sneak: notch.width + 2 * besideNotch
-        case .expanded: min(Self.expandedWidth, max(Self.minExpandedWidth, bodyWidth))
+        case .expanded: Self.expandedWidth
         case .capture: 520
         }
     }
@@ -160,7 +159,7 @@ struct NotchLayout: Equatable {
         case .closed, .compact: notch.height
         case .peek: notch.height + 40
         case .sneak: notch.height + 36
-        case .expanded: notch.height + Self.bodyTop + min(bodyHeight, Self.maxBodyHeight) + Self.bodyBottom
+        case .expanded: notch.height + Self.bodyTop + min(bodyHeight, Self.panelHeight) + Self.bodyBottom
         case .capture: notch.height + 8 + 44 + 9 + 24 + 14
         }
     }
@@ -169,7 +168,7 @@ struct NotchLayout: Equatable {
 
     /// Largest island, for the panel frame.
     static func maxSize(notch: CGSize) -> CGSize {
-        CGSize(width: expandedWidth + 2 * 14, height: notch.height + bodyTop + maxBodyHeight + bodyBottom)
+        CGSize(width: expandedWidth + 2 * 14, height: notch.height + bodyTop + panelHeight + bodyBottom)
     }
 }
 

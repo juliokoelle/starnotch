@@ -656,28 +656,6 @@ final class AgentsModule: NotchModule {
         return failedLoops.isEmpty ? 0 : 10
     }
 
-    /// Two columns (the session and the list beside it) need the full width.
-    var bodyWidth: CGFloat { NotchLayout.expandedWidth }
-
-    var bodyHeight: CGFloat {
-        if subagentID != nil { return 250 }
-        if let id = detailID {
-            let subs = snapshot.agents.first { $0.id == id }?.subagents.count ?? 0
-            return subs == 0 ? 236 : min(330, 250 + CGFloat(subs) * 30)
-        }
-        guard showsLoops else {
-            // Chips and nested subagent rows; the side card scrolls beyond.
-            let chips = others.count
-            let subs = snapshot.agents.reduce(0) { $0 + $1.subagents.count }
-            let rows = CGFloat(chips) * 46 + CGFloat(subs) * 32 + (main?.subagents.isEmpty == false ? 22 : 0)
-            return min(330, max(180, rows + 76))
-        }
-        if selectedLoop != nil { return 236 }
-        if snapshot.loops.isEmpty { return 270 }  // the explanation of how to get one
-        if loopsAsTimeline { return CGFloat(snapshot.loops.count) * 28 + 74 }
-        return min(330, CGFloat(snapshot.loops.count) * 40 + 56)
-    }
-
     func leadingEar(peek: Bool) -> AnyView {
         AnyView(AgentsLeadingEar(module: self, peek: peek))
     }

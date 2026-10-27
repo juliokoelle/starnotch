@@ -375,7 +375,7 @@ class Agent:
         return {"meeting": meeting.title or meeting.id, "meeting_id": meeting.id, "date": meeting.date}
 
     def _warn(self, error: Exception) -> None:
-        if type(error).__name__ in ("AuthenticationError", "PermissionDeniedError", "TypeError"):
+        if type(error).__name__ in ("AuthenticationError", "PermissionDeniedError", "TypeError", "ClaudeCodeUnavailable"):
             self.llm = None  # no or bad credentials: stop waiting on Claude for every line
         if not self.warned:
             self.emit({"type": "status", "state": "offline", "message": f"Claude unavailable, using rules: {error}"})
@@ -496,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Starnotch meeting agent (JSON lines on stdin/stdout)")
     parser.add_argument("--memory", help="folder of meeting JSON files (default: ~/Library/Application Support/Starnotch/memory)")
     parser.add_argument("--today", help="date to resolve 'bis Freitag' against, YYYY-MM-DD (default: today)")
-    parser.add_argument("--offline", action="store_true", help="no Claude, only the built-in rules")
+    parser.add_argument("--offline", action="store_true", help="no Claude, only the built-in rules (as STARNOTCH_BRAIN=rules)")
     parser.add_argument("--captures", default=str(quick.QUEUE),
                         help="Starnotch's quick-capture queue (default: capture-queue.jsonl in its folder); '' to ignore")
     parser.add_argument("--watch-captures", action="store_true",
@@ -505,19 +505,18 @@ def main(argv: list[str] | None = None) -> int:
 
     emit = make_emit(sys.stdout)
     memory = Memory(args.memory)
-    llm = None
+    brain, llm = "rules", None
     if not args.offline:
-        from claude import Claude
+        from claude import make_brain
 
-        try:
-            llm = Claude()
-        except Exception as error:  # no credentials: keep going on rules
-            emit({"type": "status", "state": "offline", "message": f"Claude unavailable, using rules: {error}"})
+        brain, llm, why = make_brain()
+        if why:  # no login or no key: keep going on rules
+            emit({"type": "status", "state": "offline", "message": why})
     today = dt.date.fromisoformat(args.today) if args.today else None
     captures = Path(args.captures).expanduser() if args.captures else None
     agent = Agent(memory, llm, emit, today, captures)
     emit({"type": "ready", "meetings": len(memory.meetings), "memory": str(memory.folder),
-          "model": getattr(llm, "model", None), "errors": memory.errors})
+          "brain": brain, "model": getattr(llm, "model", None), "errors": memory.errors})
     run(agent, sys.stdin, captures if args.watch_captures else None)
     return 0
 

@@ -75,4 +75,5 @@ def test_cli_offline_demo_meetings():
     assert proc.returncode == 0, proc.stderr
     lines = [json.loads(line) for line in proc.stdout.splitlines()]
     assert lines[0]["type"] == "ready" and lines[0]["meetings"] == 2 and lines[0]["model"] is None
+    assert lines[0]["brain"] == "rules"
     assert lines[1]["type"] == "prep"

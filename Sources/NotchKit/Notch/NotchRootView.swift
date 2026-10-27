@@ -95,18 +95,9 @@ struct NotchRootView: View {
                 let roomyEars = isPeek && layout.besideNotch >= 56
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
-                        // Whatever the ear shows (microphone, GPU, music), the main character stays
-                        // beside it: you see what you pull out of the notch.
-                        HStack(spacing: 4) {
-                            if !ears.earShowsFigure, !model.watching, let cast = model.cast {
-                                AvatarView(character: cast.main, mood: .idle, height: 18,
-                                           colorway: cast.colorway, sink: 0.25, emergeOnAppear: false)
-                                    .frame(height: 32, alignment: .bottom)
-                            }
-                            ears.leadingEar(peek: roomyEars)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .clipped()
+                        ears.leadingEar(peek: roomyEars)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
                         Color.clear.frame(width: notch.width)
                         ears.trailingEar(peek: roomyEars)
                             .frame(maxWidth: .infinity)

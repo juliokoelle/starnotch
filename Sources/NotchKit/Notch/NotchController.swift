@@ -99,8 +99,7 @@ final class NotchController {
             onKey: { [weak self] in self?.handleKey($0) ?? .ignored },
             onCaptureSend: { [weak self] in self?.sendCapture() },
             onCaptureMic: { [weak self] in self?.toggleCaptureMic() },
-            onCaptureEvent: { [weak self] in self?.createCaptureEvent() },
-            onFigurePull: { [weak self] in self?.onFigurePull?() }
+            onCaptureEvent: { [weak self] in self?.createCaptureEvent() }
         )
         let hosting = NSHostingView(rootView: root)
         hosting.safeAreaRegions = []
@@ -195,8 +194,6 @@ final class NotchController {
     private var dragBaseline = NSPasteboard(name: .drag).changeCount
     /// Files dragged onto the closed notch: the app opens the shelf.
     var onFileDrag: (() -> Void)?
-    /// The island pulled down while it isn't open: the main character comes out of the notch.
-    var onFigurePull: (() -> Void)?
 
     /// A file drag is under way (from Finder, the desktop, a browser download …).
     private func isFileDrag() -> Bool {

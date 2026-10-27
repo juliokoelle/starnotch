@@ -30,6 +30,8 @@ final class WheelController {
 
     /// A press on the notch released before the hold duration: a plain click.
     var onTapNotch: (() -> Void)?
+    /// A press on the notch pulled down: the main character comes out.
+    var onPullDown: (() -> Void)?
     var onWillOpen: (() -> Void)?
     var onDidClose: (() -> Void)?
     /// A module slot was chosen.
@@ -77,9 +79,15 @@ final class WheelController {
             onTapNotch?()
             return false
         case (.leftMouseDragged, .pressing):
-            // Pulled away before the wheel opens: a drag (the figure out of the notch), not a hold or a tap.
+            // Pulled down out of the notch, in any state: the main character comes out. Moved
+            // any other way before the wheel opens: a drag, not a hold or a tap.
             let mouse = NSEvent.mouseLocation
-            if hypot(mouse.x - pressStart.x, mouse.y - pressStart.y) > 8 { cancelPress() }
+            if pressStart.y - mouse.y > 24 {
+                cancelPress()
+                onPullDown?()
+            } else if abs(mouse.x - pressStart.x) > 12 || mouse.y - pressStart.y > 8 {
+                cancelPress()
+            }
             return false
         case (.leftMouseDragged, .holding), (.mouseMoved, .clicking):
             updateHighlight()

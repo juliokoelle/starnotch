@@ -13,11 +13,9 @@ struct NotchRootView: View {
     var onCaptureSend: () -> Void = {}
     var onCaptureMic: () -> Void = {}
     var onCaptureEvent: () -> Void = {}
-    var onFigurePull: () -> Void = {}
 
     @Namespace private var namespace
     @FocusState private var focused: Bool
-    @State private var pulled = false
 
     var body: some View {
         let layout = model.layout
@@ -36,15 +34,6 @@ struct NotchRootView: View {
                 .environment(\.figuresHidden, model.watching)
                 .contentShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
                 .onTapGesture { if model.interaction != .expanded { onTapIsland() } }
-                // Pulled down while closed, peeking or dictating (whatever the ears show): the
-                // main character comes out and follows the pointer. Open, the figure itself is the handle.
-                .simultaneousGesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
-                    .onChanged { value in
-                        guard !pulled, model.interaction != .expanded, value.translation.height > 24 else { return }
-                        pulled = true
-                        onFigurePull()
-                    }
-                    .onEnded { _ in pulled = false })
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

@@ -35,9 +35,10 @@ final class MeetingCompanion: NSObject {
 
     func open() {
         guard panel == nil else { return }
-        let panel = NSPanel(contentRect: CGRect(origin: savedOrigin(), size: Self.size),
-                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.level = .floating
+        let panel = FreePanel(contentRect: CGRect(origin: savedOrigin(), size: Self.size),
+                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        // Above the menu bar, so she can be carried all the way up into the notch.
+        panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -159,6 +160,11 @@ final class MeetingCompanion: NSObject {
         }
         UserDefaults.standard.set([Double(frame.origin.x), Double(frame.origin.y)], forKey: Self.originKey)
     }
+}
+
+/// A panel macOS doesn't push back below the menu bar.
+private final class FreePanel: NSPanel {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 private struct CompanionView: View {

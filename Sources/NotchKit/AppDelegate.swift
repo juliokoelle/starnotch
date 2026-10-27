@@ -170,7 +170,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.notch.collapse()
         }
         agents.onFigurePull = pull
-        notch.onFigurePull = pull
         meeting.onListening = { companion.listening = $0 }
         meeting.onCard = { [weak self] entry in
             // Popped out, the bubble beside the character takes the sneak's place.
@@ -188,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         wheel = WheelController(state: state, switcher: AppSwitcher())
         wheel.onTapNotch = { [weak self] in self?.notch.tapNotch() }
+        wheel.onPullDown = pull
         wheel.onWillOpen = { [weak self] in self?.notch.wheelWillOpen() }
         wheel.onDidClose = { [weak self] in self?.notch.wheelDidClose() }
         wheel.onSelectModule = { [weak self] kind in self?.notch.show(kind) }

@@ -25,7 +25,8 @@ final class ApprovalCenter {
     /// A status hook of another tool came in on the same socket (Cursor, Copilot CLI, Gemini CLI, opencode).
     @ObservationIgnored var onHookEvent: ((Data) -> Void)?
     @ObservationIgnored private var server: ApprovalServer?
-    static let timeout: TimeInterval = 60
+    /// "Allow for session" for Cursor and Copilot CLI, whose hooks can't carry a rule.
+    @ObservationIgnored private var allowances = SessionAllowances()
 
     static var socketPath: String { Brand.supportFolder.appending(path: "approvals.sock").path }
 
@@ -53,6 +54,11 @@ final class ApprovalCenter {
     }
 
     private func receive(_ request: ApprovalRequest, reply: @escaping @Sendable (ApprovalDecision?) -> Void) {
+        // Allowed for this session from the notch before: answered at once, no card.
+        if allowances.covers(request) {
+            reply(.allowOnce)
+            return
+        }
         let wasEmpty = queue.isEmpty
         withAnimation(Theme.snappy) { queue.append(Pending(request: request, reply: reply)) }
         onChange?(queue.map(\.request))
@@ -60,7 +66,7 @@ final class ApprovalCenter {
         // Unanswered: Claude Code's own prompt takes over.
         let id = request.id
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.timeout))
+            try? await Task.sleep(for: .seconds(request.timeout))
             self?.expire(id)
         }
     }
@@ -77,6 +83,7 @@ final class ApprovalCenter {
         // A question with answers to pick or type: ↵ alone doesn't pick one.
         if pending.request.asksForAnswer, decision == .allowOnce || decision == .allowSession { return }
         Haptics.confirm()
+        if decision == .allowSession { allowances.allow(pending.request) }
         pending.reply(decision)
         advance()
     }
@@ -242,8 +249,8 @@ struct ApprovalCard: View {
                         button(isQuestion ? "No" : "Deny", key: "esc", style: .quiet) { center.answer(.deny) }
                     }
                     }
-                    Text(isQuestion ? "Unanswered, \(request.tool) hears no answer after \(Int(ApprovalCenter.timeout)) s."
-                         : "Unanswered, \(request.provider == CodexProvider.id ? "Codex" : "the terminal") asks after \(Int(ApprovalCenter.timeout)) s.")
+                    Text(isQuestion ? "Unanswered, \(request.tool) hears no answer after \(Int(request.timeout)) s."
+                         : "Unanswered, \(request.provider == CodexProvider.id ? "Codex" : request.provider == CursorProvider.id ? "Cursor" : "the terminal") asks after \(Int(request.timeout)) s.")
                         .font(Theme.font(10.5)).foregroundStyle(Theme.textTertiary)
                 }
             }

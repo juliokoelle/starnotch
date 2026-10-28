@@ -34,12 +34,16 @@ final class SetupCenter {
             integrations: integrations.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
             bridgeScript: resources?.appending(path: "statusline-bridge.sh"))
         ledger = SetupLedger.load(paths.ledgerFile)
+        // After an update: the hook script and plugin copies that are set up get this build's version.
+        let installed = (paths, ledger)
+        DispatchQueue.global(qos: .utility).async { SetupActions.refreshInstalledCopies(installed.0, ledger: installed.1) }
         // The other agent tools change how those tools ask: off until chosen.
         selected = Set(offered.filter { isAvailable($0) && !isSetUp($0) && !Self.moreAgentItems.contains($0) })
     }
 
     /// Setup items of the tools beyond Claude Code and Codex (strand agents).
-    static let moreAgentItems: Set<SetupItem> = [.cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin]
+    static let moreAgentItems: Set<SetupItem> = [.cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin,
+                                                 .cursorApprovals, .copilotApprovals]
 
     // MARK: What this Mac has
 
@@ -87,6 +91,9 @@ final class SetupCenter {
             case .copilotHooks: previewMoreAgents || CopilotProvider.detect()
             case .geminiHooks: previewMoreAgents || GeminiProvider.detect()
             case .opencodePlugin: previewMoreAgents || OpencodeProvider.detect()
+            // Answering is offered once the tool's status is set up (or right away in recordings).
+            case .cursorApprovals: previewMoreAgents || isSetUp(.cursorHooks) || isSetUp(.cursorApprovals)
+            case .copilotApprovals: previewMoreAgents || isSetUp(.copilotHooks) || isSetUp(.copilotApprovals)
             }
         }
     }
@@ -103,7 +110,7 @@ final class SetupCenter {
         case .mcpServer:
             if paths.claudeBinary == nil && paths.codexBinary == nil { return "The claude or codex command wasn't found." }
             return paths.uvBinary == nil ? "Needs uv: Settings › Meeting agent › Install uv." : nil
-        case .cursorHooks, .copilotHooks, .geminiHooks:
+        case .cursorHooks, .copilotHooks, .geminiHooks, .cursorApprovals, .copilotApprovals:
             return paths.hookScriptSource.map { FileManager.default.fileExists(atPath: $0.path) } == true ? nil : "This build has no hook script."
         case .opencodePlugin:
             return paths.opencodePluginSource.map { FileManager.default.fileExists(atPath: $0.path) } == true ? nil : "This build has no opencode plugin."
@@ -138,7 +145,7 @@ final class SetupCenter {
                 let result: Status
                 switch item {
                 case .claudePlugin, .codexHook, .statusLine, .mcpServer, .shellHook,
-                     .cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin:
+                     .cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin, .cursorApprovals, .copilotApprovals:
                     let outcome = await Task.detached(priority: .userInitiated) { () -> Result<SetupLedger.Entry, Error> in
                         Result {
                             switch item {
@@ -150,6 +157,8 @@ final class SetupCenter {
                             case .copilotHooks: try SetupActions.installCopilotHooks(paths)
                             case .geminiHooks: try SetupActions.installGeminiHooks(paths)
                             case .opencodePlugin: try SetupActions.installOpencodePlugin(paths)
+                            case .cursorApprovals: try SetupActions.installCursorApprovals(paths)
+                            case .copilotApprovals: try SetupActions.installCopilotApprovals(paths)
                             default: try SetupActions.installShellHook(paths)
                             }
                         }
@@ -235,6 +244,8 @@ final class SetupCenter {
                         case .copilotHooks: try SetupActions.removeCopilotHooks(paths)
                         case .geminiHooks: try SetupActions.removeGeminiHooks(paths, entry: entry)
                         case .opencodePlugin: try SetupActions.removeOpencodePlugin(paths)
+                        case .cursorApprovals: try SetupActions.removeCursorApprovals(paths, entry: entry)
+                        case .copilotApprovals: try SetupActions.removeCopilotApprovals(paths)
                         default: break
                         }
                     }
@@ -373,10 +384,12 @@ struct SetupItemRow: View {
         case .calendar: "macOS asks once: your next meeting, its countdown and Join"
         case .musicAutomation: "macOS asks once per player: play, pause and skip"
         case .lidAwake: "Your Mac stays awake with the lid closed while it is plugged in"
-        case .cursorHooks: "Cursor's sessions in the notch; approve its shell and MCP commands there"
-        case .copilotHooks: "Copilot CLI's sessions in the notch; approve its requests there"
+        case .cursorHooks: "Cursor's sessions in the notch"
+        case .copilotHooks: "Copilot CLI's sessions in the notch, and when it waits for you"
         case .geminiHooks: "Gemini CLI's sessions in the notch, and when it waits for you"
         case .opencodePlugin: "opencode's sessions in the notch; approve its requests there"
+        case .cursorApprovals: "Every shell and MCP command asks in the notch first"
+        case .copilotApprovals: "Copilot's requests ask in the notch first"
         }
     }
 }

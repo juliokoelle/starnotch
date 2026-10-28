@@ -81,9 +81,13 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
     /// client, `summary` and `detail` carry the question; the answer is allow (yes) or deny (no).
     public static let mcpProvider = "mcp"
 
-    /// "Allow for session" adds a rule in Claude Code and answers "always" in opencode; the
-    /// other tools' hooks can't carry one.
-    public var supportsSessionRules: Bool { provider == "claude-code" || provider == "opencode" }
+    /// "Allow for session" adds a rule in Claude Code and answers "always" in opencode; for
+    /// Cursor and Copilot CLI the notch keeps it (`SessionAllowances`). Codex can't take one.
+    public var supportsSessionRules: Bool { ["claude-code", "opencode", "cursor", "copilot"].contains(provider) }
+
+    /// How long the card waits for a click. Cursor's and Copilot's hooks run before every call,
+    /// also those the tool would allow on its own, so they wait less.
+    public var timeout: TimeInterval { provider == "cursor" || provider == "copilot" ? 30 : 60 }
 
     /// The session's id in the agents list (Codex ids carry the provider).
     public var agentID: String? {
@@ -207,11 +211,11 @@ extension ApprovalFormat {
         return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
     }
 
-    /// Copilot CLI's permission hook output.
+    /// Copilot CLI's `permissionRequest` output (`behavior`, not preToolUse's `permissionDecision`).
     public static func copilot(_ decision: ApprovalDecision) -> Data {
         let output: [String: Any] = switch decision {
-        case .allowOnce, .allowSession, .answer: ["permissionDecision": "allow"]
-        case .deny: ["permissionDecision": "deny", "permissionDecisionReason": "Denied from the notch."]
+        case .allowOnce, .allowSession, .answer: ["behavior": "allow"]
+        case .deny: ["behavior": "deny", "message": "Denied from the notch."]
         }
         return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
     }
@@ -224,6 +228,31 @@ extension ApprovalFormat {
         case .deny: "reject"
         }
         return Data(#"{"reply":"\#(reply)"}"#.utf8)
+    }
+}
+
+/// "Allow for session" for tools whose hooks can't carry a rule (Cursor, Copilot CLI): the notch
+/// remembers it for that session and answers the same request itself. A shell command is
+/// allowed exactly as it was asked; any other tool as a whole, as Claude Code's fallback rule does.
+public struct SessionAllowances: Equatable, Sendable {
+    static let limit = 200
+    private var keys: [String] = []
+
+    public init() {}
+
+    static func key(_ request: ApprovalRequest) -> String? {
+        guard let session = request.sessionID, ["cursor", "copilot"].contains(request.provider) else { return nil }
+        return [request.provider, session, request.tool, request.tool == "Bash" ? request.detail : ""].joined(separator: "\u{1F}")
+    }
+
+    public mutating func allow(_ request: ApprovalRequest) {
+        guard let key = Self.key(request), !keys.contains(key) else { return }
+        keys.append(key)
+        if keys.count > Self.limit { keys.removeFirst(keys.count - Self.limit) }
+    }
+
+    public func covers(_ request: ApprovalRequest) -> Bool {
+        Self.key(request).map(keys.contains) ?? false
     }
 }
 
@@ -251,7 +280,8 @@ public enum ProviderApprovals {
         case ("copilot", "permissionRequest"), ("copilot", "PermissionRequest"):
             guard let name = fields.string("toolName") ?? fields.string("tool_name") else { return nil }
             tool = name
-            input = fields.jsonObject("toolArgs") ?? fields.object("tool_input") ?? [:]
+            // Copilot CLI 1.0 sends `toolInput` (an object); older builds `toolArgs` (JSON text).
+            input = fields.object("toolInput") ?? fields.jsonObject("toolArgs") ?? fields.object("tool_input") ?? [:]
             session = fields.string("sessionId") ?? fields.string("session_id")
         case ("opencode", "permission.asked"):
             tool = fields.string("permission") ?? "tool"

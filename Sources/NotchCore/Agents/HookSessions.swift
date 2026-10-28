@@ -125,9 +125,13 @@ public struct HookUpdate: Equatable, Sendable {
         case "userpromptsubmitted", "userpromptsubmit": return .prompt(f.string("prompt").map(short))
         case "pretooluse", "posttooluse":
             guard let tool = f.string("toolName") ?? f.string("tool_name") else { return nil }
-            return .tool(step(tool: tool, input: f.jsonObject("toolArgs") ?? f.object("tool_input")))
+            return .tool(step(tool: tool, input: f.jsonObject("toolArgs") ?? f.object("toolInput") ?? f.object("tool_input")))
         case "permissionrequest":
             return .waiting("Approve: " + (f.string("toolName") ?? "a tool"))
+        case "notification":
+            // Copilot's own prompt in its terminal: it waits for you there.
+            guard f.string("notification_type") == "permission_prompt" else { return nil }
+            return .waiting(short(f.string("message") ?? "Copilot asks for permission"))
         case "agentstop", "stop": return .idle(nil)
         case "erroroccurred": return .idle(f.object("error")?["message"] as? String)
         default: return nil
@@ -261,6 +265,8 @@ public struct HookSessions: Equatable, Sendable {
     public static let recentWindow: TimeInterval = 30 * 60
     /// A session whose process still lives stays at most this long.
     public static let liveWindow: TimeInterval = 12 * 3600
+    /// At most this many sessions per tool, like the tools read from files.
+    public static let maxSessions = 6
     static let maxSteps = 8
 
     public private(set) var entries: [String: Entry] = [:]
@@ -320,11 +326,16 @@ public struct HookSessions: Equatable, Sendable {
         var result: [AgentSession] = []
         let mine = entries.filter { $0.value.provider == provider }
         let children = Dictionary(grouping: mine.values.filter { $0.parentID != nil }) { $0.parentID! }
+        let sessionsPerPid = Dictionary(grouping: mine.values.compactMap(\.pid)) { $0 }.mapValues(\.count)
         for (key, entry) in mine {
             let quiet = now.timeIntervalSince(entry.lastSeen)
             let alive = entry.pid.map(isAlive)
-            if alive == false || quiet > Self.liveWindow || (alive == nil && quiet > Self.recentWindow && !entry.isBusy)
-                || (alive == nil && quiet > Self.staleBusy + Self.recentWindow) {
+            // A process that hosts several sessions (one opencode) or has no terminal (Cursor's
+            // editor) outlives each conversation: its sessions go like ones without a process.
+            let hostsMore = entry.pid.map { (sessionsPerPid[$0] ?? 0) > 1 } ?? false
+            let unproven = alive == nil || (alive == true && (hostsMore || entry.tty == nil))
+            if alive == false || quiet > Self.liveWindow || (unproven && quiet > Self.recentWindow && !entry.isBusy)
+                || (unproven && quiet > Self.staleBusy + Self.recentWindow) {
                 entries[key] = nil
                 continue
             }
@@ -361,7 +372,10 @@ public struct HookSessions: Equatable, Sendable {
                 needsYou: entry.waiting,
                 tty: entry.tty))
         }
-        return SessionMerge.ordered(result)
+        // Those that wait for the user always make the cut.
+        let ordered = SessionMerge.ordered(result)
+        let kept = ordered.filter { $0.needsYou != nil } + ordered.filter { $0.needsYou == nil }
+        return SessionMerge.ordered(Array(kept.prefix(Self.maxSessions)))
     }
 }
 

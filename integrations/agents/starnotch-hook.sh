@@ -11,8 +11,9 @@
 #
 # With --ask it waits for a click in the island and prints the answer in the tool's own format.
 # It never allows on its own: with no app, a stale socket, a timeout or any error it prints what
-# makes the tool ask as usual (Cursor: {"permission":"ask"}; Copilot: nothing). Nothing is
-# written to disk.
+# makes the tool ask as usual (Cursor: {"permission":"ask"}; Copilot: nothing, which falls through
+# to its own rules and prompt). A Copilot session started with --allow-all (or --yolo,
+# --allow-all-tools) is left alone at once. Nothing is written to disk.
 #
 # The socket: $STARNOTCH_SOCKET if set, else ~/Library/Application Support/Starnotch/approvals.sock.
 # Its folder must be yours with mode 0700 and the socket yours, so no other user can stand in.
@@ -56,6 +57,12 @@ case "$(ps -o comm= -p "$pid" 2>/dev/null)" in
         parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
         case "$parent" in ''|*[!0-9]*) ;; *) [ "$parent" -gt 1 ] && pid=$parent ;; esac ;;
 esac
+# Copilot asks this hook before its own rules: a session that allows everything needs no click.
+if [ "$ask" = "--ask" ] && [ "$tool" = copilot ]; then
+    case " $(ps -o args= -p "$pid" 2>/dev/null) " in
+        *' --allow-all '*|*' --yolo '*|*' --allow-all-tools '*) fallback ;;
+    esac
+fi
 tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
 case "$tty" in ttys[0-9]*) tty="\"starnotch_tty\":\"/dev/$tty\"," ;; *) tty="" ;; esac
 prefix="\"starnotch_provider\":\"$tool\",\"starnotch_event\":\"$event\",\"starnotch_pid\":$pid,$tty"
@@ -79,7 +86,7 @@ reply=$( { printf '%s\n' "$input"; while sleep 0.2; do printf '\n' || exit 0; do
 # Only a decision in this tool's format goes through; anything else means "ask as usual".
 case "$tool:$reply" in
     cursor:'{'*'"permission":"allow"'*'}' | cursor:'{'*'"permission":"deny"'*'}' | \
-    copilot:'{'*'"permissionDecision":"allow"'*'}' | copilot:'{'*'"permissionDecision":"deny"'*'}')
+    copilot:'{'*'"behavior":"allow"'*'}' | copilot:'{'*'"behavior":"deny"'*'}')
         case "$reply" in *$'\n'*) fallback ;; esac
         printf '%s' "$reply"
         exit 0 ;;

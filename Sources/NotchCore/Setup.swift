@@ -11,6 +11,9 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
     case lidAwake
     // Strand agents: more agent tools, each off until chosen.
     case cursorHooks, copilotHooks, geminiHooks, opencodePlugin
+    /// Answering Cursor's and Copilot CLI's prompts in the notch: their hooks run before every
+    /// shell (and MCP) call, so this is a choice of its own, offered once the status is set up.
+    case cursorApprovals, copilotApprovals
 
     public var title: String {
         switch self {
@@ -23,10 +26,12 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
         case .calendar: "Calendar access"
         case .musicAutomation: "Music and Spotify control"
         case .lidAwake: "Keep awake with the lid closed"
-        case .cursorHooks: "Cursor status and approvals"
-        case .copilotHooks: "Copilot CLI status and approvals"
+        case .cursorHooks: "Cursor status"
+        case .copilotHooks: "Copilot CLI status"
         case .geminiHooks: "Gemini CLI status"
         case .opencodePlugin: "opencode status and approvals"
+        case .cursorApprovals: "Answer Cursor in the notch"
+        case .copilotApprovals: "Answer Copilot CLI in the notch"
         }
     }
 
@@ -48,13 +53,17 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
         case .musicAutomation: "macOS asks once per player: play, pause and skip from the notch."
         case .lidAwake: "Adds \(LidAwakeCommands.ruleFile): lets you run pmset -a disablesleep 1 and 0 without a password, nothing else."
         case .cursorHooks:
-            "Adds Starnotch's hooks to ~/.cursor/hooks.json, with a backup. Shell and MCP commands then ask in the notch first; with the app closed, Cursor asks as usual."
+            "Adds Starnotch's status hooks to ~/.cursor/hooks.json, with a backup. They only report; Cursor asks and runs as before."
         case .copilotHooks:
-            "Adds ~/.copilot/hooks/starnotch.json: sessions show in the notch and permission prompts can be answered there."
+            "Adds ~/.copilot/hooks/starnotch.json: sessions show in the notch, and when Copilot asks you it shows as waiting. It never answers."
         case .geminiHooks:
             "Adds Starnotch's hooks to ~/.gemini/settings.json, with a backup. Gemini's hooks can't allow, so a prompt shows as waiting with a jump to its terminal."
         case .opencodePlugin:
             "Adds a small plugin to ~/.config/opencode/plugins: sessions show in the notch and permission prompts can be answered there."
+        case .cursorApprovals:
+            "Adds two hooks to ~/.cursor/hooks.json, with a backup. Every shell and MCP command waits up to 30 s for your answer in the notch, also those on Cursor's allowlist; unanswered or with the app closed, Cursor asks you itself."
+        case .copilotApprovals:
+            "Adds ~/.copilot/hooks/starnotch-approvals.json. Shell, edit and MCP requests wait up to 30 s for your answer in the notch, also those Copilot would allow on its own; unanswered, Copilot goes on as usual. Sessions started with --allow-all are left alone."
         }
     }
 
@@ -432,13 +441,17 @@ extension SetupActions {
     /// Every file Starnotch adds for these tools carries this name, so Remove finds exactly its own.
     public static let hookScriptName = "starnotch-hook.sh"
 
-    /// Cursor's events and whether the island answers them (shell and MCP calls).
-    static let cursorEvents: [(String, Bool)] = [("beforeSubmitPrompt", false), ("beforeShellExecution", true),
-                                                 ("beforeMCPExecution", true), ("afterShellExecution", false),
-                                                 ("afterFileEdit", false), ("stop", false)]
-    static let copilotEvents: [(String, Bool)] = [("sessionStart", false), ("sessionEnd", false), ("userPromptSubmitted", false),
-                                                  ("preToolUse", false), ("postToolUse", false), ("agentStop", false),
-                                                  ("errorOccurred", false), ("permissionRequest", true)]
+    /// Cursor's events that only report (they never change what Cursor does) …
+    static let cursorEvents = ["sessionStart", "sessionEnd", "beforeSubmitPrompt", "afterShellExecution",
+                               "afterMCPExecution", "afterFileEdit", "stop"]
+    /// … and the two the island answers, a choice of their own (`cursorApprovals`): they run
+    /// before every shell and MCP call, not only the ones Cursor would ask about.
+    static let cursorApprovalEvents = ["beforeShellExecution", "beforeMCPExecution"]
+    static let copilotEvents = ["sessionStart", "sessionEnd", "userPromptSubmitted", "preToolUse", "postToolUse",
+                                "agentStop", "errorOccurred", "notification"]
+    /// How long a hook that waits for the island may run: past the island's own wait
+    /// (`ApprovalRequest.timeout`), so the tool never kills it first.
+    static let askTimeout = 45
     static let geminiEvents = ["SessionStart", "SessionEnd", "BeforeAgent", "AfterAgent", "BeforeTool", "AfterTool", "Notification"]
 
     /// `'<folder>/hooks/starnotch-hook.sh' cursor stop`, plus `--ask` where the island answers.
@@ -457,6 +470,32 @@ extension SetupActions {
         try FileManager.default.copyItem(at: source, to: target)
         chmod(target.path, 0o755)
         return target
+    }
+
+    /// After an app update: the copies of the hook script and the opencode plugin that are set
+    /// up get the bundled version, so a fix in them reaches every tool. Only copies that exist
+    /// and differ are replaced. Returns what was refreshed.
+    @discardableResult
+    public static func refreshInstalledCopies(_ paths: SetupPaths, ledger: SetupLedger) -> [URL] {
+        var pairs: [(URL?, URL)] = []
+        let script = paths.hookScriptSource
+        if ledger.entry(.cursorHooks) != nil || ledger.entry(.cursorApprovals) != nil {
+            pairs.append((script, paths.cursorHome.appending(path: "hooks/\(hookScriptName)")))
+        }
+        if ledger.entry(.copilotHooks) != nil || ledger.entry(.copilotApprovals) != nil {
+            pairs.append((script, paths.copilotHome.appending(path: "hooks/\(hookScriptName)")))
+        }
+        if ledger.entry(.geminiHooks) != nil { pairs.append((script, paths.geminiHome.appending(path: "hooks/\(hookScriptName)"))) }
+        if ledger.entry(.opencodePlugin) != nil { pairs.append((paths.opencodePluginSource, opencodePluginFile(paths))) }
+        var refreshed: [URL] = []
+        for (source, target) in pairs {
+            guard let source, let fresh = try? Data(contentsOf: source), let installed = try? Data(contentsOf: target),
+                  fresh != installed else { continue }
+            guard (try? fresh.write(to: target, options: .atomic)) != nil else { continue }
+            if target.lastPathComponent == hookScriptName { chmod(target.path, 0o755) }
+            refreshed.append(target)
+        }
+        return refreshed
     }
 
     /// A JSON settings file, or an empty one; a file that isn't JSON stops the change.
@@ -479,6 +518,19 @@ extension SetupActions {
     // MARK: Cursor
 
     public static func installCursorHooks(_ paths: SetupPaths, now: Date = Date()) throws -> SetupLedger.Entry {
+        let created = try addCursorHooks(paths, events: cursorEvents, ask: false, now: now)
+        return SetupLedger.Entry(item: .cursorHooks, at: now, backup: created.backup, previous: created.created ? "created" : nil,
+                                 note: "Restart Cursor's agent sessions to pick it up.")
+    }
+
+    public static func installCursorApprovals(_ paths: SetupPaths, now: Date = Date()) throws -> SetupLedger.Entry {
+        let created = try addCursorHooks(paths, events: cursorApprovalEvents, ask: true, now: now)
+        return SetupLedger.Entry(item: .cursorApprovals, at: now, backup: created.backup, previous: created.created ? "created" : nil,
+                                 note: "Restart Cursor's agent sessions to pick it up.")
+    }
+
+    /// Adds one hook of ours per event beside the user's own (a second run replaces ours).
+    static func addCursorHooks(_ paths: SetupPaths, events: [String], ask: Bool, now: Date) throws -> (backup: String?, created: Bool) {
         guard FileManager.default.fileExists(atPath: paths.cursorHome.path) else { throw SetupError.missing("Cursor (~/.cursor)") }
         let file = paths.cursorHome.appending(path: "hooks.json")
         var (root, existed) = try readJSON(file, name: "~/.cursor/hooks.json")
@@ -486,23 +538,40 @@ extension SetupActions {
         let script = try placeHookScript(paths, in: paths.cursorHome)
         if root["version"] == nil { root["version"] = 1 }
         var hooks = root["hooks"] as? [String: Any] ?? [:]
-        for (event, ask) in cursorEvents {
+        for event in events {
             var list = (hooks[event] as? [[String: Any]] ?? []).filter { !isOurs($0["command"]) }
-            list.append(["command": hookCommand(script, provider: "cursor", event: event, ask: ask)])
+            var hook: [String: Any] = ["command": hookCommand(script, provider: "cursor", event: event, ask: ask)]
+            if ask { hook["timeout"] = askTimeout }
+            list.append(hook)
             hooks[event] = list
         }
         root["hooks"] = hooks
         try writeJSON(root, to: file)
-        return SetupLedger.Entry(item: .cursorHooks, at: now, backup: backup, previous: existed ? nil : "created",
-                                 note: "Restart Cursor's agent sessions to pick it up.")
+        return (backup, !existed)
     }
 
     public static func removeCursorHooks(_ paths: SetupPaths, entry: SetupLedger.Entry?) throws {
+        try removeCursorHooks(paths, events: cursorEvents, entry: entry)
+    }
+
+    public static func removeCursorApprovals(_ paths: SetupPaths, entry: SetupLedger.Entry?) throws {
+        try removeCursorHooks(paths, events: cursorApprovalEvents, entry: entry)
+    }
+
+    /// Takes out our hooks of `events`; the script goes with the last of ours, the file when
+    /// we created it and nothing else is left.
+    static func removeCursorHooks(_ paths: SetupPaths, events: [String], entry: SetupLedger.Entry?) throws {
         let file = paths.cursorHome.appending(path: "hooks.json")
-        if var (root, existed) = try? readJSON(file, name: "~/.cursor/hooks.json"), existed {
+        var oursLeft = false
+        if let (object, existed) = try? readJSON(file, name: "~/.cursor/hooks.json"), existed {
+            var root = object
             var hooks = root["hooks"] as? [String: Any] ?? [:]
             for (event, value) in hooks {
                 guard let list = value as? [[String: Any]] else { continue }
+                guard events.contains(event) else {
+                    if list.contains(where: { isOurs($0["command"]) }) { oursLeft = true }
+                    continue
+                }
                 let rest = list.filter { !isOurs($0["command"]) }
                 hooks[event] = rest.isEmpty ? nil : rest
             }
@@ -513,7 +582,7 @@ extension SetupActions {
                 try writeJSON(root, to: file)
             }
         }
-        try? FileManager.default.removeItem(at: paths.cursorHome.appending(path: "hooks/\(hookScriptName)"))
+        if !oursLeft { try? FileManager.default.removeItem(at: paths.cursorHome.appending(path: "hooks/\(hookScriptName)")) }
     }
 
     // MARK: Copilot CLI
@@ -521,27 +590,56 @@ extension SetupActions {
     /// Starnotch's own hooks file; Copilot reads every file in ~/.copilot/hooks.
     public static func copilotHooksFile(_ paths: SetupPaths) -> URL { paths.copilotHome.appending(path: "hooks/starnotch.json") }
 
+    /// The answering hook, in a file of its own so each choice comes out exactly.
+    public static func copilotApprovalsFile(_ paths: SetupPaths) -> URL { paths.copilotHome.appending(path: "hooks/starnotch-approvals.json") }
+
     public static func installCopilotHooks(_ paths: SetupPaths, now: Date = Date()) throws -> SetupLedger.Entry {
         guard FileManager.default.fileExists(atPath: paths.copilotHome.path) else { throw SetupError.missing("Copilot CLI (~/.copilot)") }
         let file = copilotHooksFile(paths)
         let backup = try backup(file, name: "copilot-starnotch.json", paths: paths, now: now)
         let script = try placeHookScript(paths, in: paths.copilotHome)
         var hooks: [String: Any] = [:]
-        for (event, ask) in copilotEvents {
-            hooks[event] = [["type": "command", "bash": hookCommand(script, provider: "copilot", event: event, ask: ask),
-                             "timeoutSec": ask ? 75 : 5]]
+        for event in copilotEvents {
+            var hook: [String: Any] = ["type": "command", "bash": hookCommand(script, provider: "copilot", event: event, ask: false),
+                                       "timeoutSec": 5]
+            // Only Copilot's own prompt: it waits for you.
+            if event == "notification" { hook["matcher"] = "permission_prompt" }
+            hooks[event] = [hook]
         }
         try writeJSON(["version": 1, "hooks": hooks], to: file)
         return SetupLedger.Entry(item: .copilotHooks, at: now, backup: backup, note: "New Copilot sessions pick it up.")
     }
 
+    /// `permissionRequest` runs before Copilot's rules and session approvals, so it waits only
+    /// `ApprovalRequest.timeout` and then falls through to Copilot's own flow.
+    public static func installCopilotApprovals(_ paths: SetupPaths, now: Date = Date()) throws -> SetupLedger.Entry {
+        guard FileManager.default.fileExists(atPath: paths.copilotHome.path) else { throw SetupError.missing("Copilot CLI (~/.copilot)") }
+        let file = copilotApprovalsFile(paths)
+        let backup = try backup(file, name: "copilot-starnotch-approvals.json", paths: paths, now: now)
+        let script = try placeHookScript(paths, in: paths.copilotHome)
+        let hook: [String: Any] = ["type": "command", "bash": hookCommand(script, provider: "copilot", event: "permissionRequest", ask: true),
+                                   "timeoutSec": askTimeout]
+        try writeJSON(["version": 1, "hooks": ["permissionRequest": [hook]]], to: file)
+        return SetupLedger.Entry(item: .copilotApprovals, at: now, backup: backup, note: "New Copilot sessions pick it up.")
+    }
+
     public static func removeCopilotHooks(_ paths: SetupPaths) throws {
-        let file = copilotHooksFile(paths)
-        // Only a file that is still Starnotch's goes.
+        try removeCopilotFile(copilotHooksFile(paths), paths: paths)
+    }
+
+    public static func removeCopilotApprovals(_ paths: SetupPaths) throws {
+        try removeCopilotFile(copilotApprovalsFile(paths), paths: paths)
+    }
+
+    /// Only a file that is still Starnotch's goes; the script with the last of them.
+    static func removeCopilotFile(_ file: URL, paths: SetupPaths) throws {
         if let text = try? String(contentsOf: file, encoding: .utf8), text.contains(hookScriptName) {
             try FileManager.default.removeItem(at: file)
         }
-        try? FileManager.default.removeItem(at: paths.copilotHome.appending(path: "hooks/\(hookScriptName)"))
+        let others = [copilotHooksFile(paths), copilotApprovalsFile(paths)].filter { $0 != file }
+        if !others.contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            try? FileManager.default.removeItem(at: paths.copilotHome.appending(path: "hooks/\(hookScriptName)"))
+        }
     }
 
     // MARK: Gemini CLI

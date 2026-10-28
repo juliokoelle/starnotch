@@ -1,1 +1,1 @@
-{"timestamp":1792504800000,"cwd":"/Users/me/projects/harbor","toolName":"bash","toolArgs":"{\"command\":\"git push --force-with-lease\",\"description\":\"Push the branch\"}"}
+{"hookName":"permissionRequest","sessionId":"5527d0cd-0000-4000-8000-000000000001","timestamp":1792504800000,"cwd":"/Users/me/projects/harbor","toolName":"bash","toolInput":{"command":"git push --force-with-lease"},"permissionSuggestions":[]}

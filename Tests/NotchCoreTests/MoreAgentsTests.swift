@@ -54,10 +54,19 @@ import TestSupport
     }
 
     @Test func copilotWithoutSessionIdsUsesTheProcess() throws {
-        let json = HookJSON.forwarded("hooks/copilot-permission.json", provider: "copilot", event: "postToolUse")
+        // An older Copilot CLI: no session id, the tool's arguments as JSON text.
+        let json = #"{"starnotch_provider":"copilot","starnotch_event":"postToolUse","starnotch_pid":4242,"cwd":"/p","toolName":"bash","toolArgs":"{\"command\":\"git push --force-with-lease\"}"}"#
         let update = try #require(HookJSON.update(json, at: now))
         #expect(update.sessionID == "pid-4242")
         #expect(update.kind == .tool(SessionStep(kind: .shell, text: "git push --force-with-lease")))
+    }
+
+    @Test func copilotsOwnPromptShowsAsWaiting() throws {
+        // As Copilot CLI 1.0 sends it, when its permission flow asks in the terminal.
+        let json = #"{"starnotch_provider":"copilot","starnotch_event":"notification","starnotch_pid":4242,"sessionId":"s1","cwd":"/p","message":"Path permission needed: /p/out","title":"Permission needed","hook_event_name":"Notification","notification_type":"permission_prompt"}"#
+        let update = try #require(HookJSON.update(json, at: now))
+        #expect(update.kind == .waiting("Path permission needed: /p/out"))
+        #expect(HookJSON.update(json.replacingOccurrences(of: "permission_prompt", with: "agent_idle"), at: now) == nil)
     }
 
     @Test func unsafeTerminalsAreDropped() throws {
@@ -71,9 +80,10 @@ import TestSupport
 @Suite struct HookSessionsTests {
     let start = UTC.date("2026-10-20 12:00")
 
-    func update(_ kind: HookUpdate.Kind, _ minute: String, id: String = "c1", pid: Int32? = nil, parent: String? = nil) -> HookUpdate {
+    func update(_ kind: HookUpdate.Kind, _ minute: String, id: String = "c1", pid: Int32? = nil, tty: String? = nil,
+                parent: String? = nil) -> HookUpdate {
         HookUpdate(provider: "cursor", sessionID: id, kind: kind, at: UTC.date("2026-10-20 \(minute)"),
-                   cwd: "/Users/me/projects/harbor", pid: pid, parentID: parent)
+                   cwd: "/Users/me/projects/harbor", pid: pid, tty: tty, parentID: parent)
     }
 
     @Test func aTurnWorksThenRestsWithItsSteps() {
@@ -125,10 +135,36 @@ import TestSupport
         store.apply(update(.prompt(nil), "13:00", id: "c3"))
         store.apply(update(.ended, "13:01", id: "c3"))
         #expect(store.entries.isEmpty)
-        // A live process keeps a resting session for hours.
-        store.apply(update(.idle(nil), "13:00", id: "c4", pid: 78))
+        // A live process in a terminal keeps a resting session for hours.
+        store.apply(update(.idle(nil), "13:00", id: "c4", pid: 78, tty: "/dev/ttys004"))
         session = store.sessions(provider: "cursor", now: UTC.date("2026-10-20 16:00"), isAlive: { _ in true })[0]
         #expect(session.pid == 78)
+    }
+
+    @Test func aProcessThatHostsManySessionsDoesNotKeepThemAll() {
+        var store = HookSessions()
+        // Cursor's editor: one process without a terminal for every conversation.
+        store.apply(update(.idle(nil), "12:00", id: "a", pid: 90))
+        store.apply(update(.idle(nil), "12:00", id: "b", pid: 90))
+        // One CLI in a terminal with two sessions (one opencode).
+        store.apply(update(.idle(nil), "12:00", id: "c", pid: 91, tty: "/dev/ttys005"))
+        store.apply(update(.idle(nil), "12:00", id: "d", pid: 91, tty: "/dev/ttys005"))
+        // A CLI of its own keeps its one session.
+        store.apply(update(.idle(nil), "12:00", id: "e", pid: 92, tty: "/dev/ttys006"))
+        #expect(store.sessions(provider: "cursor", now: UTC.date("2026-10-20 12:20"), isAlive: { _ in true }).count == 5)
+        let later = store.sessions(provider: "cursor", now: UTC.date("2026-10-20 12:40"), isAlive: { _ in true })
+        #expect(later.map(\.id) == ["cursor:e"])
+    }
+
+    @Test func atMostSixPerToolAndTheWaitingOnesStay() {
+        var store = HookSessions()
+        store.apply(update(.waiting("Allow npm publish?"), "12:00", id: "old"))
+        for minute in 1...8 { store.apply(update(.idle(nil), "12:0\(minute)", id: "s\(minute)")) }
+        let sessions = store.sessions(provider: "cursor", now: UTC.date("2026-10-20 12:10"), isAlive: { _ in true })
+        #expect(sessions.count == HookSessions.maxSessions)
+        #expect(sessions.contains { $0.id == "cursor:old" })
+        #expect(sessions.contains { $0.id == "cursor:s8" })
+        #expect(!sessions.contains { $0.id == "cursor:s1" })
     }
 
     @Test func childSessionsNestAsSubagents() {
@@ -229,7 +265,8 @@ import TestSupport
         #expect(request.agentID == "cursor:c0ffee00-0000-4000-8000-000000000001")
         #expect(request.pid == 4242)
         #expect(request.tty == "/dev/ttys007")
-        #expect(!request.supportsSessionRules)
+        #expect(request.supportsSessionRules)  // kept by the notch (SessionAllowances)
+        #expect(request.timeout == 30)
         #expect(HookJSON.text(ApprovalDecision.allowOnce.output(for: request)) == #"{"permission":"allow"}"#)
         #expect(HookJSON.text(ApprovalDecision.deny.output(for: request)).contains(#""permission":"deny""#))
     }
@@ -239,9 +276,33 @@ import TestSupport
         let request = try #require(HookJSON.approval(json))
         #expect(request.tool == "Bash")
         #expect(request.summary == "git push --force-with-lease")
-        #expect(request.agentID == "copilot:pid-4242")
-        #expect(HookJSON.text(ApprovalDecision.allowSession.output(for: request)) == #"{"permissionDecision":"allow"}"#)
-        #expect(HookJSON.text(ApprovalDecision.deny.output(for: request)).contains(#""permissionDecision":"deny""#))
+        #expect(request.agentID == "copilot:5527d0cd-0000-4000-8000-000000000001")
+        #expect(request.timeout == 30)
+        // permissionRequest takes `behavior` (preToolUse's `permissionDecision` is ignored there).
+        #expect(HookJSON.text(ApprovalDecision.allowOnce.output(for: request)) == #"{"behavior":"allow"}"#)
+        #expect(HookJSON.text(ApprovalDecision.allowSession.output(for: request)) == #"{"behavior":"allow"}"#)
+        #expect(HookJSON.text(ApprovalDecision.deny.output(for: request)) == #"{"behavior":"deny","message":"Denied from the notch."}"#)
+    }
+
+    @Test func allowForSessionIsKeptByTheNotchForCursorAndCopilot() throws {
+        let json = HookJSON.forwarded("hooks/cursor-before-shell.json", provider: "cursor", event: "beforeShellExecution")
+        let request = try #require(HookJSON.approval(json))
+        var allowances = SessionAllowances()
+        #expect(!allowances.covers(request))
+        allowances.allow(request)
+        #expect(allowances.covers(request))
+        // Another command, or the same one in another session, still asks.
+        var other = request
+        other.detail = "rm -rf build"
+        #expect(!allowances.covers(other))
+        var elsewhere = request
+        elsewhere.sessionID = "another"
+        #expect(!allowances.covers(elsewhere))
+        // Tools that keep their own rules aren't remembered here.
+        var claude = request
+        claude.provider = "claude-code"
+        allowances.allow(claude)
+        #expect(!allowances.covers(claude))
     }
 
     @Test func opencodePromptAndItsReply() throws {
@@ -272,18 +333,44 @@ import TestSupport
         let stop = try #require(hooks["stop"] as? [[String: Any]])
         #expect(stop.count == 2)
         #expect((stop[0]["command"] as? String) == "./hooks/my-audit.sh")
-        let shell = try #require((hooks["beforeShellExecution"] as? [[String: Any]])?.first?["command"] as? String)
-        #expect(shell.hasSuffix("cursor beforeShellExecution --ask"))
+        // Status only: nothing that runs before a command, and sessions start and end.
+        #expect(hooks["beforeShellExecution"] == nil && hooks["beforeMCPExecution"] == nil)
+        #expect(hooks["sessionStart"] != nil && hooks["sessionEnd"] != nil)
+        #expect(!SetupSandbox.read(file).contains("--ask"))
         #expect(SetupSandbox.exists(paths.cursorHome.appending(path: "hooks/starnotch-hook.sh").path))
         #expect(SetupSandbox.exists(entry.backup))
         // Twice: still one of ours per event.
         _ = try SetupActions.installCursorHooks(paths)
         #expect(((SetupSandbox.json(file)["hooks"] as? [String: Any])?["stop"] as? [[String: Any]])?.count == 2)
+        // Answering is its own choice, with a timeout past the island's wait.
+        let approvals = try SetupActions.installCursorApprovals(paths)
+        let gate = try #require(((SetupSandbox.json(file)["hooks"] as? [String: Any])?["beforeShellExecution"] as? [[String: Any]])?.first)
+        #expect((gate["command"] as? String)?.hasSuffix("cursor beforeShellExecution --ask") == true)
+        #expect(gate["timeout"] as? Int == 45)
+        // Removing the status leaves the answering hooks and their script.
         try SetupActions.removeCursorHooks(paths, entry: entry)
+        #expect((SetupSandbox.json(file)["hooks"] as? [String: Any])?.keys.sorted() == ["beforeMCPExecution", "beforeShellExecution", "stop"])
+        #expect(SetupSandbox.exists(paths.cursorHome.appending(path: "hooks/starnotch-hook.sh").path))
+        try SetupActions.removeCursorApprovals(paths, entry: approvals)
         let after = SetupSandbox.json(file)
         #expect((after["hooks"] as? [String: Any])?.keys.sorted() == ["stop"])
         #expect(!SetupSandbox.read(file).contains("starnotch-hook.sh"))
         #expect(!SetupSandbox.exists(paths.cursorHome.appending(path: "hooks/starnotch-hook.sh").path))
+    }
+
+    @Test func anUpdateRefreshesTheCopiesThatAreSetUp() throws {
+        let paths = SetupSandbox.makeWithMoreAgents()
+        defer { SetupSandbox.remove(paths.home) }
+        var ledger = SetupLedger()
+        ledger.record(try SetupActions.installCursorHooks(paths))
+        let copy = paths.cursorHome.appending(path: "hooks/starnotch-hook.sh")
+        SetupSandbox.write("#!/bin/bash\n# an older version\n", to: copy)
+        let refreshed = SetupActions.refreshInstalledCopies(paths, ledger: ledger)
+        #expect(refreshed == [copy])
+        #expect(SetupSandbox.read(copy) == SetupSandbox.read(try #require(paths.hookScriptSource)))
+        // Nothing to do the second time; a tool that isn't set up gets nothing.
+        #expect(SetupActions.refreshInstalledCopies(paths, ledger: ledger).isEmpty)
+        #expect(!SetupSandbox.exists(paths.geminiHome.appending(path: "hooks/starnotch-hook.sh").path))
     }
 
     @Test func cursorHooksFileWeCreatedGoesAway() throws {
@@ -319,9 +406,18 @@ import TestSupport
         defer { SetupSandbox.remove(paths.home) }
         _ = try SetupActions.installCopilotHooks(paths)
         let copilot = SetupActions.copilotHooksFile(paths)
-        #expect(SetupSandbox.read(copilot).contains("copilot permissionRequest --ask"))
+        // Status only; Copilot's own prompt shows as waiting.
+        #expect(!SetupSandbox.read(copilot).contains("--ask"))
+        #expect(SetupSandbox.read(copilot).contains(#""matcher" : "permission_prompt""#))
+        _ = try SetupActions.installCopilotApprovals(paths)
+        let approvals = SetupActions.copilotApprovalsFile(paths)
+        #expect(SetupSandbox.read(approvals).contains("copilot permissionRequest --ask"))
         try SetupActions.removeCopilotHooks(paths)
         #expect(!SetupSandbox.exists(copilot.path))
+        #expect(SetupSandbox.exists(paths.copilotHome.appending(path: "hooks/starnotch-hook.sh").path))
+        try SetupActions.removeCopilotApprovals(paths)
+        #expect(!SetupSandbox.exists(approvals.path))
+        #expect(!SetupSandbox.exists(paths.copilotHome.appending(path: "hooks/starnotch-hook.sh").path))
         _ = try SetupActions.installOpencodePlugin(paths)
         let plugin = SetupActions.opencodePluginFile(paths)
         #expect(SetupSandbox.read(plugin).contains("permission.asked"))

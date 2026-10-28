@@ -361,7 +361,8 @@ private struct AgentsStep: View {
     @Bindable var model: Onboarding
 
     private static let agentItems: [SetupItem] = [.claudePlugin, .statusLine, .mcpServer, .codexHook, .shellHook,
-                                                  .cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin]
+                                                  .cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin,
+                                                  .cursorApprovals, .copilotApprovals]
 
     var body: some View {
         let setup = model.setup

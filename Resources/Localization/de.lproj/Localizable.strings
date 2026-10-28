@@ -226,12 +226,12 @@
 "Drop files here. Drag them out again or AirDrop them." = "Dateien hier ablegen. Wieder herausziehen oder per AirDrop senden.";
 
 /* Strand agents: Cursor, Copilot CLI, Gemini CLI, opencode, exact jumps, pace */
-"Cursor status and approvals" = "Cursor: Status und Freigaben";
-"Copilot CLI status and approvals" = "Copilot CLI: Status und Freigaben";
+"Cursor status" = "Cursor: Status";
+"Copilot CLI status" = "Copilot CLI: Status";
 "Gemini CLI status" = "Gemini CLI: Status";
 "opencode status and approvals" = "opencode: Status und Freigaben";
-"Cursor's sessions in the notch; approve its shell and MCP commands there" = "Cursor-Sitzungen in der Notch; Shell- und MCP-Befehle dort freigeben";
-"Copilot CLI's sessions in the notch; approve its requests there" = "Copilot-CLI-Sitzungen in der Notch; Anfragen dort freigeben";
+"Cursor's sessions in the notch" = "Cursor-Sitzungen in der Notch";
+"Copilot CLI's sessions in the notch, and when it waits for you" = "Copilot-CLI-Sitzungen in der Notch, und wann sie auf dich warten";
 "Gemini CLI's sessions in the notch, and when it waits for you" = "Gemini-CLI-Sitzungen in der Notch, und wann sie auf dich warten";
 "opencode's sessions in the notch; approve its requests there" = "opencode-Sitzungen in der Notch; Anfragen dort freigeben";
 "This build has no hook script." = "Diesem Build fehlt das Hook-Skript.";
@@ -248,3 +248,7 @@
 "5-hour" = "5-Stunden";
 "weekly" = "Wochen";
 "5 h · %@" = "5 h · %@";
+"Answer Cursor in the notch" = "Cursor in der Notch beantworten";
+"Answer Copilot CLI in the notch" = "Copilot CLI in der Notch beantworten";
+"Every shell and MCP command asks in the notch first" = "Jeder Shell- und MCP-Befehl fragt zuerst in der Notch";
+"Copilot's requests ask in the notch first" = "Anfragen von Copilot fragen zuerst in der Notch";

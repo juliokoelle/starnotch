@@ -31,7 +31,7 @@ Run everything from the `agent/` folder with uv (it creates the environment on f
 cd agent
 uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captures FILE] [--watch-captures] [--connectors DIR]
 uv run python transcribe.py (--file AUDIO [--speed N] | --mic) [--names Max,Lisa]
-uv run python jamie_sync.py [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--query TEXT] [--force]
+uv run python jamie_sync.py [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--query TEXT] [--force] [--no-login]
 uv run python jamie_sync.py --logout
 ```
 
@@ -99,6 +99,13 @@ one). Optional fields: `history`, the conversation so far for a follow-up, oldes
 (`[{"question": "…", "answer": "…"}]`, the last 6 count); `image`, the path of a screenshot (PNG or JPEG) of the window
 the question is about. Claude Code gets the screenshot as a copy in its brain folder, readable with `Read` for that
 file only, and deleted after the call; the API gets it as an image block.
+
+The brain is told today's date (`--today`, else the real date, so an agent kept running overnight moves on) and, when
+`<memory>/jamie-sync.state` exists, when Jamie last synced: that file is written only at the end of a successful
+sync, so its modification time is the sync time, read fresh for every question. A question about a meeting from
+today that isn't in the memory (Jamie hadn't finished it by then) gets an honest "Jamie last synced at …" instead of a
+guess. The memory itself is read at start and on `reload`: the app sends `reload` to every running agent after a sync
+with `updated` > 0.
 
 `save` writes the utterances since the last `reset` (and the commitments found in them) as a meeting file;
 `title`, `date` (default today) and `meeting_id` (default `<date>-<title>`) are optional.
@@ -303,7 +310,14 @@ neither section, so most meetings carry none.
 `~/Library/Application Support/Starnotch/jamie-oauth.json` (mode 0600) with the time they run out, so an expired
 access token is refreshed without the browser. Each sync first reads the authorization server's metadata (two small
 GETs), so a token that runs out during a long sync is refreshed at Jamie's `/oauth/token` too. Exit code 0 on success, 1 on error.
-Send `{"cmd": "reload"}` to a running `agent.py` afterwards.
+Send `{"cmd": "reload"}` to a running `agent.py` afterwards when `updated` is above 0.
+
+`--no-login` is for syncs nobody asked for (the app's automatic ones): it never opens the browser. Without a stored
+login (the file holds tokens only after a finished browser login; registering the client writes it earlier), or when
+Jamie wants a new one, it prints `{"type": "status", "state": "login_required"}` and exits with 2; the app then stops
+syncing on its own until the user connects again. The app's automatic syncs also pass `--limit 10`: an unchanged
+meeting still costs one `get_meeting`, so they look only at the newest ten; Connect and Sync now look at 50.
+Without Jamie reachable at all, the error reads `jamie sync: Jamie isn't reachable; check your internet connection`.
 
 `--logout` deletes that file and prints `{"type": "status", "state": "logged_out", "removed": true}` (`false` when
 there was none); it doesn't connect. The next sync opens the login again. Which account it signs in to is decided

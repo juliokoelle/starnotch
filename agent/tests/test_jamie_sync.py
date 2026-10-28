@@ -182,8 +182,8 @@ class Jamie:
                           "transcript": LONG, "summary": {"markdown": SUMMARY, "short": "Preis bestätigt."},
                           "participants": [{"id": "0", "name": "Max", "email": "max@example.com"},
                                            {"id": "1", "name": "Speaker 1", "email": None},
-                                           {"id": "2", "name": "Julio", "email": "julio@example.com"}],
-                          "user": {"id": "u", "email": "julio@example.com"},
+                                           {"id": "2", "name": "Nora", "email": "nora@example.com"}],
+                          "user": {"id": "u", "email": "nora@example.com"},
                           "event": {"attendees": [{"name": "Lisa", "email": "lisa@example.com"}]},
                           "tasks": []} for i in range(count)]
         self.page, self.cut, self.chunk = page, cut, chunk
@@ -391,3 +391,80 @@ async def test_token_storage_remembers_when_the_token_runs_out(tmp_path):
     old.write_text(json.dumps({"tokens": {"access_token": "a", "token_type": "Bearer", "expires_in": 3600}}))
     os.utime(old, (1_000_000, 1_000_000))
     assert FileTokenStorage(old).expires_at() == 1_003_600
+
+
+async def test_last_synced_is_when_the_last_sync_finished(tmp_path):
+    assert jamie_sync.last_synced(tmp_path) is None
+    before = time.time()
+    await run(Jamie(count=1), tmp_path)
+    assert jamie_sync.last_synced(tmp_path).timestamp() >= before - 1
+
+
+def test_no_login_without_a_saved_login_stops_before_connecting(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(jamie_sync, "TOKEN_FILE", tmp_path / "jamie-oauth.json")
+    monkeypatch.setattr(jamie_sync, "connect_and_run", lambda *a, **k: pytest.fail("must not connect"))
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 2
+    assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "login_required"}
+
+
+async def test_no_login_never_opens_the_browser(monkeypatch, capsys):
+    monkeypatch.setattr(jamie_sync.webbrowser, "open", lambda url: pytest.fail("opened the browser"))
+    provider = jamie_sync.oauth_provider("https://jamie.example/mcp", interactive=False)
+    with pytest.raises(jamie_sync.LoginRequired):
+        await provider.context.redirect_handler("https://jamie.example/authorize?x=1")
+    assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "login_required"}
+
+
+def test_an_expired_login_ends_quietly_with_its_own_exit_code(tmp_path, monkeypatch, capsys):
+    token = tmp_path / "jamie-oauth.json"
+    token.write_text(json.dumps({"tokens": {"access_token": "a", "token_type": "Bearer"}}))
+    monkeypatch.setattr(jamie_sync, "TOKEN_FILE", token)
+
+    async def wrapped(*args, **kwargs):  # the MCP client raises from its task groups
+        try:
+            raise jamie_sync.LoginRequired()
+        except jamie_sync.LoginRequired as error:
+            raise ExceptionGroup("task group", [RuntimeError("cancelled")]) from error
+
+    monkeypatch.setattr(jamie_sync, "connect_and_run", wrapped)
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 2
+    assert capsys.readouterr().out == ""  # no error line: the status line went out from the redirect
+
+    async def offline(*args, **kwargs):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(jamie_sync, "connect_and_run", offline)
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 1
+    assert json.loads(capsys.readouterr().out)["message"] == "jamie sync: offline"
+
+
+def test_a_login_abandoned_in_the_browser_is_no_saved_login(tmp_path, monkeypatch, capsys):
+    token = tmp_path / "jamie-oauth.json"
+    token.write_text(json.dumps({"client": {"client_id": "c1"}}))  # registered, but the browser login never finished
+    monkeypatch.setattr(jamie_sync, "TOKEN_FILE", token)
+    monkeypatch.setattr(jamie_sync, "connect_and_run", lambda *a, **k: pytest.fail("must not connect"))
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 2
+    assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "login_required"}
+
+
+def test_offline_says_jamie_isnt_reachable(tmp_path, monkeypatch, capsys):
+    import httpx2
+
+    token = tmp_path / "jamie-oauth.json"
+    token.write_text(json.dumps({"tokens": {"access_token": "a", "token_type": "Bearer"}}))
+    monkeypatch.setattr(jamie_sync, "TOKEN_FILE", token)
+
+    async def offline(*args, **kwargs):  # the MCP client raises from its task groups
+        raise ExceptionGroup("unhandled errors in a TaskGroup", [httpx2.ConnectError("nodename nor servname provided")])
+
+    monkeypatch.setattr(jamie_sync, "connect_and_run", offline)
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 1
+    assert json.loads(capsys.readouterr().out)["message"] == \
+        "jamie sync: Jamie isn't reachable; check your internet connection"
+
+    async def broken(*args, **kwargs):
+        raise ExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("Jamie has no list_meetings tool")])
+
+    monkeypatch.setattr(jamie_sync, "connect_and_run", broken)
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 1
+    assert json.loads(capsys.readouterr().out)["message"] == "jamie sync: Jamie has no list_meetings tool"

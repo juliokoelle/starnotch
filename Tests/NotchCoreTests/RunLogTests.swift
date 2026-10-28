@@ -36,7 +36,7 @@ import TestSupport
         #expect(expressions("sonntags 05:00 UTC (0 5 * * 0), Cloud-Routine") == ["0 5 * * 0"])
         #expect(expressions("täglich 03:30 UTC, Cloud-Routine. Läuft vor Job Research (04:00 UTC)") == ["30 3 * * *"])
         #expect(expressions("täglich 05:00 UTC (07:00 Berlin, solange CEST gilt)") == ["0 5 * * *"])
-        #expect(expressions("whenever Julio feels like it").isEmpty)
+        #expect(expressions("whenever Nora feels like it").isEmpty)
     }
 
     @Test func lateWhenScheduledAndSilent() throws {

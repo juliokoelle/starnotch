@@ -5,6 +5,7 @@
     uv run python jamie_sync.py --query "Preis"   # only what search_meetings finds
     uv run python jamie_sync.py --list-tools     # prints the server's tools and their input schemas
     uv run python jamie_sync.py --logout         # forgets the login, so the next run can sign in as someone else
+    uv run python jamie_sync.py --no-login       # the app's automatic syncs: never opens the browser
 
 Jamie's tools (list_meetings, get_meeting, get_meeting_transcript, search_meetings, list_tasks) are called with
 whatever argument names their input schemas declare, and their answers are mapped onto memory.py's schema field by
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as dt
 import hashlib
 import json
 import os
@@ -362,6 +364,14 @@ def load_state(memory: Memory) -> dict[str, str]:
         return {}
 
 
+def last_synced(folder: Path) -> dt.datetime | None:
+    """When the last sync into `folder` finished: the state file is written only then (local time)."""
+    try:
+        return dt.datetime.fromtimestamp((Path(folder) / STATE_FILE).stat().st_mtime)
+    except OSError:
+        return None
+
+
 def save_state(memory: Memory, seen: dict[str, str]) -> None:
     memory.folder.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=memory.folder, suffix=".tmp")
@@ -596,11 +606,40 @@ async def wait_for_callback(port: int = CALLBACK_PORT, timeout: float = 300):
         return await asyncio.wait_for(done, timeout)
 
 
-def oauth_provider(url: str, port: int = CALLBACK_PORT):
+class LoginRequired(Exception):
+    """Jamie wants a new browser login, and this run may not open one (`--no-login`)."""
+
+
+def login_required(error: BaseException) -> bool:
+    """True when `error`, or one it wraps (the MCP client raises from task groups), is LoginRequired."""
+    if isinstance(error, LoginRequired):
+        return True
+    if isinstance(error, BaseExceptionGroup) and any(login_required(e) for e in error.exceptions):
+        return True
+    cause = error.__cause__ or error.__context__
+    return cause is not None and login_required(cause)
+
+
+def reason(error: BaseException) -> str:
+    """What went wrong, for the app: the first error inside the task groups the MCP client raises from, and a short
+    sentence when Jamie can't be reached at all (offline, or the network not back after a wake)."""
+    import httpx2
+
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    if isinstance(error, (httpx2.NetworkError, httpx2.ConnectTimeout)):
+        return "Jamie isn't reachable; check your internet connection"
+    return str(error)
+
+
+def oauth_provider(url: str, port: int = CALLBACK_PORT, interactive: bool = True):
     from mcp.client.auth import OAuthClientProvider
     from mcp.shared.auth import OAuthClientMetadata
 
     async def open_browser(authorization_url: str) -> None:
+        if not interactive:
+            print(json.dumps({"type": "status", "state": "login_required"}), flush=True)
+            raise LoginRequired()
         print(json.dumps({"type": "status", "state": "login", "url": authorization_url}), flush=True)
         webbrowser.open(authorization_url)
 
@@ -641,12 +680,12 @@ async def discover_token_endpoint(provider, http) -> None:
         pass
 
 
-async def connect_and_run(url: str, job) -> Any:
+async def connect_and_run(url: str, job, interactive: bool = True) -> Any:
     import httpx2
     from mcp.client import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
-    provider = oauth_provider(url)
+    provider = oauth_provider(url, interactive=interactive)
     async with httpx2.AsyncClient(timeout=10) as plain:
         await discover_token_endpoint(provider, plain)
     async with httpx2.AsyncClient(auth=provider, timeout=httpx2.Timeout(60, read=300)) as http:
@@ -666,10 +705,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="write every meeting again, also unchanged ones")
     parser.add_argument("--list-tools", action="store_true", help="print Jamie's tools and exit")
     parser.add_argument("--logout", action="store_true", help="forget the Jamie login and exit")
+    parser.add_argument("--no-login", action="store_true",
+                        help="never open the browser: without a usable login, say login_required and exit 2")
     args = parser.parse_args(argv)
     if args.logout:
         print(json.dumps({"type": "status", "state": "logged_out", "removed": logout()}), flush=True)
         return 0
+    if args.no_login and not FileTokenStorage()._read().get("tokens"):  # registering the client alone writes the file
+        print(json.dumps({"type": "status", "state": "login_required"}), flush=True)
+        return 2
 
     async def job(session):
         if args.list_tools:
@@ -680,9 +724,11 @@ def main(argv: list[str] | None = None) -> int:
         return await sync(session, Memory(args.memory), max(1, args.limit), args.since, args.query, args.force)
 
     try:
-        asyncio.run(connect_and_run(args.url, job))
+        asyncio.run(connect_and_run(args.url, job, interactive=not args.no_login))
     except Exception as error:
-        print(json.dumps({"type": "error", "message": f"jamie sync: {error}"}), flush=True)
+        if login_required(error):  # its status line went out already
+            return 2
+        print(json.dumps({"type": "error", "message": f"jamie sync: {reason(error)}"}), flush=True)
         return 1
     return 0
 

@@ -115,6 +115,7 @@ Jamie:
 uv run python jamie_sync.py --list-tools   # first run opens the Jamie login
 uv run python jamie_sync.py --limit 200    # pages through Jamie; full transcripts; unchanged meetings are skipped
 uv run python jamie_sync.py --logout       # forget the login (sign out at app.meetjamie.ai to switch accounts)
+uv run python jamie_sync.py --no-login     # never opens the browser (the app's automatic syncs)
 ```
 
 ## Tests

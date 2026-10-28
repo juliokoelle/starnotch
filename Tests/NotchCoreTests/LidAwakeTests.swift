@@ -67,9 +67,9 @@ import Testing
     }
 
     @Test func theRuleNamesOneUserAndTwoCommands() throws {
-        let rule = try #require(LidAwakeCommands.sudoersRule(user: "julio.k"))
+        let rule = try #require(LidAwakeCommands.sudoersRule(user: "nora.k"))
         let lines = rule.split(separator: "\n").filter { !$0.hasPrefix("#") }
-        #expect(lines == ["julio.k ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0"])
+        #expect(lines == ["nora.k ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0"])
         #expect(rule.hasSuffix("\n"))
         for bad in ["", "-x", "root ALL", "a,b", "me\nroot", "ü", "%admin", String(repeating: "a", count: 65)] {
             #expect(LidAwakeCommands.sudoersRule(user: bad) == nil)
@@ -77,13 +77,13 @@ import Testing
     }
 
     @Test func theInstallScriptChecksBeforeItMoves() throws {
-        let script = try #require(LidAwakeCommands.installScript(user: "julio"))
+        let script = try #require(LidAwakeCommands.installScript(user: "nora"))
         let check = try #require(script.range(of: "/usr/sbin/visudo -cf \"$tmp\""))
         let mode = try #require(script.range(of: "/bin/chmod 0440 \"$tmp\""))
         let owner = try #require(script.range(of: "/usr/sbin/chown root:wheel \"$tmp\""))
         let move = try #require(script.range(of: "/bin/mv -f \"$tmp\" '/etc/sudoers.d/starnotch-pmset'"))
         #expect(check.upperBound < owner.lowerBound && owner.upperBound < mode.lowerBound && mode.upperBound < move.lowerBound)
-        #expect(script.contains("'julio ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0'"))
+        #expect(script.contains("'nora ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0'"))
         #expect(!script.contains("\n"))
         #expect(LidAwakeCommands.installScript(user: "a b") == nil)
         #expect(LidAwakeCommands.removeScript() == "/bin/rm -f '/etc/sudoers.d/starnotch-pmset'")

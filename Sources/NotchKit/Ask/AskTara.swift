@@ -163,6 +163,11 @@ final class AskTara {
         focusRequest += 1
     }
 
+    /// New meetings came into the memory: a running agent re-reads it, so the next question sees them.
+    func reloadMemory() {
+        process?.write(MeetingCommand.reload)
+    }
+
     /// The app quits.
     func shutdown() {
         cancelSpeech()

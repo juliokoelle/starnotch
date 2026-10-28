@@ -29,7 +29,7 @@ Run everything from the `agent/` folder with uv (it creates the environment on f
 
 ```sh
 cd agent
-uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captures FILE] [--watch-captures] [--connectors DIR]
+uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captures FILE] [--watch-captures] [--connectors DIR] [--usage FILE]
 uv run python transcribe.py (--file AUDIO [--speed N] | --mic) [--names Max,Lisa]
 uv run python jamie_sync.py [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--query TEXT] [--force]
 uv run python jamie_sync.py --logout
@@ -55,6 +55,14 @@ missing folder, or a file that isn't JSON, is skipped. Example, as a vault conne
  "today": {"title": "2026-10-28", "path": "/Users/…/Daily/2026-10-28.md", "content": "…"},
  "tasks": [{"text": "Send the deck", "due": "2026-10-29", "path": "/Users/…/Tasks.md"}]}
 ```
+
+Every call to the brain (an `ask`, a captured question, a live analysis batch) appends one line to the usage
+ledger, `usage.jsonl` in the same folder (`--usage` points elsewhere, `--usage ''` keeps none): `time` (UTC),
+`feature` (`ask`, `capture` or `meeting`), `brain`, `model`, `input_tokens`, `cache_creation_input_tokens`,
+`cache_read_input_tokens`, `output_tokens`, `duration_ms` and `cost_usd`, the call's price at API list prices
+(Claude Code's own `total_cost_usd`; for `api` computed from the price table in `usage.py`, `null` for a model not
+in it). On a Claude plan nothing is billed per call; the tokens count against the plan's limits. Lines older than
+90 days are dropped when an agent first writes after it starts. Settings shows today and the last 7 days.
 
 During a meeting the app reads `transcribe.py`'s stdout and writes each `utterance` line, unchanged, into
 `agent.py`'s stdin (it may show the line as a live caption on the way). For a test without the app:

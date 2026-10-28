@@ -23,6 +23,7 @@ from typing import Any, Callable, TextIO
 
 import captures as quick
 import connectors as linked
+import usage as ledger
 from memory import Commitment, Line, Meeting, Memory, _words
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
@@ -204,8 +205,9 @@ def _norm(text: str) -> str:
 class Agent:
     def __init__(self, memory: Memory, llm: Any | None, emit: Callable[[dict[str, Any]], None],
                  today: dt.date | None = None, captures: Path | None = None, connectors: Path | None = None,
-                 brain: str | None = None):
+                 brain: str | None = None, usage: Path | None = None):
         self.memory = memory
+        self.ledger = ledger.Ledger(usage) if usage else None
         self.captures_path = captures
         self.connectors_path = connectors
         self.brain = brain or ("rules" if llm is None else "claude")
@@ -322,7 +324,8 @@ class Agent:
             picture = Path(str(image)).expanduser() if image else None
             extra = {"images": [picture]} if picture and picture.is_file() else {}  # a picture that's gone: ask without
             try:
-                result = self.llm.json(ASK_SYSTEM.format(memory=self.ask_context(notes)), prompt, ASK_SCHEMA, 2000, **extra)
+                result = self._think("capture" if answering else "ask", ASK_SYSTEM.format(memory=self.ask_context(notes)),
+                                     prompt, ASK_SCHEMA, 2000, **extra)
             except Exception as error:
                 self._warn(error, rest=False)
             if result is not None:
@@ -417,8 +420,8 @@ class Agent:
         result = None
         if self._thinking():
             try:
-                result = self.llm.json(SYSTEM.format(memory=self.context()),
-                                       self._analysis_prompt(before, new), ANALYSIS_SCHEMA)
+                result = self._think("meeting", SYSTEM.format(memory=self.context()),
+                                     self._analysis_prompt(before, new), ANALYSIS_SCHEMA)
             except Exception as error:
                 self._warn(error)
         if result is None:
@@ -503,6 +506,16 @@ class Agent:
         carry an excerpt of a long transcript, so the lines that matter now come along in the prompt."""
         return [f"[{h.meeting.id} | {h.meeting.date}] {h.line.speaker}: {h.line.text}"
                 for h in self.memory.search(text, RECALL) if h.score >= 2]
+
+    def _think(self, feature: str, system: str, prompt: str, schema: dict[str, Any], max_tokens: int = 4000,
+               **extra: Any) -> dict[str, Any] | None:
+        """One brain call; its tokens and cost go to the usage ledger, also when the call fails after spending them."""
+        try:
+            return self.llm.json(system, prompt, schema, max_tokens, **extra)
+        finally:
+            spent = getattr(self.llm, "last_usage", None)
+            if spent and self.ledger:
+                self.ledger.record(feature, self.brain, spent)
 
     def _thinking(self) -> bool:
         return self.llm is not None and time.monotonic() >= self.resting_until
@@ -663,6 +676,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="answer questions typed into quick capture as they arrive")
     parser.add_argument("--connectors", default=str(linked.FOLDER),
                         help="folder of connector snapshots (*.json) for ask (default: connectors/ in Starnotch's folder); '' to ignore")
+    parser.add_argument("--usage", default=str(ledger.LEDGER),
+                        help="usage ledger, one line per brain call (default: usage.jsonl in Starnotch's folder); '' for none")
     args = parser.parse_args(argv)
 
     # The app ends a meeting with SIGTERM; as an exception it lets a running Claude call clean up its prompt file.
@@ -679,7 +694,8 @@ def main(argv: list[str] | None = None) -> int:
     today = dt.date.fromisoformat(args.today) if args.today else None
     captures = Path(args.captures).expanduser() if args.captures else None
     connectors = Path(args.connectors).expanduser() if args.connectors else None
-    agent = Agent(memory, llm, emit, today, captures, connectors, brain)
+    usage = Path(args.usage).expanduser() if args.usage else None
+    agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage)
     emit({"type": "ready", "meetings": len(memory.meetings), "memory": str(memory.folder),
           "brain": brain, "model": getattr(llm, "model", None), "errors": memory.errors})
     run(agent, sys.stdin, captures if args.watch_captures else None)

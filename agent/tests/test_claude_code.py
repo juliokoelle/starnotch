@@ -47,6 +47,9 @@ elif mode == "overloaded":
 elif mode == "crash":
     print("boom", file=sys.stderr)
     sys.exit(2)
+elif mode == "recorded":  # a real result Claude Code printed, from tests/fixtures
+    print(open(os.environ["FAKE_CLAUDE_OUTPUT"], encoding="utf-8").read())
+    sys.exit(0)
 print(json.dumps(result))
 sys.exit(1 if result["is_error"] else 0)
 """
@@ -217,6 +220,24 @@ def test_cli_ready_names_the_brain(fake, tmp_path):
     assert lines[0]["type"] == "ready" and lines[0]["brain"] == "claude-code" and lines[0]["model"] == "sonnet"
     assert lines[1]["type"] == "answer" and lines[1]["reply_to"] == 1
     assert "Kickoff Lumen-Abo" in fake()[0]["system"]
+    ledger = tmp_path / "Library" / "Application Support" / "Starnotch" / "usage.jsonl"
+    entry = json.loads(ledger.read_text(encoding="utf-8"))  # one line: the question's call
+    assert entry["feature"] == "ask" and entry["brain"] == "claude-code" and entry["input_tokens"] == 900
+
+
+def test_usage_of_a_real_result(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE", "recorded")
+    monkeypatch.setenv("FAKE_CLAUDE_OUTPUT", str(ROOT / "tests" / "fixtures" / "claude-code-ask-cached.json"))
+    brain = code(tmp_path)
+    answer = brain.json("s", "u", {"type": "object"})
+    assert answer["answer"].startswith("Max schuldet dem Team noch die Margenzahlen")
+    assert brain.last_usage == {"model": "claude-sonnet-5-5", "input_tokens": 2, "cache_creation_input_tokens": 1115,
+                                "cache_read_input_tokens": 32025, "output_tokens": 308, "duration_ms": 4456,
+                                "cost_usd": 0.0107465}
+    monkeypatch.setenv("FAKE_CLAUDE", "crash")
+    with pytest.raises(ClaudeCodeError):
+        brain.json("s", "u", {})
+    assert brain.last_usage is None  # nothing known about a call that printed no result
 
 
 def test_a_screenshot_is_read_from_the_brain_folder(fake, tmp_path):

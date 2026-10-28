@@ -40,7 +40,7 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .quickCapture: "Quick capture"
         case .weather: "Weather"
         case .dayProgress: "Day progress"
-        case .notes: "Notes"
+        case .notes: "Notepad"
         case .health: "Sleep and recovery"
         case .lyrics: "Synced lyrics"
         case .lyricsOnHover: "Lyrics on hover"

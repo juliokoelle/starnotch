@@ -229,6 +229,7 @@
 "Weather" = "Wetter";
 "Day progress" = "Tagesfortschritt";
 "Notes" = "Notizen";
+"Notepad" = "Notizblock";
 "Sleep and recovery" = "Schlaf und Erholung";
 "Now, today's high and low and the next hours, in the calendar" = "Jetzt, Höchst- und Tiefstwert und die nächsten Stunden, im Kalender";
 "How much of your work day is done, as a thin ring" = "Wie viel deines Arbeitstags geschafft ist, als dünner Ring";
@@ -301,7 +302,7 @@
 "Weekends count" = "Wochenenden zählen";
 "Day progress beside the notch" = "Tagesfortschritt neben der Notch";
 "A thin ring at rest while the work day runs." = "Ein dünner Ring in Ruhe, solange der Arbeitstag läuft.";
-"Notes folder" = "Notizordner";
+"Notepad folder" = "Ordner des Notizblocks";
 "Choose…" = "Auswählen…";
 "Default" = "Standard";
 "Use folder" = "Ordner verwenden";

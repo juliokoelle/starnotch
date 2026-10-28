@@ -113,7 +113,7 @@ private struct NotesFolderSettings: View {
     @Bindable var daily: DailyStore
 
     var body: some View {
-        LabeledContent("Notes folder") {
+        LabeledContent("Notepad folder") {
             HStack(spacing: 8) {
                 Text((daily.notesFolder.path as NSString).abbreviatingWithTildeInPath)
                     .lineLimit(1).truncationMode(.middle)

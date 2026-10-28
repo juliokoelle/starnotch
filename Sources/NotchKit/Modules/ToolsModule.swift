@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 final class ToolsModule: NotchModule {
     enum Tab: String, CaseIterable {
         case clipboard = "Clipboard", timer = "Timer", shelf = "Shelf"
-        case notes = "Notes"
+        case notes = "Notepad"
 
         var symbol: String {
             switch self {

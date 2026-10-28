@@ -182,8 +182,8 @@ class Jamie:
                           "transcript": LONG, "summary": {"markdown": SUMMARY, "short": "Preis bestätigt."},
                           "participants": [{"id": "0", "name": "Max", "email": "max@example.com"},
                                            {"id": "1", "name": "Speaker 1", "email": None},
-                                           {"id": "2", "name": "Julio", "email": "julio@example.com"}],
-                          "user": {"id": "u", "email": "julio@example.com"},
+                                           {"id": "2", "name": "Nora", "email": "nora@example.com"}],
+                          "user": {"id": "u", "email": "nora@example.com"},
                           "event": {"attendees": [{"name": "Lisa", "email": "lisa@example.com"}]},
                           "tasks": []} for i in range(count)]
         self.page, self.cut, self.chunk = page, cut, chunk

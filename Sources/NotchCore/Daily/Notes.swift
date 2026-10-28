@@ -59,4 +59,30 @@ public enum NoteNaming {
         while lowered.contains("\(base) \(number)".lowercased()) { number += 1 }
         return "\(base) \(number)"
     }
+
+    /// "Groceries (conflict)", numbered when taken: where the app's text goes when the file
+    /// changed elsewhere since the app read it, so neither version is lost.
+    public static func conflictName(_ base: String, taken: Set<String>) -> String {
+        unique("\(base) (conflict)", taken: taken)
+    }
+}
+
+/// Whether a note's file changed outside the app since it was last read or written here.
+public enum NoteSync {
+    public enum Action: Equatable, Sendable {
+        /// The file is as the app left it.
+        case keep
+        /// Changed elsewhere and nothing unsaved here: show the file's text.
+        case reload
+        /// Changed elsewhere while edits wait here: save them beside the file, not over it.
+        case conflict
+    }
+
+    /// `disk` is the file's modification date now; `known` the one after the app's last read or
+    /// write (nil: the app hasn't read it). Any other date counts, older too: a sync service may
+    /// put back an earlier version.
+    public static func action(disk: Date?, known: Date?, unsaved: Bool) -> Action {
+        guard let disk, let known, abs(disk.timeIntervalSince(known)) > 0.01 else { return .keep }
+        return unsaved ? .conflict : .reload
+    }
 }

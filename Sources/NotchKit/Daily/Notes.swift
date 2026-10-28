@@ -5,7 +5,9 @@ import SwiftUI
 
 /// Quick notes: plain Markdown files in a folder, saved while typing. A note starts with a dated
 /// name and takes its first line as its name when the user moves on; files the user made
-/// elsewhere keep their names.
+/// elsewhere keep their names. The folder may be a vault or sit in iCloud: the open note is read
+/// again when its file changed elsewhere, and edits made meanwhile go to a copy beside it
+/// instead of over it.
 @MainActor
 @Observable
 final class NotesStore {
@@ -36,7 +38,11 @@ final class NotesStore {
     /// The editor has the keyboard: the panel stays open.
     var editing = false
     private(set) var savedAt: Date?
+    /// The last save went to a copy: the file had changed elsewhere.
+    private(set) var savedAsCopy = false
     @ObservationIgnored var persists = true
+    /// The open file's modification date after the app last read or wrote it.
+    @ObservationIgnored private var known: Date?
     @ObservationIgnored private var loading = false
     @ObservationIgnored private var saveTask: Task<Void, Never>?
 
@@ -63,6 +69,39 @@ final class NotesStore {
             self.selected = nil
             setText("")
         }
+        syncOpenNote()
+    }
+
+    /// The open note's file changed elsewhere (another editor, iCloud): its text shows, unless
+    /// edits wait here; those then go to a copy when they're saved.
+    func syncOpenNote() {
+        guard persists, let url = selected else { return }
+        let disk = Self.modified(url)
+        guard NoteSync.action(disk: disk, known: known, unsaved: saveTask != nil) == .reload, let fresh = Self.read(url) else { return }
+        known = disk
+        if fresh != text { setText(fresh) }
+    }
+
+    private static func modified(_ url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+    }
+
+    /// Coordinated, so a file iCloud is still bringing down is read whole.
+    private static func read(_ url: URL) -> String? {
+        var text: String?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: nil) { url in
+            text = try? String(contentsOf: url, encoding: .utf8)
+        }
+        return text
+    }
+
+    private static func write(_ text: String, to url: URL) throws {
+        var coordination: NSError?
+        var failure: Error?
+        NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordination) { url in
+            do { try text.write(to: url, atomically: true, encoding: .utf8) } catch { failure = error }
+        }
+        if let error = coordination ?? failure { throw error }
     }
 
     /// The first few kilobytes, enough for the title and the preview.
@@ -76,10 +115,11 @@ final class NotesStore {
     // MARK: Editing
 
     func open(_ note: Note) {
-        guard note.url != selected else { return }
+        guard note.url != selected else { return syncOpenNote() }
         settle()
         selected = note.url
-        setText(persists ? (try? String(contentsOf: note.url, encoding: .utf8)) ?? "" : previewTexts[note.url] ?? note.title)
+        known = persists ? Self.modified(note.url) : nil
+        setText(persists ? Self.read(note.url) ?? "" : previewTexts[note.url] ?? note.title)
     }
 
     /// An empty note; its file appears with the first character typed.
@@ -87,6 +127,7 @@ final class NotesStore {
         Haptics.tick()
         settle()
         selected = nil
+        known = nil
         setText("")
     }
 
@@ -131,11 +172,21 @@ final class NotesStore {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let name = NoteNaming.unique(NoteNaming.placeholder(created: Date()), taken: takenNames)
             selected = folder.appending(path: "\(name).\(NoteNaming.fileExtension)")
+            known = nil
         }
-        guard let url = selected else { return }
+        guard var url = selected else { return }
+        // Changed elsewhere since the app read it: this text goes beside it, the file stays.
+        let copy = NoteSync.action(disk: Self.modified(url), known: known, unsaved: true) == .conflict
+        if copy {
+            let name = NoteNaming.conflictName(url.deletingPathExtension().lastPathComponent, taken: takenNames)
+            url = folder.appending(path: "\(name).\(NoteNaming.fileExtension)")
+            selected = url
+        }
         do {
-            try text.write(to: url, atomically: true, encoding: .utf8)
+            try Self.write(text, to: url)
+            known = Self.modified(url)
             savedAt = Date()
+            savedAsCopy = copy
             upsert(url)
         } catch {
             Log.app.error("Couldn't save the note: \(error.localizedDescription, privacy: .public)")
@@ -153,6 +204,7 @@ final class NotesStore {
             try? FileManager.default.removeItem(at: url)
             notes.removeAll { $0.url == url }
             selected = nil
+            known = nil
             return
         }
         let base = NoteNaming.safeName(NoteNaming.title(of: text))
@@ -223,7 +275,7 @@ struct NotesCard: View {
                         } label: {
                             Image(systemName: "square.and.pencil").font(.system(size: 11.5, weight: .semibold))
                                 .foregroundStyle(Theme.textSecondary)
-                                .frame(width: 28, height: 24)
+                                .frame(width: 28, height: 28)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(PressScale())
@@ -262,7 +314,11 @@ struct NotesCard: View {
                             .simultaneousGesture(TapGesture().onEnded { NotchPanel.takeKeyboard() })
                     }
                     HStack(spacing: 10) {
-                        if let saved = store.savedAt { Text("Saved \(TimeText.clock(saved))") } else { Text("Markdown, saved as you type") }
+                        if let saved = store.savedAt {
+                            store.savedAsCopy ? Text("Changed elsewhere, saved as a copy") : Text("Saved \(TimeText.clock(saved))")
+                        } else {
+                            Text("Markdown, saved as you type")
+                        }
                         Spacer()
                         Button("Show in Finder") { store.reveal() }.buttonStyle(PressScale())
                     }
@@ -273,6 +329,8 @@ struct NotesCard: View {
         }
         .onChange(of: focused) { _, focus in store.editing = focus }
         .onAppear { store.load() }
+        // The focus goes with the view without a change: the panel must not stay held open.
+        .onDisappear { store.editing = false }
     }
 }
 
@@ -300,7 +358,7 @@ private struct NoteRow: View {
                 Button { store.delete(note) } label: {
                     Image(systemName: "trash").font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
-                        .frame(width: 20, height: 28)
+                        .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressScale())

@@ -326,7 +326,10 @@ final class ToolsModule: NotchModule {
 
     func setExpanded(_ expanded: Bool) {
         if !expanded { selected = nil }
-        if !expanded { notes?.settle() }
+        if !expanded {
+            notes?.settle()
+            notes?.editing = false
+        }
     }
 
     /// Typing a note: the panel stays when the pointer leaves.

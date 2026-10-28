@@ -13,12 +13,14 @@ import UniformTypeIdentifiers
 final class ToolsModule: NotchModule {
     enum Tab: String, CaseIterable {
         case clipboard = "Clipboard", timer = "Timer", shelf = "Shelf"
+        case notes = "Notes"
 
         var symbol: String {
             switch self {
             case .clipboard: "doc.on.clipboard"
             case .timer: "timer"
             case .shelf: "tray.and.arrow.down"
+            case .notes: "note.text"
             }
         }
     }
@@ -36,6 +38,8 @@ final class ToolsModule: NotchModule {
     }
     /// The image converter is switched on (it works on the shelf's files).
     var converts = true
+    /// Quick notes (the daily tools' store), set by the app.
+    var notes: NotesStore?
     private(set) var history = ClipboardHistory()
     private(set) var timer = FocusTimer()
     /// Countdown and stopwatch.
@@ -292,7 +296,7 @@ final class ToolsModule: NotchModule {
         case .clipboard:
             if let item = history.list().first(where: { $0.id == selected }) ?? history.list().first { copy(item) }
         case .timer: startOrPause()
-        case .shelf: break
+        case .shelf, .notes: break
         }
     }
 
@@ -322,7 +326,14 @@ final class ToolsModule: NotchModule {
 
     func setExpanded(_ expanded: Bool) {
         if !expanded { selected = nil }
+        if !expanded {
+            notes?.settle()
+            notes?.editing = false
+        }
     }
+
+    /// Typing a note: the panel stays when the pointer leaves.
+    var holdsOpen: Bool { tab == .notes && notes?.editing == true }
 }
 
 // MARK: Images
@@ -408,6 +419,7 @@ private struct ToolsBody: View {
             case .clipboard: ClipboardList(module: module)
             case .timer: TimerCard(module: module)
             case .shelf: ShelfCard(module: module)
+            case .notes: if let notes = module.notes { NotesCard(store: notes) }
             }
         }
     }

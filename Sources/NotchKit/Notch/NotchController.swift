@@ -474,15 +474,18 @@ final class NotchController {
     /// - Parameters:
     ///   - urgent: gets through Watch mode (approvals, a meeting about to start).
     ///   - counts: held back while watching, it counts toward "N updates while you watched".
-    func sneak(_ sneak: Sneak, key: String, onlyAtRest: Bool = false, urgent: Bool = false, counts: Bool = true) {
+    /// - Returns: whether the line shows or waits its turn; false when it was dropped.
+    @discardableResult
+    func sneak(_ sneak: Sneak, key: String, onlyAtRest: Bool = false, urgent: Bool = false, counts: Bool = true) -> Bool {
         // Some events are stale by the time the panel closes (a track change seen in the panel).
-        if onlyAtRest && model.interaction != .rest { return }
+        if onlyAtRest && model.interaction != .rest { return false }
         guard Quiet.letsThrough(urgent: urgent, watching: model.watching) else {
             if counts { heldWhileWatching += 1 }
-            return
+            return false
         }
         sneaks.push(sneak, key: key)
         showNextSneak()
+        return true
     }
 
     private func showNextSneak() {

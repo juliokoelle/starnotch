@@ -1,12 +1,17 @@
 /// The small tools inside or beside the tabs, each with its own switch in the Tools gallery.
 public enum ToolFeature: String, Codable, CaseIterable, Sendable {
     case clipboard, timers, shelf, imageConverter, keepAwake, quickCapture
+    /// The daily tools: weather and day progress in the calendar's header (and the ears), notes in
+    /// the Tools tab, sleep and recovery from a wearable.
+    case weather, dayProgress, notes, health
 
     /// The tab it lives in; nil for tools outside the tabs (the menu, a shortcut, the plus button).
     public var module: ModuleKind? {
         switch self {
         case .clipboard, .timers, .shelf, .imageConverter: .tools
         case .keepAwake, .quickCapture: nil
+        case .notes: .tools
+        case .weather, .dayProgress, .health: nil
         }
     }
 
@@ -21,6 +26,10 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .imageConverter: "Image converter"
         case .keepAwake: "Keep awake"
         case .quickCapture: "Quick capture"
+        case .weather: "Weather"
+        case .dayProgress: "Day progress"
+        case .notes: "Notes"
+        case .health: "Sleep and recovery"
         }
     }
 }

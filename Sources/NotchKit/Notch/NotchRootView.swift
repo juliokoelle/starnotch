@@ -122,7 +122,7 @@ struct NotchRootView: View {
                     }
                     .frame(height: notch.height)
                     if isPeek {
-                        ears.peekLine()
+                        model.peekModule.peekLine()
                             .padding(.horizontal, 12)
                             .frame(maxHeight: .infinity)
                             .transition(.blurSlide(y: -6, scale: 0.96))

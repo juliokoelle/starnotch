@@ -267,9 +267,13 @@ final class AgendaModule: NotchModule {
         return next.start.timeIntervalSince(now) <= 5 * 60 && next.end > now
     }
 
-    var holdsOpen: Bool { selectedID != nil }
+    var holdsOpen: Bool { selectedID != nil || DailyStore.shared.cardShown }
 
     func handleBack() -> Bool {
+        if DailyStore.shared.cardShown {
+            withAnimation(Theme.snappy) { DailyStore.shared.cardShown = false }
+            return true
+        }
         guard showsDetail else { return false }
         withAnimation(Theme.snappy) {
             selectedID = nil
@@ -280,6 +284,7 @@ final class AgendaModule: NotchModule {
 
     func setExpanded(_ expanded: Bool) {
         if !expanded {
+            DailyStore.shared.cardShown = false
             selectedID = nil
             detailDismissed = false
             dayOffset = 0
@@ -740,11 +745,15 @@ private struct AgendaBodyB: View {
                     VStack(alignment: .leading, spacing: 1) {
                         DayHeader(module: module, now: now)
                         if module.span == .day {
-                            ViewThatFits(in: .horizontal) {
-                                Text(summary(now, short: false)).fixedSize()
-                                Text(summary(now, short: true))
+                            HStack(spacing: 8) {
+                                ViewThatFits(in: .horizontal) {
+                                    Text(summary(now, short: false)).fixedSize()
+                                    Text(summary(now, short: true))
+                                }
+                                .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
+                                // Weather, the day's progress and last night, when those tools are on.
+                                if module.isToday { DailyChip(store: .shared) }
                             }
-                            .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
                         } else {
                             Text(module.rangeEvents.filter { $0.kind == .meeting }.count == 1 ? "1 meeting"
                                  : "\(module.rangeEvents.filter { $0.kind == .meeting }.count) meetings")
@@ -799,6 +808,15 @@ private struct AgendaBodyB: View {
                     }
                 }
                 }
+            }
+        }
+        // The day card (weather, work day, last night) over the agenda, from the chip.
+        .overlay {
+            if DailyStore.shared.cardShown {
+                DailyCard(store: .shared)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .background(Color.black.padding(-8))
+                    .transition(.blurSlide(y: -8))
             }
         }
         .onAppear { module.source?.requestAccessIfNeeded() }

@@ -7,5 +7,7 @@
     <key>com.apple.security.automation.apple-events</key><true/>
     <!-- Next meeting, quick capture events, Reminders in Today. -->
     <key>com.apple.security.personal-information.calendars</key><true/>
+    <!-- Weather where the Mac is, approximate, when Weather is on and no city is set. -->
+    <key>com.apple.security.personal-information.location</key><true/>
 </dict>
 </plist>

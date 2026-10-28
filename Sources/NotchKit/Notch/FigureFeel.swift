@@ -126,18 +126,15 @@ extension View {
     func handleSquash() -> some View { modifier(HandleSquash()) }
 }
 
-/// The main character in an ear: the island's handle (squashes with its press), a note beside it
-/// while music plays.
+/// The main character in an ear: the island's handle (squashes with its press).
 struct EarFigure: View {
     let cast: AvatarCast
     let mood: AvatarMood
     let height: CGFloat
     var sink: CGFloat = 0
-    @Environment(\.musicPlaying) private var musicPlaying
 
     var body: some View {
-        AvatarView(character: cast.main, mood: mood, height: height, colorway: cast.colorway, sink: sink,
-                   musicNote: musicPlaying)
+        AvatarView(character: cast.main, mood: mood, height: height, colorway: cast.colorway, sink: sink)
             .handleSquash()
     }
 }

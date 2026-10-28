@@ -432,8 +432,8 @@ final class PreviewDirector {
             return
         }
         if name == "music-agents" || name == "crowded-sneak" {
-            // music-agents: agents working and waiting while music plays, ears as by default: the
-            // agents' figure gets the note. crowded-sneak: a status item right beside the
+            // music-agents: agents working and waiting while music plays, ears as by default (no
+            // note there: it belongs to the music tab and its peek). crowded-sneak: a status item right beside the
             // notch on the left; a sneak stays out of it and drops its right ear.
             agents.usePreview(Self.snapshot(agentsActive: true))
             music.start()

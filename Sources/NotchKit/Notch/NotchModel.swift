@@ -66,8 +66,6 @@ final class NotchModel {
     var earsMode = EarsMode.attention
     /// The notch or the closed island is pressed (from `WheelController`): Tara squashes.
     var handlePressed = false
-    /// Music, for the note beside the main character in any ear while it plays (set by the app delegate).
-    @ObservationIgnored weak var music: NowPlayingModule?
     var watching = false
 
     private var active: [NotchModule] { modules.filter { $0.ambientPriority > 0 } }

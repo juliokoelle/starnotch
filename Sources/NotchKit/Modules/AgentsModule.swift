@@ -797,7 +797,6 @@ private struct MainFigure: View {
     var sink: CGFloat = 0
     var emergeOnAppear = true
     @State private var draggingOut = false
-    @Environment(\.musicPlaying) private var musicPlaying
 
     var body: some View {
         figure
@@ -817,11 +816,10 @@ private struct MainFigure: View {
             let character = module.character(of: main)
             AvatarView(character: character, mood: module.avatarMood(of: main), height: height,
                        colorway: module.colorway(of: main), sink: sink, emergeOnAppear: emergeOnAppear,
-                       level: module.variantLevel(of: main), musicNote: musicPlaying)
+                       level: module.variantLevel(of: main))
         } else {
             AvatarView(character: module.cast.main, mood: module.failedLoops.isEmpty ? .idle : .failed,
-                       height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: emergeOnAppear,
-                       musicNote: musicPlaying)
+                       height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: emergeOnAppear)
         }
     }
 }

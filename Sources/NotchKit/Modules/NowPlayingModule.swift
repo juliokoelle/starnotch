@@ -633,9 +633,9 @@ private struct NowPlayingBody: View {
                     .id(track.id)
                     .transition(.blurSlide(x: 20 * module.direction))
                     Spacer(minLength: 0)
-                    // The main character listens along with headphones.
+                    // The main character listens along, a note beside her while it plays.
                     AvatarView(character: module.cast.main, mood: .music, height: 34,
-                               colorway: module.cast.colorway, emergeOnAppear: false)
+                               colorway: module.cast.colorway, emergeOnAppear: false, musicNote: module.isPlaying)
                         .frame(width: 40, height: 36, alignment: .top)
                 }
 

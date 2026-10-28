@@ -42,7 +42,6 @@ struct NotchRootView: View {
                 .environment(\.figuresHidden, model.watching)
                 .environment(\.figureCue, figureCue)
                 .environment(\.handlePressed, model.handlePressed)
-                .environment(\.musicPlaying, model.music?.isPlaying == true)
                 .contentShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
                 .onTapGesture { if ![.expanded, .palette, .inbox].contains(model.interaction) { onTapIsland() } }
             Spacer(minLength: 0)

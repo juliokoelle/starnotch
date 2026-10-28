@@ -18,7 +18,9 @@ final class AskSpeech {
     }
 
     /// Asks for speech recognition, then the microphone (each only the first time); true when both are allowed.
-    static func authorize(_ done: @escaping @MainActor @Sendable (Bool) -> Void) {
+    /// Nonisolated, so the callbacks aren't the main actor's: macOS answers both on its own queues, and Swift
+    /// stops the app when a main-actor closure runs there. The answer comes back on the main actor.
+    nonisolated static func authorize(_ done: @escaping @MainActor @Sendable (Bool) -> Void) {
         SFSpeechRecognizer.requestAuthorization { status in
             guard status == .authorized else {
                 Task { @MainActor in done(false) }

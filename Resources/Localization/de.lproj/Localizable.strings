@@ -559,3 +559,19 @@
 "Couldn't let the Mac sleep again with the lid closed" = "Der Mac konnte mit geschlossenem Deckel nicht wieder schlafen";
 "Trying again in a minute" = "Neuer Versuch in einer Minute";
 "Your Mac stays awake with the lid closed, on power or on battery" = "Dein Mac bleibt zugeklappt wach, am Strom oder im Akkubetrieb";
+/* Wave 3: Ask Tara dictates with Wispr Flow */
+"Stop dictating" = "Diktat beenden";
+/* Wave 3: Ask Tara's answer card */
+"Listening…" = "Hört zu …";
+"Sources" = "Quellen";
+"Copy" = "Kopieren";
+"Copied" = "Kopiert";
+"Copy the answer" = "Antwort kopieren";
+"Save to notes" = "In Notizen sichern";
+"Saved to the notepad" = "Im Notizblock gesichert";
+"Saved to the inbox" = "Im Eingang gesichert";
+"Couldn't save" = "Sichern fehlgeschlagen";
+"Add the question and answer to your notes inbox" = "Frage und Antwort in den Eingang deiner Notizen schreiben";
+"Save the question and answer as a note in the notepad" = "Frage und Antwort als Notiz im Notizblock sichern";
+/* Wave 3: Ask Tara falls back from Wispr Flow */
+"Wispr Flow didn't start, so Apple's recognizer listens" = "Wispr Flow ist nicht gestartet, deshalb hört Apples Spracherkennung zu";

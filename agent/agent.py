@@ -22,7 +22,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, TextIO
+from typing import Any, Callable, Iterable, TextIO
 
 import captures as quick
 import connectors as linked
@@ -162,8 +162,9 @@ APPLE_LANGUAGE = {"de": "The person's locale is de_DE.\n", "en": ""}
 APPLE_REPLY = {"de": "You MUST respond in German.", "en": "You MUST respond in English."}
 APPLE_ASK_SYSTEM = """{locale}You are Tara, the user's assistant in the Mac's notch. Answer the question only from the material \
 in the prompt: lines from the user's meetings, their quick-capture notes and items from their other tools. Lead with the \
-answer, in at most three short sentences and under 300 characters. Never write an id in the answer, only in the \
-sources. Back every fact with a source: kind "meeting" with the meeting id and words \
+answer, in at most three short sentences and under 300 characters. Write the answer in your own words: no quotation \
+marks, no lines from the transcript, no speaker names with a colon and no labels such as (meeting); quotes go only in \
+the sources, as do ids. Back every fact with a source: kind "meeting" with the meeting id and words \
 copied exactly from one line of that meeting, kind "capture" or "note" with the id in brackets. If the material does \
 not answer the question, say plainly that it is not in the material and give no sources. A general question that is \
 not about the user's work you may answer briefly, with no sources.{picture} {reply}"""
@@ -415,6 +416,9 @@ class Agent:
             known = ({m.id for m in self.memory.meetings} | {c.id for c in self.captures()}
                      | {item.id for item in notes})
             text = re.sub(r"\s*\[([^\]]+)\]", lambda m: "" if m.group(1) in known else m.group(0), text).strip()
+            speakers = {name for m in self.memory.meetings
+                        for name in [*m.participants, *(line.speaker for line in m.transcript)]}
+            text = _clean_reply(text, lambda quote: self.memory.find_quote(quote) is not None, speakers)
         if image and self.brain == "apple":  # say so rather than seem to have looked
             text = NO_PICTURE[_language(question)] + text
         return {"type": "answer", "question": question, "text": text, "sources": sources, "brain": brain}
@@ -785,6 +789,83 @@ def _conversation(history: Any, keep: int = HISTORY, chars: int = 600) -> str:
         if question:
             lines += [f"User: {question[:chars]}", f"Tara: {answer[:chars]}"]
     return "# Conversation so far\n" + "\n".join(lines) + "\n\n# Question now\n" if lines else ""
+
+
+# The on-device model pastes transcript lines into its answer now and then ("… wurde erwähnt: 'Speaker 0: Also, …'
+# (meeting)"), though told not to: a quoted line goes, and the words that lead into it go too when they only introduce
+# it ("Jonas sagte dazu:"), else they stay as the sentence they are; a few quoted words from the meetings lose their
+# marks; labels and speaker tags go. A "Name:" counts as a speaker tag only for a speaker of the meetings, so quoted
+# titles like "Status: offen" stay. Straight single quotes count only around words, so apostrophes stay. Line breaks
+# and lists stay.
+QUOTED = re.compile(r'"([^"\n]+)"|„([^“”"\n]+)[“”"]|“([^”\n]+)”|‘([^’\n]+)’|«([^»\n]+)»|»([^«\n]+)«'
+                    r"|(?<!\w)'([^'\n]+)'(?!\w)")
+GENERIC_SPEAKER = r"(?:Speaker|Sprecher(?:in)?)\s*\d+"
+LOOSE_TAG = re.compile(rf"\b{GENERIC_SPEAKER}\s*:\s*")
+# A transcript line pasted without quotes after a colon: "…erwähnt: Speaker 0: <line> (meeting)".
+TAGGED_LINE = re.compile(rf"(?<=:)[ \t]*{GENERIC_SPEAKER}\s*:[ \t]*([^\n\0(]+)")
+LABEL = re.compile(r"\s*\((?:meetings?|captures?|quick capture|notes?|notiz(?:en)?|besprechung(?:en)?)\)", re.I)
+LINE_WORDS = 6  # a quote this long from the meetings is a line, not a few words
+# Where the clause before a colon starts: a sentence end (not the period of "12. Oktober"), a comma, a line break.
+CLAUSE_START = re.compile(r"(?<!\d)[.!?](?=\s)|[;,\n]")
+# A clause that only introduces a quote: a few words, no number, a verb of saying ("wie Jonas sagte", "it was noted").
+INTRO_WORDS = 5
+SAYING = re.compile(r"\b(?:sag|gesagt|meint|erwähn|bestätig|erklär|schrieb|geschrieben|betont|hieß|heißt|lautet"
+                    r"|zitier|said|say|mention|note|state|wrote|write|told|explain|confirm|put it|quote)", re.I)
+
+
+def _introduces_only(clause: str) -> bool:
+    return len(clause.split()) <= INTRO_WORDS and not re.search(r"\d", clause) and bool(SAYING.search(clause))
+
+
+def _clean_reply(text: str, from_meetings: Callable[[str], bool], speakers: Iterable[str] = ()) -> str:
+    """The on-device model's answer as a short reply: no quoted transcript lines, labels or speaker tags."""
+    names = "".join(f"|{re.escape(s)}" for s in sorted({s for s in speakers if s}, key=len, reverse=True))
+    tag = re.compile(rf"^\s*(?:{GENERIC_SPEAKER}{names})\s*:\s+")
+    lines: list[str] = []  # the lines dropped, for an answer that was nothing else
+
+    def replace(match: re.Match[str]) -> str:
+        inner = next(g for g in match.groups() if g is not None)
+        bare = tag.sub("", inner, count=1)
+        words = len(bare.split())
+        if bare != inner or (words >= LINE_WORDS and from_meetings(bare)):
+            lines.append(bare)
+            return "\0"  # a line: dropped below, with the words that only lead into it
+        return bare if words >= 3 and from_meetings(bare) else match.group(0)
+
+    def tagged(match: re.Match[str]) -> str:
+        line = match.group(1).strip()
+        if len(line.split()) < LINE_WORDS or not from_meetings(line):
+            return match.group(0)
+        lines.append(line)
+        return "\0"
+
+    marked = LABEL.sub("", TAGGED_LINE.sub(tagged, QUOTED.sub(replace, text)))
+    out, rest = "", marked
+    while "\0" in rest:
+        before, rest = rest.split("\0", 1)
+        head = (out + before).rstrip(" \t")
+        new_sentence = not rest.strip() or rest.lstrip()[:1].isupper()
+        if head.endswith(":"):
+            head = head[:-1].rstrip()
+            start = max((m.end() for m in CLAUSE_START.finditer(head)), default=0)
+            if _introduces_only(head[start:]):  # "Jonas sagte dazu:" goes with the line
+                head = head[:start].rstrip(" \t")
+                if head.endswith(",") and new_sentence:
+                    head = head[:-1] + "."
+            elif new_sentence:  # "Der Preis bleibt bei 30 Euro:" stays, as a sentence
+                head += "."
+        out = head
+    cleaned = out + rest
+    cleaned = LOOSE_TAG.sub("", cleaned)
+    cleaned = re.sub(r"[ \t]+([,.;:!?])", r"\1", cleaned)
+    cleaned = re.sub(r"[,;:](?=[,;:.!?])", "", cleaned)
+    cleaned = re.sub(r"([.!?])(?:[ \t]*[.,;:])+", r"\1", cleaned)
+    cleaned = re.sub(r"^[\s,;:]+", "", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", re.sub(r"[ \t]+\n", "\n", cleaned)).strip()
+    if len(cleaned.split()) >= 2:
+        return cleaned
+    # Nothing but a line and the words leading into it: the line's words rather than nothing.
+    return re.sub(r"\s+", " ", " ".join(lines)).strip() or cleaned
 
 
 def _unprefixed(quote: str, speaker: str) -> str:

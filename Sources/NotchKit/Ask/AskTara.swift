@@ -42,10 +42,32 @@ final class AskTara {
     private(set) var attachment: Attachment?
     /// The window's picture is being taken.
     private(set) var capturing = false
+    /// The answer went to the clipboard a moment ago.
+    private(set) var copied = false
+    /// Where "Save to notes" put the answer, or that it couldn't.
+    enum Saved: Equatable { case notepad, inbox, failed }
+    private(set) var saved: Saved?
+    /// A short word under the field, such as Wispr Flow not starting; it goes after a few seconds.
+    private(set) var notice: String?
 
     /// The bubble opens beside Tara: the companion comes out if needed and takes the keyboard.
     @ObservationIgnored var onOpen: () -> Void = {}
     @ObservationIgnored var onClose: () -> Void = {}
+    /// Wispr Flow: when it's installed, the mic starts its hands-free dictation (launching it if
+    /// needed), which pastes into the field.
+    @ObservationIgnored var wispr: DictationModule? {
+        didSet { wispr?.onPhase = { [weak self] phase in self?.wisprChanged(phase) } }
+    }
+    /// The mic started Wispr Flow from here (its own state says whether it still listens).
+    private var dictatingHere = false
+    /// Wispr Flow didn't start from this bubble: the mic uses Apple's recognizer until it closes.
+    @ObservationIgnored private var wisprDidntStart = false
+    /// Esc or quitting while Wispr Flow dictates: the bubble waits for its paste before it goes.
+    @ObservationIgnored private var closingAfterDictation = false
+    @ObservationIgnored private var noticeReset: Task<Void, Never>?
+    /// The notepad, where "Save to notes" writes when no notes vault is connected.
+    @ObservationIgnored var notes: NotesStore?
+    @ObservationIgnored private var copiedReset: Task<Void, Never>?
 
     @ObservationIgnored private var process: MeetingProcess?
     @ObservationIgnored private var processBrain: TaraBrain?
@@ -93,6 +115,15 @@ final class AskTara {
 
     var isListening: Bool { phase == .listening }
 
+    /// Wispr Flow dictates into the field; it ends with a second press or by itself.
+    var isDictating: Bool {
+        guard dictatingHere, let wispr else { return false }
+        switch wispr.phase {
+        case .starting, .listening: return true
+        case .idle, .sent, .unavailable: return false
+        }
+    }
+
     init(demo: Bool = false) {
         self.demo = demo
         AskWindowShot.removeLeftovers(in: Self.shotFolder)  // a crash or force quit left them
@@ -101,6 +132,7 @@ final class AskTara {
     /// Tara's face while the bubble is open.
     var mood: AvatarMood? {
         guard isOpen else { return nil }
+        if isDictating { return .listening }
         switch phase {
         case .thinking: return .thinking
         case .listening: return .listening
@@ -128,9 +160,18 @@ final class AskTara {
     }
 
     func close() {
-        guard isOpen else { return }
+        guard isOpen, !closingAfterDictation else { return }
+        if isDictating {
+            closingAfterDictation = true
+            finishDictation { [weak self] in
+                self?.closingAfterDictation = false
+                self?.close()
+            }
+            return
+        }
         holdTask?.cancel()
         cancelSpeech()
+        stopDictating()
         timeout?.cancel()
         pending = nil
         withAnimation(Theme.reduceMotion ? nil : Theme.close) {
@@ -141,6 +182,9 @@ final class AskTara {
             expanded = nil
             phase = .idle
         }
+        resetActions()
+        setNotice(nil)
+        wisprDidntStart = false
         conversation.clear()
         removeAttachment()
         removeSentImage()
@@ -159,6 +203,7 @@ final class AskTara {
             expanded = nil
             phase = .idle
         }
+        resetActions()
         conversation.clear()
         focusRequest += 1
     }
@@ -171,6 +216,7 @@ final class AskTara {
     /// The app quits.
     func shutdown() {
         cancelSpeech()
+        stopDictating()
         process?.terminate()
         process = nil
         removeAttachment()
@@ -201,12 +247,77 @@ final class AskTara {
 
     // MARK: Speaking
 
+    /// The mic: Wispr Flow's hands-free dictation when Wispr Flow is installed, opened if it isn't
+    /// running (a second press stops it and it pastes the words into the field), else Apple's
+    /// recognizer. Holding ⌃⌥T always uses the recognizer.
     func toggleListening() {
-        isListening ? stopListening(andSend: true) : startListening()
+        if isDictating { return stopDictating() }
+        if isListening { return stopListening(andSend: true) }
+        guard !isThinking else { return }
+        if let wispr, wispr.isInstalled, !wisprDidntStart, !previewing {
+            focusRequest += 1  // the field has the keyboard, so Wispr's paste lands there
+            dictatingHere = true
+            // Not running: the URL launches it first, which takes some seconds more.
+            wispr.start(patience: wispr.isRunning ? 2.5 : 12)
+        } else {
+            startListening()
+        }
+    }
+
+    private func stopDictating() {
+        let wasDictating = isDictating
+        dictatingHere = false
+        guard wasDictating else { return }
+        wispr?.stop()
+        focusRequest += 1
+    }
+
+    /// Wispr Flow has no cancel: stopping it always pastes what it heard where the keyboard is. So
+    /// the bubble keeps the keyboard until the words land in the field (or 2.5 s pass), then `done`.
+    func finishDictation(then done: @escaping @MainActor () -> Void) {
+        guard isDictating else { return done() }
+        let before = text
+        stopDictating()
+        Task { [weak self] in
+            let deadline = Date().addingTimeInterval(2.5)
+            while Date() < deadline {
+                guard let self, self.text == before else { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            try? await Task.sleep(for: .milliseconds(150))  // the rest of the paste
+            done()
+        }
+    }
+
+    private func wisprChanged(_ phase: DictationModule.Phase) {
+        guard dictatingHere else { return }
+        switch phase {
+        case .starting, .listening:
+            break
+        case .idle:
+            dictatingHere = false  // it finished by itself and pastes
+        case .sent, .unavailable:
+            // The microphone never came up: no permission, signed out, or it didn't launch.
+            dictatingHere = false
+            wisprDidntStart = true
+            setNotice(Localization.string("Wispr Flow didn't start, so Apple's recognizer listens"))
+            startListening()
+        }
+    }
+
+    private func setNotice(_ message: String?) {
+        noticeReset?.cancel()
+        withAnimation(Theme.snappy) { notice = message }
+        guard message != nil else { return }
+        noticeReset = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(Theme.snappy) { self?.notice = nil }
+        }
     }
 
     func startListening() {
-        guard !isListening, !isThinking else { return }
+        guard !isListening, !isThinking, !isDictating else { return }
         // Sample data never brings up a permission prompt (a recorded demo); speaking works if it's allowed.
         if AskSpeech.isDenied || (demo && !AskSpeech.isAuthorized) {
             fail("Tara needs speech recognition and the microphone: System Settings › Privacy & Security")
@@ -285,6 +396,8 @@ final class AskTara {
     func send() {
         // Return while speaking: the question goes once the last words are in.
         if isListening || collectingSpeech { return stopListening(andSend: true) }
+        // Return while Wispr Flow dictates: it stops and pastes; the question goes with the next return.
+        if isDictating { return stopDictating() }
         let question = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty, !isThinking else { return }
         if previewing { return }
@@ -310,6 +423,52 @@ final class AskTara {
             self.pending = nil
             self.fail("Tara took too long to answer; see tara-ask.log in the app's folder")
         }
+    }
+
+    // MARK: Copy and save
+
+    func copyAnswer() {
+        guard let answer else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(answer.text, forType: .string)
+        Haptics.tick()
+        copied = true
+        copiedReset?.cancel()
+        copiedReset = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.6))
+            guard !Task.isCancelled else { return }
+            self?.copied = false
+        }
+    }
+
+    /// The question and answer go to the notes: a line in the vault's inbox when a notes vault is
+    /// connected, else a note of their own in the notepad. Once per answer.
+    func saveAnswer() {
+        guard let answer, saved == nil || saved == .failed else { return }
+        let question = asked ?? answer.question
+        let result: Saved
+        if previewing {
+            result = Self.savesToInbox ? .inbox : .notepad
+        } else if Self.savesToInbox, let inbox = CaptureInbox.markdownFile {
+            let capture = Capture(text: answer.inboxLine(asked: question, sourcesLabel: Localization.string("Sources")),
+                                  route: .note)
+            result = CaptureInbox.appendMarkdown(capture, to: inbox) ? .inbox : .failed
+        } else if let notes, notes.add(answer.note(asked: question, sourcesLabel: Localization.string("Sources"))) {
+            result = .notepad
+        } else {
+            result = .failed
+        }
+        result == .failed ? Haptics.tick() : Haptics.confirm()
+        saved = result
+    }
+
+    /// A notes vault is connected and its inbox takes Markdown: saved answers go there.
+    static var savesToInbox: Bool { Runtime.vault?.isConfigured == true && CaptureInbox.markdownFile != nil }
+
+    private func resetActions() {
+        copiedReset?.cancel()
+        copied = false
+        saved = nil
     }
 
     // MARK: Dropped on a window
@@ -443,6 +602,7 @@ final class AskTara {
             if !answer.onRules { offlineReason = nil }  // Claude answered: it's reachable again
             conversation.append(question: answer.question, answer: answer.text)
             Haptics.tick()
+            resetActions()
             withAnimation(Theme.snappy) {
                 self.answer = answer
                 phase = .answered
@@ -464,6 +624,17 @@ final class AskTara {
     }
 
     // MARK: Previews
+
+    /// Long enough to scroll in the answer card.
+    private static let longAnswer = """
+        Beim Preis habt ihr euch auf 30 Euro im Monat festgelegt. Im Kickoff am 12. Oktober lagen zwei Vorschläge auf dem Tisch: 25 Euro, um schneller Nutzer zu gewinnen, und 30 Euro, weil die Kosten pro Nutzer sonst kaum gedeckt wären. Jonas hat sich für 30 Euro ausgesprochen, und niemand hat widersprochen.
+
+        Im Weekly eine Woche später kam das Thema noch einmal auf, weil Max einen Rabatt für Jahresabos vorgeschlagen hat. Der Rabatt ist noch offen: Max rechnet bis Freitag durch, was zwei Monate gratis im Jahresabo kosten würden. Am Monatspreis ändert das nichts, die 30 Euro bleiben.
+
+        Offen ist außerdem, ob es einen günstigeren Tarif für Studierende gibt. Das wurde nur kurz erwähnt und auf die Zeit nach dem Launch verschoben. Für die Launch-Seite heißt das: ein Preis, 30 Euro im Monat, und der Hinweis auf das Jahresabo erst, wenn Max' Rechnung steht.
+
+        Nächster Schritt laut deinen Notizen: Preis mit Max klären, bevor die Seite live geht.
+        """
 
     /// `--preview ask-empty | ask-typed | ask-listening | ask-thinking | ask-answer | ask-long | ask-rules | ask-window | ask-failed`
     /// show made-up states.
@@ -505,7 +676,7 @@ final class AskTara {
                 self.phase = .answered
             case "ask-long":
                 self.asked = question
-                self.answer = AskAnswer(question: question, text: String(repeating: "Im Kickoff wurden 30 Euro im Monat beschlossen und 25 Euro verworfen. ", count: 5), sources: [
+                self.answer = AskAnswer(question: question, text: Self.longAnswer, sources: [
                     AskSource(id: "0", kind: .meeting, title: "Kickoff Lumen-Abo", quote: "Das Lumen-Abo kostet 30 Euro im Monat.", speaker: "Jonas", date: "2026-10-12"),
                     AskSource(id: "1", kind: .capture, title: "Preis mit Max klären", quote: "Preis mit Max klären", date: "2026-10-24"),
                 ], brain: "claude-code")

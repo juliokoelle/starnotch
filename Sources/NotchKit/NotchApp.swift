@@ -13,6 +13,7 @@ public enum NotchApp {
         Localization.apply(Runtime.language)
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)  // menu bar agent, no Dock icon (LSUIElement)
+        EditMenu.install()
         let delegate = AppDelegate()
         Self.delegate = delegate
         app.delegate = delegate

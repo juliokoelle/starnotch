@@ -14,6 +14,12 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
     /// Answering Cursor's and Copilot CLI's prompts in the notch: their hooks run before every
     /// shell (and MCP) call, so this is a choice of its own, offered once the status is set up.
     case cursorApprovals, copilotApprovals
+    /// Tara's memory as read-only MCP tools in the user's AI apps (`agent/memory_mcp.py`), one
+    /// choice per app.
+    case memoryClaudeDesktop, memoryClaudeCode, memoryCursor, memoryChatGPT
+
+    /// The AI apps that can read Tara's memory.
+    public static let memoryItems: [SetupItem] = [.memoryClaudeDesktop, .memoryClaudeCode, .memoryCursor, .memoryChatGPT]
 
     public var title: String {
         switch self {
@@ -32,6 +38,21 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
         case .opencodePlugin: "opencode status and approvals"
         case .cursorApprovals: "Answer Cursor in the notch"
         case .copilotApprovals: "Answer Copilot CLI in the notch"
+        case .memoryClaudeDesktop: "Tara's memory in Claude Desktop"
+        case .memoryClaudeCode: "Tara's memory in Claude Code"
+        case .memoryCursor: "Tara's memory in Cursor"
+        case .memoryChatGPT: "Tara's memory in ChatGPT"
+        }
+    }
+
+    /// The app's name alone, for the memory items' rows.
+    public var appName: String? {
+        switch self {
+        case .memoryClaudeDesktop: "Claude Desktop"
+        case .memoryClaudeCode: "Claude Code"
+        case .memoryCursor: "Cursor"
+        case .memoryChatGPT: "ChatGPT"
+        default: nil
         }
     }
 
@@ -64,6 +85,14 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
             "Adds two hooks to ~/.cursor/hooks.json, with a backup. Every shell and MCP command waits up to 30 s for your answer in the notch, also those on Cursor's allowlist; unanswered or with the app closed, Cursor asks you itself."
         case .copilotApprovals:
             "Adds ~/.copilot/hooks/starnotch-approvals.json. Shell, edit and MCP requests wait up to 30 s for your answer in the notch, also those Copilot would allow on its own; unanswered, Copilot goes on as usual. Sessions started with --allow-all are left alone."
+        case .memoryClaudeDesktop:
+            "Adds the starnotch-memory MCP server to ~/Library/Application Support/Claude/claude_desktop_config.json, with a backup. Read only: search, meetings, commitments, decisions, today."
+        case .memoryClaudeCode:
+            "Runs claude mcp add --scope user starnotch-memory: every Claude Code session can search Tara's memory. Read only."
+        case .memoryCursor:
+            "Adds the starnotch-memory MCP server to ~/.cursor/mcp.json, with a backup. Read only."
+        case .memoryChatGPT:
+            "Adds a [mcp_servers.starnotch-memory] block to ~/.codex/config.toml, with a backup: ChatGPT's Mac app runs local tools from there (Codex reads it too). Read only."
         }
     }
 

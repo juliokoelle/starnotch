@@ -36,6 +36,9 @@ final class SystemModule: NotchModule {
     var keepAwake = false
     /// Keep awake is switched on in Settings › Tools.
     var offersKeepAwake = true
+    /// Tara's memory is paused (the switch in this row pauses it until resumed, or resumes it).
+    var memoryPaused = false
+    @ObservationIgnored var onToggleMemory: (() -> Void)?
     @ObservationIgnored var onToggleKeepAwake: (() -> Void)?
     /// Keep awake's second level on a laptop: also with the lid closed, until a time or until
     /// switched off. `lidBusy` while macOS asks for the password or pmset runs.
@@ -809,6 +812,15 @@ private struct StatusChips: View {
                 if module.offersKeepAwake, module.offersLidAwake {
                     lidToggle(labels: labels(module.lidAwakeOn))
                         .transition(.opacity)
+                }
+                if module.onToggleMemory != nil {
+                    toggle(module.memoryPaused ? "pause.circle.fill" : "pause.circle",
+                           labels(module.memoryPaused) ? (module.memoryPaused ? "Tara paused" : "Pause Tara") : nil,
+                           on: module.memoryPaused,
+                           help: module.memoryPaused ? "Tara's memory is paused: nothing new is recorded. Click to resume"
+                                                     : "Pause Tara's memory: no meetings, captures, notes or clipboard until you resume") {
+                        module.onToggleMemory?()
+                    }
                 }
                 toggle(module.darkMode ? "moon.fill" : "moon", labels(module.darkMode) ? "Dark mode" : nil, on: module.darkMode,
                        help: "Switch the whole Mac between light and dark") {

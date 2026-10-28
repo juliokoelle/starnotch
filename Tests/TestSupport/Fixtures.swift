@@ -13,7 +13,7 @@ public enum Fixtures {
         (try? String(contentsOf: root.appending(path: path), encoding: .utf8)) ?? ""
     }
 
-    static func temp(_ name: String) -> URL {
+    public static func temp(_ name: String) -> URL {
         let url = FileManager.default.temporaryDirectory.appending(path: "\(name)-\(UUID().uuidString.prefix(8))")
         // Setup failures stop the run here, so a broken temp folder is not reported later as a missing session.
         try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

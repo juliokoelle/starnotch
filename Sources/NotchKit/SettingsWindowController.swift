@@ -10,9 +10,10 @@ final class SettingsWindowController {
     private var window: NSWindow?
     private let setup: SetupCenter?
     private let jamie: JamieConnect?
-    private let openSetup: () -> Void
+    private let openSetup: (Onboarding.Step) -> Void
 
-    init(state: AppState, cast: AvatarCast, setup: SetupCenter? = nil, jamie: JamieConnect? = nil, openSetup: @escaping () -> Void = {}) {
+    init(state: AppState, cast: AvatarCast, setup: SetupCenter? = nil, jamie: JamieConnect? = nil,
+         openSetup: @escaping (Onboarding.Step) -> Void = { _ in }) {
         self.state = state
         self.cast = cast
         self.setup = setup

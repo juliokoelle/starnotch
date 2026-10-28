@@ -50,7 +50,7 @@ Requires macOS 14 Sonoma or later and the Swift 6 toolchain (Xcode or just the C
 
 The first launch is one calm window with one card per step: meet Tara and pick her look, set up your agents, allow the calendar, allow the music players (only when the system-wide source can't be read), connect Jamie, choose how Tara thinks (your Claude subscription through Claude Code, your own API key, Apple Intelligence on this Mac, or simple rules), pick your notes folder, and switch on the tools you want. Each permission and connection says in one sentence why it asks and where the data stays; optional ones say so and can be skipped for now, and a granted permission turns its icon into a check. Everything is in Settings later, and nothing is set up until you click; open at login starts off. At the end Tara drops out of the notch with "Welcome to Starnotch" (left out with Reduce Motion), greets you in a speech bubble beside her and shows what she already found on this Mac: your agents, meetings in her memory, your notes and your next meeting.
 
-<p align="center"><img src="docs/screenshots/onboarding.png" width="420" alt="Starnotch first launch, step one of eight: meet Tara, pick her character and colour"></p>
+<p align="center"><img src="docs/screenshots/onboarding.png" width="420" alt="Starnotch first launch, step one of nine: meet Tara, pick her character and colour"></p>
 
 ## Set up in one click
 
@@ -73,6 +73,8 @@ The second step of the first launch lists the agents it found (Claude Code, Code
 ## Privacy
 
 Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. Synced lyrics, when you switch them on, ask LRCLIB (lrclib.net) with the track's title, artist, album and length. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API. Once you connect Jamie, the app reads your meetings from your Jamie account on its own, every 30 minutes and after your meetings. Ask Tara sends your question, the meeting memory, your quick captures, any connector snapshots and, when you drop her on a window, its picture to the brain you chose (Claude Code on your plan, or Anthropic's API); with rules nothing leaves the Mac.
+
+Settings › Tara's memory decides what she keeps: pause it (an hour, until midnight, or until you resume; also from the System tab, a mark on the notch shows it), switch single sources off (meetings and calendar, quick captures, notes vault, clipboard, agent sessions), keep apps out (password apps always), and delete what she remembers per source. If you let your AI apps read her memory (Claude Desktop, Claude Code, Cursor, ChatGPT's Mac app; a step of its own in the setup, off until you choose an app, and Settings › Tara's memory › Choose apps…), they get a read-only MCP server on this Mac that leaves out every source you switched off; what they do with an answer is up to them. While one is set up, the app keeps today's calendar (titles, times, places, attendees, join links) in its folder for that server; Ask Tara doesn't send it. Details: [agent/README.md](agent/README.md#taras-memory-in-every-ai-app).
 
 ## Now playing from any app
 

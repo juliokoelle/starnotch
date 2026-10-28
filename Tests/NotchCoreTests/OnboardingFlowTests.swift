@@ -12,7 +12,7 @@ import TestSupport
     }
 
     @Test func hiddenStepsAreSkippedBothWays() {
-        let flow = OnboardingFlow(hidden: [.music, .notes])
+        let flow = OnboardingFlow(hidden: [.music, .notes, .memory])
         #expect(flow.steps == [.tara, .agents, .calendar, .meetings, .brain, .tools])
         #expect(flow.next(after: .calendar) == .meetings)
         #expect(flow.previous(before: .meetings) == .calendar)
@@ -22,8 +22,11 @@ import TestSupport
 
     @Test func aHiddenStepAskedForLeadsToTheNextShownOne() {
         let flow = OnboardingFlow(hidden: [.music, .notes])
+        #expect(flow.resolve(.notes) == .memory)
+        let noApps = OnboardingFlow(hidden: [.music, .notes, .memory])
+        #expect(noApps.resolve(.notes) == .tools)
+        #expect(noApps.resolve(.memory) == .tools)
         #expect(flow.resolve(.music) == .meetings)
-        #expect(flow.resolve(.notes) == .tools)
         #expect(flow.resolve(.agents) == .agents)
         // Opened by hand anyway, Back and Continue still lead into the shown steps.
         #expect(flow.next(after: .music) == .meetings)
@@ -32,7 +35,16 @@ import TestSupport
 
     @Test func optionalStepsAreTheOnesTheNotchDoesWithout() {
         let optional = OnboardingStep.allCases.filter(\.isOptional)
-        #expect(optional == [.music, .meetings, .notes])
+        #expect(optional == [.music, .meetings, .notes, .memory])
+    }
+
+    @Test func theAIAppsComeAfterTheNotesAndBeforeTheTools() {
+        let flow = OnboardingFlow()
+        #expect(flow.next(after: .notes) == .memory)
+        #expect(flow.next(after: .memory) == .tools)
+        #expect(flow.previous(before: .tools) == .memory)
+        #expect(flow.steps.last == .tools)
+        #expect(OnboardingFlow(hidden: [.notes]).previous(before: .memory) == .brain)
     }
 
     @Test func stepNumbersStayStableForLaunchFlags() {
@@ -40,5 +52,6 @@ import TestSupport
         #expect(OnboardingStep(rawValue: 0) == .tara)
         #expect(OnboardingStep(rawValue: 1) == .agents)
         #expect(OnboardingStep(rawValue: 7) == .tools)
+        #expect(OnboardingStep(rawValue: 8) == .memory)
     }
 }

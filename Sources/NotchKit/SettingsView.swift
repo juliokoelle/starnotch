@@ -9,7 +9,8 @@ struct SettingsView: View {
     let cast: AvatarCast
     var setup: SetupCenter?
     var jamie: JamieConnect?
-    var openSetup: () -> Void = {}
+    /// Opens the setup window at a step: the agents for "Set up more…", the AI apps for Tara's memory.
+    var openSetup: (Onboarding.Step) -> Void = { _ in }
 
     var body: some View {
         Form {
@@ -65,9 +66,17 @@ struct SettingsView: View {
                 }
             }
 
+            Section {
+                MemorySettings(state: state, setup: setup, openSetup: { openSetup(.memory) })
+            } header: {
+                Text("Tara's memory")
+            } footer: {
+                Text(MemorySettings.footer).foregroundStyle(.secondary)
+            }
+
             if let setup {
                 Section {
-                    SetupLedgerList(center: setup, openSetup: openSetup)
+                    SetupLedgerList(center: setup, openSetup: { openSetup(.agents) })
                 } header: {
                     Text("What's set up")
                 } footer: {

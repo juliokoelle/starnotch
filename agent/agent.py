@@ -26,6 +26,7 @@ from typing import Any, Callable, Iterable, TextIO
 
 import captures as quick
 import connectors as linked
+import privacy as switches
 from jamie_sync import last_synced
 import usage as ledger
 from memory import Commitment, Line, Meeting, Memory, _bare, _facts, _words
@@ -248,8 +249,9 @@ class Agent:
     def __init__(self, memory: Memory, llm: Any | None, emit: Callable[[dict[str, Any]], None],
                  today: dt.date | None = None, captures: Path | None = None, connectors: Path | None = None,
                  brain: str | None = None, usage: Path | None = None, gap: float = MEETING_GAP,
-                 clock: Callable[[], float] | None = None):
-        self.memory = memory
+                 clock: Callable[[], float] | None = None, privacy: Path | None = None):
+        self._memory = memory
+        self.privacy_path = privacy  # None: privacy.json in the app's folder (or STARNOTCH_PRIVACY)
         self.ledger = ledger.Ledger(usage) if usage else None
         self.captures_path = captures
         self.connectors_path = connectors
@@ -267,6 +269,16 @@ class Agent:
         self.reported_text: list[str] = []
         self.warned = False
         self.resting_until = 0.0  # time.monotonic() until which Claude isn't asked
+
+    @property
+    def privacy(self) -> switches.Privacy:
+        """The switches as the app has them now (Settings › Tara's memory)."""
+        return switches.load(self.privacy_path)
+
+    @property
+    def memory(self) -> Memory:
+        """The meetings, or none while the user has meetings switched off."""
+        return self._memory if self.privacy.shares("meetings") else Memory.empty(self._memory.folder)
 
     @property
     def today(self) -> dt.date:
@@ -289,7 +301,7 @@ class Agent:
                 out = self.ask(str(message.get("question") or ""), message.get("history"), message.get("image"),
                                answering=str(reply_to)[len("capture:"):] if str(reply_to).startswith("capture:") else None)
             elif cmd == "reload":
-                self.memory.load()
+                self._memory.load()
                 out = {"type": "status", "state": "reloaded", "meetings": len(self.memory.meetings)}
             elif cmd == "save":
                 out = self.save(message)
@@ -308,7 +320,9 @@ class Agent:
         self.emit(out)
 
     def captures(self) -> list[quick.Capture]:
-        return quick.read(self.captures_path) if self.captures_path else []
+        if not self.captures_path or not self.privacy.shares("captures"):
+            return []
+        return quick.read(self.captures_path)
 
     def context(self) -> str:
         """The meetings, plus what the user noted with quick capture (it's theirs, so it counts as memory too)."""
@@ -317,7 +331,9 @@ class Agent:
         return text + ("\n\n# Quick capture: the user's own tasks, questions and notes\n" + noted if noted else "")
 
     def notes(self) -> list[linked.Item]:
-        return linked.read(self.connectors_path) if self.connectors_path else []
+        if not self.connectors_path or not self.privacy.shares("notes"):
+            return []
+        return linked.read(self.connectors_path)
 
     def ask_context(self, notes: list[linked.Item]) -> str:
         """For questions: the meetings, the captures with their ids, and the connector snapshots."""
@@ -571,7 +587,12 @@ class Agent:
     def save(self, message: dict[str, Any]) -> dict[str, Any]:
         """Writes the meeting, the utterances still waiting for the meeting gap included, before it analyses those:
         the transcript doesn't depend on the analysis, and the app ends the agent if the save takes too long.
-        Commitments that analysis finds are written in a second go."""
+        Commitments that analysis finds are written in a second go. A pause only stopped the listening, so what
+        was heard before it is saved (a meeting with nothing heard isn't). With meetings switched off nothing is
+        saved, and what was heard stays for a Save once they are back on (Close drops it)."""
+        refused = self.privacy.why_not("meetings")
+        if refused and (not self.privacy.shares("meetings") or not (self.live or self.waiting)):
+            return {"type": "status", "state": "not_saved", "message": refused}
         date = str(message.get("date") or self.today.isoformat())
         title = str(message.get("title") or "Meeting")
         said = self.live + self.waiting
@@ -583,18 +604,21 @@ class Agent:
             transcript=[Line(u.speaker, u.text, u.t) for u in said],
             commitments=list(self.commitments),
         )
-        path = self.memory.save(meeting)
+        path = self._memory.save(meeting)
         if self.waiting:
             self.flush()
             if len(self.commitments) > len(meeting.commitments):
                 meeting.commitments = list(self.commitments)
-                path = self.memory.save(meeting)
+                path = self._memory.save(meeting)
         return {"type": "status", "state": "saved", "meeting_id": meeting.id, "path": str(path)}
 
     # Listening
 
     def hear(self, raw: list[dict[str, Any]]) -> None:
-        """Utterances wait for the next analysis: Claude is asked at most once every `gap` seconds, the rules at once."""
+        """Utterances wait for the next analysis: Claude is asked at most once every `gap` seconds, the rules at once.
+        While Tara's memory is paused (or meetings are off) what is said is dropped: no new transcript."""
+        if not self.privacy.records("meetings"):
+            return
         new = [Utterance(str(r.get("speaker") or ""), str(r.get("text") or "").strip(), float(r.get("t") or 0))
                for r in raw]
         self.waiting += [u for u in new if u.text]

@@ -5,8 +5,8 @@ import Observation
 import SwiftUI
 
 /// First run in one calm window, one card per step: meet Tara, connect the agents, allow the
-/// calendar and the players, connect meetings, choose how Tara thinks, connect the notes, pick
-/// the tools. Every step can be skipped; everything is in Settings later. Nothing is set up
+/// calendar and the players, connect meetings, choose how Tara thinks, connect the notes, choose
+/// the AI apps that may read Tara's memory, pick the tools. Every step can be skipped; everything is in Settings later. Nothing is set up
 /// before the user's click.
 @MainActor
 @Observable
@@ -45,22 +45,25 @@ final class Onboarding {
     static var pop: Animation { Theme.reduceMotion ? .easeOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0.4) }
 
     /// The Mac's own permissions get steps of their own (calendar, players) or sit with the tools
-    /// (open at login); the agents step sets up everything else that was found.
+    /// (open at login), Tara's memory in the AI apps has its own step; the agents step sets up
+    /// everything else that was found.
     static let ownSteps: Set<SetupItem> = [.calendar, .musicAutomation, .launchAtLogin, .lidAwake]
 
     /// The steps this Mac shows: the players' step only with a player installed and the
     /// system-wide source not working (it needs no permission), the notes step only with the
-    /// notes connector in this build. Previews show the players' step.
+    /// notes connector in this build, the AI apps' step only with one of them on this Mac.
+    /// Previews show the players' step.
     var flow: OnboardingFlow {
         var hidden: Set<Step> = []
         if !setup.offered.contains(.musicAutomation) || (MediaRemoteBridge.isUsable && !setup.preview) { hidden.insert(.music) }
         if (VaultSetup.preview ?? Runtime.vault) == nil { hidden.insert(.notes) }
+        if memoryItems.isEmpty { hidden.insert(.memory) }
         return OnboardingFlow(hidden: hidden)
     }
 
     func go(to next: Step) {
         guard next != step else { return }
-        forward = next.rawValue > step.rawValue
+        forward = next.position > step.position
         withAnimation(Self.motion) { step = next }
     }
 
@@ -83,17 +86,31 @@ final class Onboarding {
         return made
     }
 
-    // MARK: Agents
+    // MARK: Agents and AI apps
 
     /// What the agents step offers, in page order.
-    var agentItems: [SetupItem] { setup.offered.filter { !Self.ownSteps.contains($0) } }
-
-    /// Switched on and not set up yet: what "Set up" would do.
-    var pendingAgents: [SetupItem] {
-        agentItems.filter { setup.selected.contains($0) && !setup.isSetUp($0) && setup.status[$0] == nil }
+    var agentItems: [SetupItem] {
+        setup.offered.filter { !Self.ownSteps.contains($0) && !SetupItem.memoryItems.contains($0) }
     }
 
-    var agentsRunning: Bool { agentItems.contains { setup.status[$0] == .running } }
+    /// The AI apps on this Mac that can read Tara's memory: off until chosen.
+    var memoryItems: [SetupItem] { setup.offered.filter { SetupItem.memoryItems.contains($0) } }
+
+    /// What a step sets up with its own button.
+    func setupItems(_ step: Step) -> [SetupItem] {
+        switch step {
+        case .agents: agentItems
+        case .memory: memoryItems
+        default: []
+        }
+    }
+
+    /// Switched on and not set up yet: what the step's "Set up" would do.
+    func pending(_ step: Step) -> [SetupItem] {
+        setupItems(step).filter { setup.selected.contains($0) && !setup.isSetUp($0) && setup.status[$0] == nil }
+    }
+
+    func isRunning(_ step: Step) -> Bool { setupItems(step).contains { setup.status[$0] == .running } }
 
     // MARK: Permissions
 
@@ -139,9 +156,9 @@ final class Onboarding {
     /// The step's connection or permission is in place: its icon turns into a check.
     func isDone(_ step: Step) -> Bool {
         switch step {
-        case .agents:
-            return pendingAgents.isEmpty && !agentsRunning
-                && agentItems.contains { item in
+        case .agents, .memory:
+            return pending(step).isEmpty && !isRunning(step)
+                && setupItems(step).contains { item in
                     if case .done = setup.status[item] { return true }
                     return setup.isSetUp(item)
                 }
@@ -182,7 +199,12 @@ final class Onboarding {
     /// Previews: the current step as it looks right after its action.
     func previewDone() {
         switch step {
-        case .agents: setup.setUp(Set(pendingAgents))
+        case .agents: setup.setUp(Set(pending(.agents)))
+        case .memory:
+            // Two apps chosen and set up.
+            let chosen = Set(memoryItems.prefix(2))
+            setup.selected.formUnion(chosen)
+            setup.setUp(chosen)
         case .calendar: setup.setUp([.calendar])
         case .music: setup.setUp([.musicAutomation])
         case .meetings: jamie.preview(.done(meetings: 42, hint: nil))
@@ -325,6 +347,12 @@ struct OnboardingView: View {
                  stays: "Apple Intelligence and simple rules stay on this Mac; with Claude, the text goes to Anthropic.") {
                 BrainStep(model: model)
             }
+        case .memory:
+            Page(model: model, step: step, symbol: "sparkles", title: "Tara's memory in your AI apps",
+                 why: "Claude, ChatGPT and Cursor can look things up in your meetings, captures and notes when you ask them. Choose the apps; they can read, never change.",
+                 stays: "Read only, from this Mac. What an app looks up goes to its AI provider with your chat; Settings › Tara's memory decides what it sees.") {
+                MemoryStep(model: model)
+            }
         case .notes:
             Page(model: model, step: step, symbol: "books.vertical", title: "Your notes",
                  why: "An Obsidian vault or any Markdown folder: your tasks and today's note in the notch, and Tara reads along.",
@@ -370,15 +398,15 @@ struct OnboardingView: View {
     /// it), Continue once it's done.
     @ViewBuilder private var primary: some View {
         let step = model.step
-        let pending = model.pendingAgents
-        if step == .agents && model.agentsRunning {
+        let pending = model.pending(step)
+        if model.isRunning(step) {
             primaryButton("Setting up…") {}.disabled(true)
-        } else if step == .agents && !pending.isEmpty {
+        } else if !pending.isEmpty {
             skipButton
             primaryButton(pending.count == 1 ? "Set up 1 item" : "Set up \(pending.count) items") { model.setup.setUp(Set(pending)) }
         } else if step == .tools {
             primaryButton("Start using \(Brand.displayName)") { model.finish() }
-        } else if [.calendar, .music, .meetings, .notes].contains(step) && !model.isSettled(step) {
+        } else if [.calendar, .music, .meetings, .notes, .memory].contains(step) && !model.isSettled(step) {
             skipButton
         } else {
             primaryButton("Continue") { model.next() }
@@ -411,7 +439,7 @@ private struct StepIndicator: View {
 
     var body: some View {
         let steps = model.flow.steps
-        let index = steps.firstIndex(of: model.step) ?? steps.firstIndex { $0.rawValue > model.step.rawValue } ?? steps.count
+        let index = steps.firstIndex(of: model.step) ?? steps.firstIndex { $0.position > model.step.position } ?? steps.count
         HStack(spacing: 0) {
             ForEach(Array(steps.enumerated()), id: \.element) { position, step in
                 let current = step == model.step
@@ -451,6 +479,7 @@ private struct StepIndicator: View {
         case .meetings: "Meetings"
         case .brain: "How Tara thinks"
         case .notes: "Your notes"
+        case .memory: "Tara's memory in your AI apps"
         case .tools: "Tools"
         }
     }
@@ -675,15 +704,42 @@ private struct AgentsStep: View {
                     OnboardingLabel("What gets set up")
                     CardList(items: items) { SetupItemRow(center: setup, item: $0, detailed: model.detailed) }
                 }
-                Button(model.detailed ? "Hide the details" as LocalizedStringKey : "Show exactly what changes") {
-                    withAnimation(Onboarding.motion) { model.detailed.toggle() }
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 13.5))
-                .foregroundStyle(Theme.accent)
-                .frame(minHeight: 28)
-                .contentShape(Rectangle())
+                DetailsToggle(model: model)
             }
+        }
+    }
+}
+
+/// The setup rows say exactly what changes on disk, or just what they bring.
+private struct DetailsToggle: View {
+    @Bindable var model: Onboarding
+
+    var body: some View {
+        Button(model.detailed ? "Hide the details" as LocalizedStringKey : "Show exactly what changes") {
+            withAnimation(Onboarding.motion) { model.detailed.toggle() }
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 13.5))
+        .foregroundStyle(Theme.accent)
+        .frame(minHeight: 28)
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Tara's memory in the AI apps
+
+/// The AI apps found on this Mac, each off until chosen; the footer's "Set up" registers the
+/// memory server in the ones switched on.
+private struct MemoryStep: View {
+    @Bindable var model: Onboarding
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                OnboardingLabel("Found on this Mac")
+                CardList(items: model.memoryItems) { SetupItemRow(center: model.setup, item: $0, detailed: model.detailed) }
+            }
+            DetailsToggle(model: model)
         }
     }
 }

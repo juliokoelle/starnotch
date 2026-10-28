@@ -91,7 +91,17 @@ final class MeetingModule: NotchModule {
 
     // MARK: Actions
 
+    /// Tara's privacy switches: no meeting is heard while her memory is paused or meetings are off.
+    @ObservationIgnored var privacy: () -> MemoryPrivacy = { MemoryPrivacy() }
+
     func start(demo: Bool) {
+        let privacy = privacy()
+        guard privacy.records(.meetings, at: Date()) else {
+            message = privacy.isOn(.meetings)
+                ? "Tara's memory is paused. Resume it in the System tab or in Settings › Tara's memory."
+                : "Meetings are switched off in Settings › Tara's memory."
+            return
+        }
         guard FileManager.default.fileExists(atPath: directory.appending(path: "agent.py").path) else {
             message = "agent.py not found in \(directory.path); set [meeting] agent_dir in config.toml"
             return
@@ -302,6 +312,12 @@ final class MeetingModule: NotchModule {
                 }
             } else if state == "offline" {
                 message = text ?? "Tara's model isn't reachable; running on rules"
+            } else if state == "not_saved" {
+                // Meetings switched off (or paused before anything was heard): nothing went into the
+                // memory. The agent keeps what it heard, so Save works once meetings are back on;
+                // Close drops it.
+                message = "Not saved: meetings are off in Settings › Tara's memory, or nothing was heard before the pause"
+                if phase == .saving { set(.stopped(demo: agentIsDemo)) }
             }
         case .error(let text):
             message = text

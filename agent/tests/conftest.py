@@ -42,6 +42,12 @@ print(json.dumps({{"result": json.loads(answer) if answer else {{"answer": "30 E
 
 
 @pytest.fixture(autouse=True)
+def no_real_privacy_file(tmp_path, monkeypatch):
+    """Tests never read the app's privacy.json: a file of their own, absent unless a test writes it."""
+    monkeypatch.setenv("STARNOTCH_PRIVACY", str(tmp_path / "privacy.json"))
+
+
+@pytest.fixture(autouse=True)
 def no_real_apple_helper(monkeypatch):
     """Tests never find the helper a local `swift build` left in .build, nor one the environment names."""
     monkeypatch.setattr(claude, "APPLE_HELPERS", ())

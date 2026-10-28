@@ -52,6 +52,8 @@ final class AskTara {
 
     /// The bubble opens beside Tara: the companion comes out if needed and takes the keyboard.
     @ObservationIgnored var onOpen: () -> Void = {}
+    /// Apps on Tara's ignore list: she never takes a picture of their windows.
+    @ObservationIgnored var ignores: (String?) -> Bool = { _ in false }
     @ObservationIgnored var onClose: () -> Void = {}
     /// Wispr Flow: when it's installed, the mic starts its hands-free dictation (launching it if
     /// needed), which pastes into the field.
@@ -479,6 +481,10 @@ final class AskTara {
         guard isOpen, !isThinking, !capturing, !previewing, let target = AskWindowShot.window(at: point) else { return }
         // The rules and Apple's model can't see pictures; sample data never brings up the Screen Recording prompt.
         guard ![.rules, .apple].contains(MeetingAgentSetup.brain), !demo || CGPreflightScreenCaptureAccess() else { return }
+        guard !ignores(target.bundleID) else {
+            fail(String(format: Localization.string("%@ is on the ignore list in Settings › Tara's memory, so Tara doesn't look at it"), target.app))
+            return
+        }
         withAnimation(Theme.snappy) { capturing = true }
         let folder = Self.shotFolder
         Task { [weak self] in

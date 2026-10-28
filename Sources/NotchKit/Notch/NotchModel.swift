@@ -43,6 +43,9 @@ final class NotchModel {
     @ObservationIgnored var toggleWatch: (() -> Void)?
     /// The "+" in the panel opens quick capture (preview).
     @ObservationIgnored var requestCapture: (() -> Void)?
+    /// Tara's memory is paused: a badge beside the tabs says so, a click resumes it.
+    var memoryPaused = false
+    @ObservationIgnored var resumeMemory: (() -> Void)?
     /// A tab was dragged to a new place: the visible modules in their new order, to save.
     @ObservationIgnored var onReorder: (([ModuleKind]) -> Void)?
 

@@ -53,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Ask Tara (strand ask)
     private var ask: AskTara?
     private var askHotKey: HotKey?
+    /// Ends a timed pause of Tara's memory.
+    private var pauseEnd: Task<Void, Never>?
+    /// Today's calendar as last written for Tara (the calendar reloads every 15 s; the file only changes with it).
+    private var lastCalendarSnapshot: [CalendarSnapshotEvent]?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -304,8 +308,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if !options.sampleData && !options.tour {
             setup.checkClaudePlugin()
         }
-        settingsWindow = SettingsWindowController(state: state, cast: cast, setup: setup, jamie: meeting.jamie) { [weak self] in
-            self?.showSetup(at: .agents)
+        settingsWindow = SettingsWindowController(state: state, cast: cast, setup: setup, jamie: meeting.jamie) { [weak self] step in
+            self?.showSetup(at: step)
         }
         statusItem = StatusItemController(
             state: state,
@@ -401,7 +405,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notch.paletteSources.providers = [ClosurePaletteProvider { [weak self] _ in
             guard let self else { return [] }
             let setup: [(Onboarding.Step, String)] = [(.agents, "Set up your agents"), (.meetings, "Set up meetings"),
-                                                      (.brain, "Choose how Tara thinks"), (.tools, "Choose tools"),
+                                                      (.brain, "Choose how Tara thinks"),
+                                                      (.memory, "Share Tara's memory with your AI apps"), (.tools, "Choose tools"),
                                                       (.tara, "Choose Tara's look")]
             return [PaletteItem(id: "settings", title: Localization.string("Settings"), symbol: "gearshape", kind: .settings,
                                 keywords: ["preferences", "display", "quiet", "providers", "loops"],
@@ -419,6 +424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // MARK: end of strand cmdk
 
         applyTools()
+        startPrivacy(sample: sample)
         notch.inbox.loadPeople(from: people)
         music.onTrackChange = { [weak self, weak music] track in
             guard music?.musicOn == true else { return }  // media strand: Music off, no cover sneak
@@ -434,6 +440,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Tara's welcome, with sample sessions behind "Open the notch".
             agents.usePreview(PreviewDirector.snapshot(agentsActive: true))
             self.welcome?.preview(name)
+        } else if let name = options.preview, name.hasPrefix("memory-settings") {
+            // Settings › Tara's memory (in memory only: previews don't save or delete).
+            MemorySettingsPreview.show(state: state, setup: setup, paused: name.hasSuffix("paused"))
         } else if let name = options.preview, name == "setup-consent" || name == "setup-done" || name == "setup-agents" || name.hasPrefix("onboarding") {
             // The setup pages with nothing behind them (the center is in preview mode).
             agents.usePreview(PreviewDirector.snapshot(agentsActive: false))
@@ -445,6 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showOnboardingPreview(name)
             }
         } else if let name = options.preview {
+            if name == "memory-paused" { state.settings.privacy.pause(.untilResumed, now: Date()) }
             previewDirector = PreviewDirector(notch: notch, agents: agents, music: music)
             previewDirector?.system = system
             previewDirector?.run(name)
@@ -886,5 +896,135 @@ extension AppDelegate {
                 DailyPreview.run(name, store: self.daily, notch: self.notch, tools: tools, agents: self.agents)
             }
         }
+    }
+}
+
+// MARK: Tara's memory: privacy
+
+extension AppDelegate {
+    /// Every place that records something for Tara asks the switches first (Settings › Tara's
+    /// memory); `privacy.json` mirrors them for the sidecar. Previews and sample data change them
+    /// in memory only and never write or delete a file.
+    fileprivate func startPrivacy(sample: Bool) {
+        let privacy: () -> MemoryPrivacy = { [weak self] in self?.state.settings.privacy ?? MemoryPrivacy() }
+        tools?.privacy = privacy
+        notch.inbox.privacy = privacy
+        vaultLive?.privacy = privacy
+        meeting?.privacy = privacy
+        meeting?.jamie.privacy = privacy
+        ask?.ignores = { [weak self] id in self?.state.settings.privacy.ignores(app: id) ?? false }
+        notchModel.resumeMemory = { [weak self] in self?.setMemoryPaused(false) }
+        system?.onToggleMemory = { [weak self] in
+            guard let self else { return }
+            self.setMemoryPaused(!self.state.settings.privacy.isPaused(at: Date()))
+        }
+        if !sample {
+            calendar.onToday = { [weak self] events in self?.writeCalendarSnapshot(events) }
+            writeCalendarSnapshot(calendar.today)  // the calendar read today's events before this was set
+        }
+        state.onPrivacyChanged = { [weak self] old in self?.privacyChanged(from: old) }
+        let files = MemoryFiles(support: Brand.supportFolder)
+        state.memoryCount = { [weak self] source in
+            if source == .clipboard { return self?.tools?.history.items.count ?? 0 }
+            return files.count(source)
+        }
+        state.memoryHasFiles = { [weak self] source in
+            source == .clipboard ? (self?.tools?.history.items.isEmpty == false) : !files.files(for: source).isEmpty
+        }
+        state.onForgetMemory = { [weak self] source in
+            guard let self else { return false }
+            guard self.state.persists else { return true }  // previews delete nothing
+            if source == .clipboard {
+                self.tools?.forgetHistory()
+                return true
+            }
+            let left = Set(files.files(for: source)).subtracting(files.forget(source))
+            // The agents read again: what was deleted is gone from Ask Tara at once.
+            self.ask?.reloadMemory()
+            Log.app.info("Tara's memory: deleted \(source.rawValue, privacy: .public)")
+            return left.isEmpty
+        }
+        applyPrivacy()
+    }
+
+    /// The System tab's switch and the badge beside the tabs: pause until resumed, or resume.
+    func setMemoryPaused(_ paused: Bool) {
+        Haptics.tick()
+        if paused {
+            state.settings.privacy.pause(.untilResumed, now: Date())
+        } else {
+            state.settings.privacy.resume()
+        }
+    }
+
+    /// Shows the state in the notch, mirrors it to `privacy.json` and ends a timed pause on time.
+    private func applyPrivacy() {
+        let now = Date()
+        var privacy = state.settings.privacy
+        if let until = privacy.pausedUntil, now >= until {
+            privacy.expire(at: now)
+            state.settings.privacy = privacy  // a pause that ran out isn't saved as one
+        }
+        let paused = privacy.isPaused(at: now)
+        withAnimation(Theme.snappy) {
+            notchModel.memoryPaused = paused
+            system?.memoryPaused = paused
+        }
+        if state.persists { privacy.writeSidecarFile(MemoryFiles(support: Brand.supportFolder).privacyFile, now: now) }
+        pauseEnd?.cancel()
+        pauseEnd = nil
+        if paused, let until = privacy.pausedUntil, !privacy.isPausedUntilResumed {
+            pauseEnd = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(max(1, until.timeIntervalSinceNow + 0.5)))
+                guard !Task.isCancelled else { return }
+                self?.applyPrivacy()
+            }
+        }
+    }
+
+    private func privacyChanged(from old: MemoryPrivacy) {
+        applyPrivacy()
+        let now = Date()
+        let new = state.settings.privacy
+        // How it was just before: a timed pause that has just run out still counted then.
+        let before = old.pausedUntil.map { min(now, $0.addingTimeInterval(-1)) } ?? now
+        // Paused, or meetings off: a meeting being heard stops at once (nothing new is transcribed),
+        // and a Jamie sync already running ends.
+        if !new.records(.meetings, at: now) {
+            if meeting?.isRunning == true { meeting?.stop() }
+            meeting?.jamie.cancel()
+        }
+        // Back on: the vault snapshot and today's calendar are written fresh.
+        if new.records(.notes, at: now), !old.records(.notes, at: before) { vaultLive?.restart() }
+        if new.records(.meetings, at: now), !old.records(.meetings, at: before) {
+            lastCalendarSnapshot = nil
+            writeCalendarSnapshot(calendar.today)
+        }
+        // A source switched off or on: the agents read again without it (or with it).
+        if new.off != old.off { ask?.reloadMemory() }
+    }
+
+    /// Today's calendar for the AI apps that read Tara's memory (`calendar-today.json`, which
+    /// only the memory server reads): written while meetings may be recorded and an AI app is set
+    /// up in Settings › What's set up. With none set up, the file goes.
+    private func writeCalendarSnapshot(_ events: [CalendarModule.Meeting]) {
+        guard state.persists else { return }
+        let url = MemoryFiles(support: Brand.supportFolder).calendarSnapshot
+        guard SetupItem.memoryItems.contains(where: setup.isSetUp) else {
+            if lastCalendarSnapshot != nil || FileManager.default.fileExists(atPath: url.path) {
+                lastCalendarSnapshot = nil
+                try? FileManager.default.removeItem(at: url)
+            }
+            return
+        }
+        guard calendar.access == .granted else { return }
+        let snapshot = events.map {
+            CalendarSnapshotEvent(title: $0.title, start: $0.start, end: $0.end, location: $0.location,
+                                  attendees: $0.attendees, link: $0.link?.url.absoluteString)
+        }
+        let privacy = state.settings.privacy
+        guard snapshot != lastCalendarSnapshot, privacy.records(.meetings, at: Date()) else { return }
+        lastCalendarSnapshot = snapshot
+        Task.detached(priority: .utility) { CalendarSnapshot.write(snapshot, to: url, privacy: privacy) }
     }
 }

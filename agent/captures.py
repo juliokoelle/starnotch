@@ -48,8 +48,8 @@ def read(path: Path = QUEUE) -> list[Capture]:
             raw = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(raw, dict) or not raw.get("text"):
-            continue
+        if not isinstance(raw, dict) or not raw.get("text") or raw.get("memory") is False:
+            continue  # "memory": false: kept only so it isn't lost, while Tara's memory was paused
         out.append(Capture(
             id=str(raw.get("id") or len(out)),
             created=str(raw.get("created") or ""),

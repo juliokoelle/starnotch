@@ -21,6 +21,7 @@ final class AppState {
             if settings.earsMode != oldValue.earsMode { onEarsModeChanged?(settings.earsMode) }
             if settings.disabledProviders != oldValue.disabledProviders { onProvidersChanged?(Set(settings.disabledProviders)) }
             if settings.brain != oldValue.brain { onBrainChanged?() }
+            if settings.privacy != oldValue.privacy { onPrivacyChanged?(oldValue.privacy) }
         }
     }
     /// Previews and sample data change settings in memory only.
@@ -31,6 +32,14 @@ final class AppState {
     @ObservationIgnored var onDisplayChanged: (() -> Void)?
     @ObservationIgnored var onEarsModeChanged: ((EarsMode) -> Void)?
     @ObservationIgnored var onBrainChanged: (() -> Void)?
+    /// Tara's privacy switches changed; gets the ones from before.
+    @ObservationIgnored var onPrivacyChanged: ((MemoryPrivacy) -> Void)?
+    /// Settings › Tara's memory › Delete; returns whether everything of the source is gone.
+    @ObservationIgnored var onForgetMemory: ((MemorySource) -> Bool)?
+    /// What a source holds now (counts for the Settings rows).
+    @ObservationIgnored var memoryCount: ((MemorySource) -> Int)?
+    /// Whether a source holds any file Delete would remove.
+    @ObservationIgnored var memoryHasFiles: ((MemorySource) -> Bool)?
     private(set) var isAccessibilityTrusted = AXIsProcessTrusted()
     private(set) var loginItemStatus = SMAppService.mainApp.status
     private(set) var loginItemError: String?

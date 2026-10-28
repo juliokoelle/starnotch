@@ -10,6 +10,8 @@ enum AskWindowShot {
         let windowID: CGWindowID
         /// The app the window belongs to, for the chip in the field.
         let app: String
+        /// Its bundle identifier, for the ignore list (Settings › Tara's memory).
+        var bundleID: String? = nil
     }
 
     /// The topmost normal window of another app under a point in AppKit screen coordinates.
@@ -27,7 +29,9 @@ enum AskWindowShot {
                   let bounds = info[kCGWindowBounds as String] as? [String: Any],
                   let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
                   rect.contains(flipped), rect.width > 80, rect.height > 60 else { continue }
-            return Target(windowID: id, app: info[kCGWindowOwnerName as String] as? String ?? "")
+            let pid = info[kCGWindowOwnerPID as String] as? Int32
+            return Target(windowID: id, app: info[kCGWindowOwnerName as String] as? String ?? "",
+                          bundleID: pid.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier })
         }
         return nil
     }

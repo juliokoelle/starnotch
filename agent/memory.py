@@ -163,6 +163,14 @@ class Memory:
         self.errors: list[str] = []
         self.load()
 
+    @classmethod
+    def empty(cls, folder: str | os.PathLike[str] | None = None) -> "Memory":
+        """No meetings, without reading the folder: what Tara sees while meetings are switched off."""
+        memory = cls.__new__(cls)
+        memory.folder = Path(folder).expanduser() if folder else DEFAULT_DIR
+        memory.meetings, memory.errors = [], []
+        return memory
+
     def load(self) -> None:
         self.meetings, self.errors = [], []
         if not self.folder.is_dir():

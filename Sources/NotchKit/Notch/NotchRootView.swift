@@ -146,6 +146,18 @@ struct NotchRootView: View {
                     }
                 }
                 .padding(.horizontal, layout.topRadius)
+                // Tara's memory paused: a small mark at the left, only while hovered.
+                .overlay(alignment: .bottomLeading) {
+                    if isPeek && model.memoryPaused {
+                        Image(systemName: "pause.circle.fill").font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .padding(.leading, layout.topRadius + 8)
+                            .padding(.bottom, 5)
+                            .transition(.opacity)
+                            .help("Tara's memory is paused")
+                            .accessibilityLabel(Text("Tara's memory is paused"))
+                    }
+                }
                 // Watch mode on: a tiny moon, only while hovered.
                 .overlay(alignment: .bottomTrailing) {
                     if isPeek && model.watching {
@@ -241,10 +253,12 @@ private struct TabStrip: View {
 
     /// The full strip if it fits; else tighter, without the moon, without the counts. Quick
     /// capture's "+" stays to the end: it is the one button people look for. Split around the
-    /// notch, the part right of it carries the "+".
+    /// notch, the part right of it carries the "+" and the paused badge, which every full strip
+    /// shows.
     var body: some View {
         if let range {
-            strip(counts: true, plus: range.upperBound >= model.modules.count, moon: false, padding: 5)
+            let last = range.upperBound >= model.modules.count
+            strip(counts: true, plus: last, moon: false, padding: 5, badge: last)
         } else {
             full
         }
@@ -260,7 +274,8 @@ private struct TabStrip: View {
         }
     }
 
-    private func strip(counts: Bool, plus showsPlus: Bool, moon showsMoon: Bool, padding: CGFloat) -> some View {
+    private func strip(counts: Bool, plus showsPlus: Bool, moon showsMoon: Bool, padding: CGFloat,
+                       badge: Bool = true) -> some View {
         HStack(spacing: 2) {
             ForEach(shown, id: \.kind) { module in
                 let selected = module.kind == model.module
@@ -300,6 +315,7 @@ private struct TabStrip: View {
                 .accessibilityLabel(module.kind.title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
+            if badge && model.memoryPaused { paused }
             if showsPlus { plus }
             if showsMoon { moon }
         }
@@ -319,6 +335,23 @@ private struct TabStrip: View {
             .buttonStyle(PressScale())
             .help("Quick capture (⌃⌥N)")
         }
+    }
+
+    /// Tara's memory is paused; a click resumes it.
+    @ViewBuilder var paused: some View {
+        Button { model.resumeMemory?() } label: {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .padding(.vertical, -3)  // a 28 pt target in the 22 pt strip
+        .transition(.opacity)
+        .help("Tara's memory is paused. Click to resume")
+        .accessibilityLabel(Text("Tara's memory is paused"))
+        .accessibilityHint(Text("Resumes it"))
     }
 
     /// Watch mode on or off.

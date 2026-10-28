@@ -29,8 +29,9 @@ struct LaunchOptions {
     var tour = false
     /// Test mode: sample agents, calendar, Today and music, no permissions, nothing written.
     var sampleData = false
-    /// Open onboarding right after launch, even when it was done; `--onboarding-step 0…7` picks the step
-    /// (Tara, agents, calendar, music, meetings, Tara's brain, notes, tools).
+    /// Open onboarding right after launch, even when it was done; `--onboarding-step 0…8` picks the step
+    /// (Tara, agents, calendar, music, meetings, Tara's brain, notes, tools, and 8 for the AI apps
+    /// that read Tara's memory, which comes before the tools).
     var onboarding = false
     var onboardingStep: Int?
 

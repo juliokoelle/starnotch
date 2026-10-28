@@ -39,7 +39,7 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
     public func detail(_ paths: SetupPaths) -> String {
         switch self {
         case .claudePlugin:
-            "Runs claude plugin marketplace add \(SetupPaths.marketplaceRepo) (or the copy inside the app) and claude plugin install \(SetupPaths.pluginID)."
+            "Runs claude plugin marketplace add \(SetupPaths.marketplaceRepo) (or the app's copy of its own marketplace folder, in its support folder) and claude plugin install \(SetupPaths.pluginID)."
         case .codexHook:
             "Adds one PermissionRequest hook to ~/.codex/hooks.json, with a backup. Codex asks you to trust it once in /hooks."
         case .statusLine:
@@ -240,21 +240,31 @@ public enum SetupActions {
 
     // MARK: Claude Code plugin
 
-    /// Adds the marketplace (the GitHub repository, else the copy inside the app) and installs the plugin.
+    /// Adds the marketplace (the GitHub repository, else the app's copy in its support folder) and installs the plugin.
     public static func installClaudePlugin(_ paths: SetupPaths, run: SetupRunner = processRunner, now: Date = Date()) throws -> SetupLedger.Entry {
         guard let claude = paths.claudeBinary else { throw SetupError.missing("The claude command") }
         let env = ["HOME": paths.home.path]
         var source = SetupPaths.marketplaceRepo
         var added = run(claude, ["plugin", "marketplace", "add", source], env)
         if added.status != 0, !added.output.localizedCaseInsensitiveContains("already") {
-            guard let local = paths.integrations?.appending(path: "claude-code"),
-                  FileManager.default.fileExists(atPath: local.appending(path: ".claude-plugin/marketplace.json").path) else {
+            guard let local = try? placeClaudePluginCopy(paths) else {
                 throw SetupError.failed("Couldn't add the marketplace: \(added.output.trimmingCharacters(in: .whitespacesAndNewlines))")
             }
             source = local.path
             added = run(claude, ["plugin", "marketplace", "add", source], env)
             guard added.status == 0 || added.output.localizedCaseInsensitiveContains("already") else {
                 throw SetupError.failed("Couldn't add the marketplace: \(added.output.trimmingCharacters(in: .whitespacesAndNewlines))")
+            }
+        }
+        // Already there: it may point at a folder that is gone (a moved or deleted build).
+        if added.output.localizedCaseInsensitiveContains("already"),
+           let registered = (try? Data(contentsOf: paths.knownMarketplaces)).flatMap(ClaudePluginCheck.marketplace), registered != .absent {
+            if !ClaudePluginCheck.isCurrent(registered, stableCopy: paths.claudePluginCopy, exists: { FileManager.default.fileExists(atPath: $0) }) {
+                source = try registerClaudePluginCopy(paths, claude: claude, previous: registered, run: run, env: env).path
+            } else if case .directory(let path) = registered {
+                source = path
+            } else {
+                source = SetupPaths.marketplaceRepo
             }
         }
         let installed = run(claude, ["plugin", "install", SetupPaths.pluginID], env)
@@ -313,6 +323,7 @@ public enum SetupActions {
         guard removed.status == 0 || removed.output.localizedCaseInsensitiveContains("not installed") else {
             throw SetupError.failed("Couldn't remove the plugin: \(removed.output.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
+        try? FileManager.default.removeItem(at: paths.claudePluginCopy)
     }
 
     // MARK: Codex hook

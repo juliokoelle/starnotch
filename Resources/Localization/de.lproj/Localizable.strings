@@ -542,3 +542,6 @@
 "Unavailable" = "Nicht verfügbar";
 "Needs Apple Intelligence on this Mac." = "Braucht Apple Intelligence auf diesem Mac.";
 "Tara's model isn't reachable, so simple rules answered" = "Taras Modell ist nicht erreichbar, deshalb haben einfache Regeln geantwortet";
+/* Wave 3: the approvals plugin registration heals itself */
+"Registered again from the app's copy. Restart running sessions." = "Erneut aus der Kopie der App registriert. Laufende Sitzungen neu starten.";
+"Installed again. Restart running sessions." = "Erneut installiert. Laufende Sitzungen neu starten.";

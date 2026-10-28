@@ -278,7 +278,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         setup = SetupCenter(state: state)
-        if preview { setup.usePreviewLedger() }
+        if preview {
+            setup.usePreviewLedger()
+        } else if !options.sampleData && !options.tour {
+            setup.checkClaudePlugin()
+        }
         settingsWindow = SettingsWindowController(state: state, cast: cast, setup: setup, jamie: meeting.jamie) { [weak self] in
             self?.showSetup(at: .agents)
         }

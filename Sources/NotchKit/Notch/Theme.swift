@@ -101,6 +101,21 @@ extension AnyTransition {
     }
 }
 
+extension View {
+    /// For a scroll area in the fixed panel: its edges fade out, so a row cut there reads as
+    /// "more this way", and the content gets as much room at each end, so nothing is faded once
+    /// scrolled to the top or the bottom.
+    func scrollEdgeFade(top: CGFloat = 0, bottom: CGFloat = 18) -> some View {
+        contentMargins(.top, top, for: .scrollContent)
+            .contentMargins(.bottom, bottom, for: .scrollContent)
+            .mask(VStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: top)
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: bottom)
+            })
+    }
+}
+
 enum Haptics {
     static func tick() { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
     static func open() { NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now) }

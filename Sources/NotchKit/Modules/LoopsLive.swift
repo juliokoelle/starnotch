@@ -273,8 +273,10 @@ struct LoopsCard: View {
                         LoopsEmpty().transition(.opacity)
                     } else if module.loopsAsTimeline {
                         // More loops than the panel holds scroll; the axis follows the last row.
+                        // The axis ends a little early: the scroll view clips, and "24" and a
+                        // dot at midnight sit centred on its end.
                         ScrollView(.vertical) {
-                            LoopTimelineView(module: module)
+                            LoopTimelineView(module: module).padding(.trailing, 9)
                         }
                         .scrollIndicators(.never)
                         .transition(.blurSlide(x: 14))
@@ -322,6 +324,8 @@ struct LoopsCard: View {
 private struct LoopTimelineView: View {
     let module: AgentsModule
     private let labelWidth: CGFloat = 150
+    /// Where each row's track begins: the label column plus the row's spacing.
+    private var trackStart: CGFloat { labelWidth + 8 }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -330,11 +334,11 @@ private struct LoopTimelineView: View {
                 ForEach(module.loops) { loop in
                     row(loop, dayStart: start).frame(height: 28)
                 }
-                hours.padding(.leading, labelWidth).padding(.top, 2)
+                hours.padding(.leading, trackStart).padding(.top, 2)
             }
             .overlay(alignment: .topLeading) {
                 GeometryReader { proxy in
-                    let x = labelWidth + (proxy.size.width - labelWidth) * fraction(context.date, dayStart: start)
+                    let x = trackStart + (proxy.size.width - trackStart) * fraction(context.date, dayStart: start)
                     Rectangle()
                         .fill(Theme.accent.opacity(0.7))
                         .frame(width: 1, height: CGFloat(module.loops.count) * 28)

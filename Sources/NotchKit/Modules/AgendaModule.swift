@@ -782,6 +782,7 @@ private struct AgendaBodyB: View {
                                 AgendaList(module: module, now: now)
                             }
                             .scrollIndicators(.never)
+                            .scrollEdgeFade(top: 12)
                             .onAppear { proxy.scrollTo(module.selected?.id ?? "now", anchor: .center) }
                             .onChange(of: module.selected?.id) { _, id in
                                 guard let id else { return }
@@ -865,19 +866,18 @@ private struct WeekView: View {
                                 .padding(.horizontal, isToday ? 5 : 0)
                                 .background { if isToday { Capsule().fill(Theme.accent) } }
                         }
-                        ForEach(events.prefix(4)) { event in
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(TimeText.clock(event.start)).font(Theme.font(9.5).monospacedDigit()).foregroundStyle(Theme.textTertiary)
-                                Text(event.title).font(Theme.font(10.5, .medium)).foregroundStyle(Theme.textBody).lineLimit(2)
+                        // As many events as the column holds, the rest as "+n".
+                        ViewThatFits(in: .vertical) {
+                            ForEach((0...min(events.count, 12)).reversed(), id: \.self) { shown in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(events.prefix(shown)) { row($0) }
+                                    if shown < events.count {
+                                        Text("+\(events.count - shown)").font(Theme.font(10)).foregroundStyle(Theme.textTertiary)
+                                    }
+                                }
                             }
-                            .padding(.leading, 5)
-                            .overlay(alignment: .leading) { Rectangle().fill(event.calendar.color).frame(width: 2) }
-                            .opacity(event.end <= now ? 0.5 : 1)
                         }
-                        if events.count > 4 {
-                            Text("+\(events.count - 4)").font(Theme.font(10)).foregroundStyle(Theme.textTertiary)
-                        }
-                        Spacer(minLength: 0)
+                        .frame(maxHeight: .infinity, alignment: .top)
                     }
                     .padding(6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -888,6 +888,16 @@ private struct WeekView: View {
             }
         }
         .frame(maxHeight: .infinity)
+    }
+
+    private func row(_ event: CalEvent) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(TimeText.clock(event.start)).font(Theme.font(9.5).monospacedDigit()).foregroundStyle(Theme.textTertiary)
+            Text(event.title).font(Theme.font(10.5, .medium)).foregroundStyle(Theme.textBody).lineLimit(2)
+        }
+        .padding(.leading, 5)
+        .overlay(alignment: .leading) { Rectangle().fill(event.calendar.color).frame(width: 2) }
+        .opacity(event.end <= now ? 0.5 : 1)
     }
 }
 
@@ -1234,6 +1244,7 @@ private struct Briefing: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .scrollIndicators(.never)
+                .scrollEdgeFade()
             }
         }
     }

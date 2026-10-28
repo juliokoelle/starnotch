@@ -102,7 +102,7 @@ final class NotchController {
                 } else if let url = self?.model.sneak?.url {
                     NSWorkspace.shared.open(url)
                 } else {
-                    self?.expand()
+                    self?.expandFromClick()
                 }
             },
             onKey: { [weak self] in self?.handleKey($0) ?? .ignored },
@@ -650,8 +650,17 @@ final class NotchController {
             // The same mouse-up reaches the island's tap handler next; don't reopen.
             suppressUntil = Date().addingTimeInterval(0.3)
         } else {
-            expand()
+            expandFromClick()
         }
+    }
+
+    /// A click on the notch or the closed island opens the panel with keyboard focus: ← → switch
+    /// tabs, ↵ acts, esc closes. A hover alone never takes the keyboard from the app in front.
+    private func expandFromClick() {
+        expand()
+        guard model.interaction == .expanded else { return }
+        model.keyboardFocus = true
+        panel.makeKey()
     }
 
     /// ⌃⌥Space: open with keyboard focus, or close.

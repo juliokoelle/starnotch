@@ -18,6 +18,8 @@ final class SetupCenter {
     private(set) var status: [SetupItem: Status] = [:]
     /// Recordings: show the page, never act.
     var preview = false
+    /// Recordings: the four other agent tools count as found (strand agents).
+    var previewMoreAgents = false
     @ObservationIgnored weak var state: AppState?
     /// Switched off before its rule is removed.
     @ObservationIgnored weak var lidAwake: LidAwakeController?
@@ -32,8 +34,12 @@ final class SetupCenter {
             integrations: integrations.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
             bridgeScript: resources?.appending(path: "statusline-bridge.sh"))
         ledger = SetupLedger.load(paths.ledgerFile)
-        selected = Set(offered.filter { isAvailable($0) && !isSetUp($0) })
+        // The other agent tools change how those tools ask: off until chosen.
+        selected = Set(offered.filter { isAvailable($0) && !isSetUp($0) && !Self.moreAgentItems.contains($0) })
     }
+
+    /// Setup items of the tools beyond Claude Code and Codex (strand agents).
+    static let moreAgentItems: Set<SetupItem> = [.cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin]
 
     // MARK: What this Mac has
 
@@ -47,6 +53,8 @@ final class SetupCenter {
         var list: [Found] = []
         if FileManager.default.fileExists(atPath: paths.home.appending(path: ".claude").path) { list.append(Found(name: "Claude Code", symbol: "terminal")) }
         if CodexProvider.detect() { list.append(Found(name: "Codex", symbol: "chevron.left.forwardslash.chevron.right")) }
+        // Strand agents: the other agent tools.
+        for type in Self.moreAgents where previewMoreAgents || type.detect() { list.append(Found(name: type.displayName, symbol: "terminal")) }
         list.append(Found(name: "Calendar", symbol: "calendar"))
         let players = PlayerBridge.bundleIDs.sorted(by: { $0.value < $1.value })
             .filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.value) != nil }
@@ -59,7 +67,10 @@ final class SetupCenter {
     }
 
     /// The agents among what was found (onboarding's "Your agents"): the ones the setup connects.
-    var foundAgents: [Found] { found.filter { ["Claude Code", "Codex"].contains($0.name) } }
+    var foundAgents: [Found] { found.filter { (["Claude Code", "Codex"] + Self.moreAgents.map { $0.displayName }).contains($0.name) } }
+
+    /// Agent tools beyond Claude Code and Codex, each with its own setup item.
+    static let moreAgents: [any AgentProvider.Type] = [CursorProvider.self, CopilotProvider.self, GeminiProvider.self, OpencodeProvider.self]
 
     /// The items this Mac can use, in page order.
     var offered: [SetupItem] {
@@ -72,6 +83,10 @@ final class SetupCenter {
             case .launchAtLogin, .calendar: true
             case .musicAutomation: PlayerBridge.bundleIDs.values.contains { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
             case .lidAwake: false
+            case .cursorHooks: previewMoreAgents || (CursorProvider.detect() && FileManager.default.fileExists(atPath: paths.cursorHome.path))
+            case .copilotHooks: previewMoreAgents || CopilotProvider.detect()
+            case .geminiHooks: previewMoreAgents || GeminiProvider.detect()
+            case .opencodePlugin: previewMoreAgents || OpencodeProvider.detect()
             }
         }
     }
@@ -88,6 +103,10 @@ final class SetupCenter {
         case .mcpServer:
             if paths.claudeBinary == nil && paths.codexBinary == nil { return "The claude or codex command wasn't found." }
             return paths.uvBinary == nil ? "Needs uv: Settings › Meeting agent › Install uv." : nil
+        case .cursorHooks, .copilotHooks, .geminiHooks:
+            return paths.hookScriptSource.map { FileManager.default.fileExists(atPath: $0.path) } == true ? nil : "This build has no hook script."
+        case .opencodePlugin:
+            return paths.opencodePluginSource.map { FileManager.default.fileExists(atPath: $0.path) } == true ? nil : "This build has no opencode plugin."
         default: return nil
         }
     }
@@ -118,7 +137,8 @@ final class SetupCenter {
             for item in order {
                 let result: Status
                 switch item {
-                case .claudePlugin, .codexHook, .statusLine, .mcpServer, .shellHook:
+                case .claudePlugin, .codexHook, .statusLine, .mcpServer, .shellHook,
+                     .cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin:
                     let outcome = await Task.detached(priority: .userInitiated) { () -> Result<SetupLedger.Entry, Error> in
                         Result {
                             switch item {
@@ -126,6 +146,10 @@ final class SetupCenter {
                             case .codexHook: try SetupActions.installCodexHook(paths)
                             case .statusLine: try SetupActions.installStatusLine(paths)
                             case .mcpServer: try SetupActions.installMCPServer(paths)
+                            case .cursorHooks: try SetupActions.installCursorHooks(paths)
+                            case .copilotHooks: try SetupActions.installCopilotHooks(paths)
+                            case .geminiHooks: try SetupActions.installGeminiHooks(paths)
+                            case .opencodePlugin: try SetupActions.installOpencodePlugin(paths)
                             default: try SetupActions.installShellHook(paths)
                             }
                         }
@@ -207,6 +231,10 @@ final class SetupCenter {
                         case .statusLine: try SetupActions.removeStatusLine(paths, entry: entry)
                         case .shellHook: try SetupActions.removeShellHook(paths)
                         case .mcpServer: try SetupActions.removeMCPServer(paths)
+                        case .cursorHooks: try SetupActions.removeCursorHooks(paths, entry: entry)
+                        case .copilotHooks: try SetupActions.removeCopilotHooks(paths)
+                        case .geminiHooks: try SetupActions.removeGeminiHooks(paths, entry: entry)
+                        case .opencodePlugin: try SetupActions.removeOpencodePlugin(paths)
                         default: break
                         }
                     }
@@ -261,7 +289,7 @@ final class SetupCenter {
     func resetForPreview() {
         preview = true
         ledger = SetupLedger()
-        selected = Set(offered)
+        selected = Set(offered).subtracting(Self.moreAgentItems)
     }
 
     /// Recordings: a page as it looks after setting up.
@@ -345,6 +373,10 @@ struct SetupItemRow: View {
         case .calendar: "macOS asks once: your next meeting, its countdown and Join"
         case .musicAutomation: "macOS asks once per player: play, pause and skip"
         case .lidAwake: "Your Mac stays awake with the lid closed while it is plugged in"
+        case .cursorHooks: "Cursor's sessions in the notch; approve its shell and MCP commands there"
+        case .copilotHooks: "Copilot CLI's sessions in the notch; approve its requests there"
+        case .geminiHooks: "Gemini CLI's sessions in the notch, and when it waits for you"
+        case .opencodePlugin: "opencode's sessions in the notch; approve its requests there"
         }
     }
 }

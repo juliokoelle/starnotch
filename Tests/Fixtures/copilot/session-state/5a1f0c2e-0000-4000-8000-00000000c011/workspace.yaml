@@ -1,0 +1,6 @@
+id: 5a1f0c2e-0000-4000-8000-00000000c011
+cwd: /Users/me/projects/harbor
+git_root: /Users/me/projects/harbor
+branch: fix/export-test
+summary: Flaky export test
+created_at: 2026-10-20T11:40:00.000Z

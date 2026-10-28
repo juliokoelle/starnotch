@@ -950,10 +950,22 @@ private struct ProviderSwitches: View {
     @Bindable var state: AppState
     @State private var copied = false
 
+    /// What each tool's switch covers.
+    static func detail(_ id: String) -> LocalizedStringKey {
+        switch id {
+        case CodexProvider.id: "Sessions, subagents, context and plan limits from ~/.codex."
+        case CursorProvider.id: "Sessions and approvals for shell and MCP calls through Cursor's hooks (What's set up)."
+        case CopilotProvider.id: "Sessions from ~/.copilot; approvals through its hooks (What's set up)."
+        case GeminiProvider.id: "Sessions from ~/.gemini; its hooks show when it waits, they can't approve."
+        case OpencodeProvider.id: "Sessions from opencode's database; status and approvals through Starnotch's plugin."
+        default: "Sessions and subagents from ~/.claude; titles and status from the Claude app when it's installed."
+        }
+    }
+
     var body: some View {
         let detected = AgentScanner.providerTypes.filter { $0.detect() }
         if detected.isEmpty {
-            Text("No agent tools found (Claude Code, Codex).").foregroundStyle(.secondary)
+            Text("No agent tools found (Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI, opencode).").foregroundStyle(.secondary)
         }
         ForEach(detected.map { ($0.id, $0.displayName) }, id: \.0) { id, name in
             Toggle(isOn: Binding(
@@ -964,9 +976,7 @@ private struct ProviderSwitches: View {
                     state.settings.disabledProviders = off.sorted()
                 })) {
                 Text(name)
-                Text(id == CodexProvider.id
-                     ? "Sessions, subagents, context and plan limits from ~/.codex."
-                     : "Sessions and subagents from ~/.claude; titles and status from the Claude app when it's installed.")
+                Text(Self.detail(id))
             }
         }
         if detected.contains(where: { $0.id == CodexProvider.id }) {

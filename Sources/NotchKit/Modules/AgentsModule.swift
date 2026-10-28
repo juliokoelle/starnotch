@@ -307,6 +307,8 @@ final class AgentsModule: NotchModule {
         switch provider {
         case CodexProvider.id: "Codex"
         case ClaudeCodeProvider.id: "Claude"
+        case CopilotProvider.id: "Copilot"
+        case GeminiProvider.id: "Gemini"
         default: toolName(of: provider)
         }
     }
@@ -316,6 +318,11 @@ final class AgentsModule: NotchModule {
         switch provider {
         case CodexProvider.id: Color(hex: 0x4FC3B5)
         case ClaudeCodeProvider.id: Color(hex: 0xE0875F)
+        // Muted like the two above, told apart by hue only.
+        case CursorProvider.id: Color(hex: 0xB8BFCC)
+        case CopilotProvider.id: Color(hex: 0xA78BDB)
+        case GeminiProvider.id: Color(hex: 0x7FA8E8)
+        case OpencodeProvider.id: Color(hex: 0xD4B76A)
         default: Theme.textSecondary
         }
     }
@@ -338,9 +345,28 @@ final class AgentsModule: NotchModule {
         let events = requests.compactMap { request in
             request.agentID.map { AgentEvent(sessionID: $0, kind: .needsApproval("Approve: \(request.summary.isEmpty ? request.tool : request.summary)"), at: Date()) }
         }
+        // A prompt from a hooked tool (Cursor, Copilot CLI, opencode) may be the first its session
+        // says: it makes the session known, with its process for the jump.
+        let updates = requests.compactMap { request -> HookUpdate? in
+            guard let session = request.sessionID, request.provider != ClaudeCodeProvider.id, request.provider != CodexProvider.id,
+                  request.provider != ApprovalRequest.mcpProvider else { return nil }
+            let step = SessionStep(kind: request.tool == "Bash" ? .shell : .tool, text: request.summary.isEmpty ? request.tool : request.summary)
+            return HookUpdate(provider: request.provider, sessionID: session, kind: .tool(step), at: Date(),
+                              cwd: request.cwd, pid: request.pid, tty: request.tty)
+        }
         Task { [weak self] in
             guard let self else { return }
+            for update in updates { await self.scanner.ingest(update) }
             await self.scanner.setEvents(events)
+            await self.refresh()
+        }
+    }
+
+    /// A status hook of Cursor, Copilot CLI, Gemini CLI or opencode, as the socket received it.
+    func ingestHook(_ data: Data) {
+        guard !previewMode else { return }
+        Task { [weak self] in
+            guard let self, await self.scanner.ingest(data) else { return }
             await self.refresh()
         }
     }

@@ -21,14 +21,22 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
     public var options: [String] = []
     /// … and/or a field to type the answer.
     public var freeText = false
+    /// The agent's process and terminal, when the hook script reports them (tools other than
+    /// Claude Code and Codex), so the session can be found and jumped to.
+    public var pid: Int32?
+    public var tty: String?
 
     /// A question that wants an answer rather than yes or no.
     public var asksForAnswer: Bool { !options.isEmpty || freeText }
 
     /// The hook's stdin JSON; nil unless it is a PermissionRequest with a tool name.
     public static func parse(_ data: Data, id: String = UUID().uuidString) -> ApprovalRequest? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["hook_event_name"] as? String == "PermissionRequest",
+        guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        // Cursor, Copilot CLI and opencode ask in their own words: put them in Claude Code's.
+        if object["hook_event_name"] as? String != "PermissionRequest", let normalized = ProviderApprovals.normalize(object) {
+            object = normalized
+        }
+        guard object["hook_event_name"] as? String == "PermissionRequest",
               let tool = object["tool_name"] as? String, !tool.isEmpty else { return nil }
         let input = object["tool_input"] as? [String: Any] ?? [:]
         let (summary, detail) = describe(tool: tool, input: input)
@@ -45,6 +53,8 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
         var request = ApprovalRequest(id: id, sessionID: object["session_id"] as? String, cwd: object["cwd"] as? String,
                                       tool: tool, summary: summary, detail: detail, allowRules: rules)
         if let provider = (object["starnotch_provider"] as? String)?.nilIfEmpty { request.provider = provider }
+        request.pid = (object["starnotch_pid"] as? NSNumber).map { Int32(clamping: $0.intValue) }.flatMap { $0 > 1 ? $0 : nil }
+        request.tty = (object["starnotch_tty"] as? String).flatMap { TerminalJump.isSafe(tty: $0) ? $0 : nil }
         if request.provider == mcpProvider {
             let options = (object["starnotch_options"] as? [String] ?? [])
                 .map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)) }
@@ -71,8 +81,9 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
     /// client, `summary` and `detail` carry the question; the answer is allow (yes) or deny (no).
     public static let mcpProvider = "mcp"
 
-    /// "Allow for session" adds a rule in Claude Code; Codex's hook can't carry one.
-    public var supportsSessionRules: Bool { provider == "claude-code" }
+    /// "Allow for session" adds a rule in Claude Code and answers "always" in opencode; the
+    /// other tools' hooks can't carry one.
+    public var supportsSessionRules: Bool { provider == "claude-code" || provider == "opencode" }
 
     /// The session's id in the agents list (Codex ids carry the provider).
     public var agentID: String? {
@@ -126,8 +137,14 @@ public enum ApprovalDecision: Equatable, Sendable {
 
     /// The hook's stdout for the request's tool.
     public func output(for request: ApprovalRequest) -> Data {
-        if request.provider == ApprovalRequest.mcpProvider { return ApprovalFormat.mcp(self) }
-        return request.provider == "codex" ? ApprovalFormat.codex(self) : claudeOutput(for: request)
+        switch request.provider {
+        case ApprovalRequest.mcpProvider: return ApprovalFormat.mcp(self)
+        case "codex": return ApprovalFormat.codex(self)
+        case "cursor": return ApprovalFormat.cursor(self)
+        case "copilot": return ApprovalFormat.copilot(self)
+        case "opencode": return ApprovalFormat.opencode(self)
+        default: return claudeOutput(for: request)
+        }
     }
 
     /// Claude Code's stdout, exactly as its PermissionRequest decision control documents it.
@@ -179,6 +196,93 @@ public enum ApprovalFormat {
     }
 }
 
+extension ApprovalFormat {
+    /// Cursor's `beforeShellExecution`/`beforeMCPExecution` output. No rule for the session.
+    public static func cursor(_ decision: ApprovalDecision) -> Data {
+        let output: [String: Any] = switch decision {
+        case .allowOnce, .allowSession, .answer: ["permission": "allow"]
+        case .deny: ["permission": "deny", "user_message": "Denied from the notch.",
+                     "agent_message": "The user denied this from the notch."]
+        }
+        return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
+    }
+
+    /// Copilot CLI's permission hook output.
+    public static func copilot(_ decision: ApprovalDecision) -> Data {
+        let output: [String: Any] = switch decision {
+        case .allowOnce, .allowSession, .answer: ["permissionDecision": "allow"]
+        case .deny: ["permissionDecision": "deny", "permissionDecisionReason": "Denied from the notch."]
+        }
+        return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
+    }
+
+    /// The reply Starnotch's opencode plugin posts to opencode (`/permission/<id>/reply`).
+    public static func opencode(_ decision: ApprovalDecision) -> Data {
+        let reply = switch decision {
+        case .allowOnce, .answer: "once"
+        case .allowSession: "always"
+        case .deny: "reject"
+        }
+        return Data(#"{"reply":"\#(reply)"}"#.utf8)
+    }
+}
+
+/// Permission prompts of tools whose hooks speak their own words, put in Claude Code's
+/// `PermissionRequest` shape (tool_name, tool_input, session_id, cwd) so one card serves all.
+public enum ProviderApprovals {
+    public static func normalize(_ object: [String: Any]) -> [String: Any]? {
+        guard let provider = object["starnotch_provider"] as? String else { return nil }
+        let event = (object["starnotch_event"] as? String) ?? (object["hook_event_name"] as? String) ?? ""
+        let fields = HookFields(object)
+        var tool: String
+        var input: [String: Any]
+        let session: String?
+        switch (provider, event) {
+        case ("cursor", "beforeShellExecution"):
+            guard let command = fields.string("command") else { return nil }
+            tool = "Bash"
+            input = ["command": command]
+            session = fields.string("conversation_id")
+        case ("cursor", "beforeMCPExecution"):
+            tool = fields.string("tool_name") ?? "MCP"
+            input = fields.jsonObject("tool_input") ?? [:]
+            if input.isEmpty, let url = fields.string("url") ?? fields.string("command") { input = ["command": url] }
+            session = fields.string("conversation_id")
+        case ("copilot", "permissionRequest"), ("copilot", "PermissionRequest"):
+            guard let name = fields.string("toolName") ?? fields.string("tool_name") else { return nil }
+            tool = name
+            input = fields.jsonObject("toolArgs") ?? fields.object("tool_input") ?? [:]
+            session = fields.string("sessionId") ?? fields.string("session_id")
+        case ("opencode", "permission.asked"):
+            tool = fields.string("permission") ?? "tool"
+            let patterns = fields.strings("patterns")
+            let metadata = fields.object("metadata") ?? [:]
+            input = metadata
+            if input["command"] == nil, tool == "bash", !patterns.isEmpty { input["command"] = patterns.joined(separator: " ") }
+            if input["file_path"] == nil, let file = (metadata["filepath"] as? String) ?? (metadata["filePath"] as? String) {
+                input["file_path"] = file
+            }
+            if input["description"] == nil, let title = fields.string("title") ?? patterns.first { input["description"] = title }
+            session = fields.string("session_id")
+        default:
+            return nil
+        }
+        // The card's words for a shell command and a file edit are Claude Code's tool names.
+        switch tool.lowercased() {
+        case "bash", "shell", "run_shell_command": tool = "Bash"
+        case "edit", "write": tool = "Edit"
+        case "webfetch", "fetch": tool = "WebFetch"
+        default: break
+        }
+        var result = object
+        result["hook_event_name"] = "PermissionRequest"
+        result["tool_name"] = tool
+        result["tool_input"] = input
+        result["session_id"] = session ?? (object["starnotch_pid"] as? NSNumber).map { "pid-\($0.intValue)" }
+        return result
+    }
+}
+
 /// The notch's end of the approvals socket: a Unix socket in the app's support folder (folder
 /// 0700, socket 0600). Each connection carries one request; the reply is the hook's stdout (or
 /// nothing, which leaves Claude Code's own prompt in charge). Only processes of the same user
@@ -190,16 +294,21 @@ public final class ApprovalServer: @unchecked Sendable {
     public let path: String
     private let handler: Handler
     private let onCancel: @Sendable (String) -> Void
+    private let onEvent: @Sendable (Data) -> Void
     private var source: DispatchSourceRead?
     private let queue = DispatchQueue(label: "approvals.accept")
 
     /// - Parameters:
     ///   - handler: gets each request; call `reply` once (nil = no decision).
     ///   - onCancel: the hook went away before a reply (answered in the terminal): the request id.
-    public init(path: String, handler: @escaping Handler, onCancel: @escaping @Sendable (String) -> Void = { _ in }) {
+    ///   - onEvent: a line that isn't a permission request (a status hook of another tool, see
+    ///     `HookUpdate`): its bytes. No reply is written; the connection closes.
+    public init(path: String, handler: @escaping Handler, onCancel: @escaping @Sendable (String) -> Void = { _ in },
+                onEvent: @escaping @Sendable (Data) -> Void = { _ in }) {
         self.path = path
         self.handler = handler
         self.onCancel = onCancel
+        self.onEvent = onEvent
     }
 
     public func start() throws {
@@ -256,7 +365,7 @@ public final class ApprovalServer: @unchecked Sendable {
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         var noSigPipe: Int32 = 1
         setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
-        DispatchQueue.global(qos: .userInitiated).async { [handler, onCancel] in
+        DispatchQueue.global(qos: .userInitiated).async { [handler, onCancel, onEvent] in
             // Read until the bytes parse as one request (the hook sends JSON, then closes its write side or not).
             var data = Data()
             var buffer = [UInt8](repeating: 0, count: 16_384)
@@ -269,7 +378,11 @@ public final class ApprovalServer: @unchecked Sendable {
                 // The hook sends one line; a full line that isn't a request ends it.
                 if data.contains(0x0A) { break }
             }
-            guard let request else { close(client); return }
+            guard let request else {
+                close(client)
+                if !data.isEmpty { onEvent(data) }
+                return
+            }
             let state = Once()
             let finish: @Sendable (ApprovalDecision?) -> Void = { decision in
                 guard state.claim() else { return }

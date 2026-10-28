@@ -126,6 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         approvals.onEmpty = { [weak self] in self?.notch.collapse() }
         approvals.onChange = { [weak agents] requests in agents?.setPendingApprovals(requests) }
+        // Strand agents: status hooks of Cursor, Copilot CLI, Gemini CLI and opencode arrive on the approvals socket.
+        approvals.onHookEvent = { [weak agents] data in agents?.ingestHook(data) }
         agents.onLimitAlert = { [weak self] tool, window, used, pace in
             self?.notch.sneak(Sneak(visual: .symbol("gauge.with.dots.needle.67percent", tint: used >= 90 ? .critical : .waiting),
                                     // "Claude full at 14:20 · 82 %" when the pace says so, else "Claude 82 % · lasts".
@@ -314,12 +316,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agents.onLoopFinished = { [weak self] loop in self?.loopFinished(loop) }
         if let name = options.preview, let agendaPreview {
             agendaPreview.run(name, notch: notch, agents: agents)
-        } else if let name = options.preview, name == "setup-consent" || name == "setup-done" || name.hasPrefix("onboarding") {
+        } else if let name = options.preview, name == "setup-consent" || name == "setup-done" || name == "setup-agents" || name.hasPrefix("onboarding") {
             // The setup pages with nothing behind them (the center is in preview mode).
             agents.usePreview(PreviewDirector.snapshot(agentsActive: false))
             if name == "setup-done" {
                 SetupLedgerWindow.show(center: setup)
             } else {
+                setup.previewMoreAgents = name == "setup-agents"  // strand agents: all six tools found
                 setup.resetForPreview()
                 showOnboardingPreview(name)
             }
@@ -556,7 +559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// one of its states (`connecting`, `login`, `syncing`, `done`, `empty`, `failed`).
     private func showOnboardingPreview(_ name: String) {
         let parts = name.split(separator: ":").map(String.init)
-        let step = name == "setup-consent" ? .agents : parts.count > 1 ? Int(parts[1]).flatMap(Onboarding.Step.init(rawValue:)) : nil
+        let step = name == "setup-consent" || name == "setup-agents" ? .agents : parts.count > 1 ? Int(parts[1]).flatMap(Onboarding.Step.init(rawValue:)) : nil
         showSetup(at: step)
         guard parts.count > 2, let jamie = onboarding?.model.jamie else { return }
         switch parts[2] {

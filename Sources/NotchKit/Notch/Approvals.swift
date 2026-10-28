@@ -22,6 +22,8 @@ final class ApprovalCenter {
     @ObservationIgnored var onEmpty: (() -> Void)?
     /// The pending requests changed (their sessions show "waiting for you").
     @ObservationIgnored var onChange: (([ApprovalRequest]) -> Void)?
+    /// A status hook of another tool came in on the same socket (Cursor, Copilot CLI, Gemini CLI, opencode).
+    @ObservationIgnored var onHookEvent: ((Data) -> Void)?
     @ObservationIgnored private var server: ApprovalServer?
     static let timeout: TimeInterval = 60
 
@@ -32,6 +34,8 @@ final class ApprovalCenter {
             Task { @MainActor in self?.receive(request, reply: reply) }
         }, onCancel: { [weak self] id in
             Task { @MainActor in self?.remove(id) }
+        }, onEvent: { [weak self] data in
+            Task { @MainActor in self?.onHookEvent?(data) }
         })
         do {
             try server.start()

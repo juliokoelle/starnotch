@@ -224,3 +224,27 @@
 "A tool is off until you switch it on; the notch shows only the ones that are on. Tabs hide themselves when what they need isn't on this Mac." = "Ein Tool ist aus, bis du es einschaltest; die Notch zeigt nur, was an ist. Tabs blenden sich aus, wenn auf diesem Mac fehlt, was sie brauchen.";
 "The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Automatic uses Claude Code when it's there, else an Anthropic key, else simple rules." = "Die Schlüssel bleiben auf diesem Mac, in agent.env im Ordner der App, nur für dich lesbar. In ~/.zshrc exportierte Schlüssel gehen auch. Automatisch nimmt Claude Code, wenn vorhanden, sonst einen Anthropic-Schlüssel, sonst einfache Regeln.";
 "Drop files here. Drag them out again or AirDrop them." = "Dateien hier ablegen. Wieder herausziehen oder per AirDrop senden.";
+
+/* Strand agents: Cursor, Copilot CLI, Gemini CLI, opencode, exact jumps, pace */
+"Cursor status and approvals" = "Cursor: Status und Freigaben";
+"Copilot CLI status and approvals" = "Copilot CLI: Status und Freigaben";
+"Gemini CLI status" = "Gemini CLI: Status";
+"opencode status and approvals" = "opencode: Status und Freigaben";
+"Cursor's sessions in the notch; approve its shell and MCP commands there" = "Cursor-Sitzungen in der Notch; Shell- und MCP-Befehle dort freigeben";
+"Copilot CLI's sessions in the notch; approve its requests there" = "Copilot-CLI-Sitzungen in der Notch; Anfragen dort freigeben";
+"Gemini CLI's sessions in the notch, and when it waits for you" = "Gemini-CLI-Sitzungen in der Notch, und wann sie auf dich warten";
+"opencode's sessions in the notch; approve its requests there" = "opencode-Sitzungen in der Notch; Anfragen dort freigeben";
+"This build has no hook script." = "Diesem Build fehlt das Hook-Skript.";
+"This build has no opencode plugin." = "Diesem Build fehlt das opencode-Plugin.";
+"No agent tools found (Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI, opencode)." = "Keine Agenten-Tools gefunden (Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI, opencode).";
+"Sessions and approvals for shell and MCP calls through Cursor's hooks (What's set up)." = "Sitzungen und Freigaben für Shell- und MCP-Aufrufe über die Hooks von Cursor (What's set up).";
+"Sessions from ~/.copilot; approvals through its hooks (What's set up)." = "Sitzungen aus ~/.copilot; Freigaben über seine Hooks (What's set up).";
+"Sessions from ~/.gemini; its hooks show when it waits, they can't approve." = "Sitzungen aus ~/.gemini; seine Hooks zeigen, wann es wartet, freigeben können sie nicht.";
+"Sessions from opencode's database; status and approvals through Starnotch's plugin." = "Sitzungen aus der Datenbank von opencode; Status und Freigaben über das Plugin von Starnotch.";
+"At this pace your %@ limit is full at %@" = "In diesem Tempo ist dein %@-Limit um %@ voll";
+"Lasts until the reset at %@" = "Reicht bis zum Reset um %@";
+"Lasts until the reset" = "Reicht bis zum Reset";
+"full %@" = "voll %@";
+"5-hour" = "5-Stunden";
+"weekly" = "Wochen";
+"5 h · %@" = "5 h · %@";

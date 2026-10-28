@@ -1,0 +1,7 @@
+{"type":"session.start","data":{"sessionId":"5a1f0c2e-0000-4000-8000-00000000c011","context":{"cwd":"/Users/me/projects/harbor","branch":"fix/export-test"}},"id":"e1","timestamp":"2026-10-20T11:40:00.000Z","parentId":null}
+{"type":"session.model_change","data":{"newModel":"gpt-6.1"},"id":"e2","timestamp":"2026-10-20T11:40:01.000Z","parentId":"e1"}
+{"type":"user.message","data":{"content":"The export test fails every third run.\nFind out why.","attachments":[]},"id":"e3","timestamp":"2026-10-20T11:50:00.000Z","parentId":"e2"}
+{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"e4","timestamp":"2026-10-20T11:50:01.000Z","parentId":"e3"}
+{"type":"assistant.message","data":{"content":"Running the export tests a few times.","toolRequests":[]},"id":"e5","timestamp":"2026-10-20T11:50:05.000Z","parentId":"e4"}
+{"type":"tool.execution_start","data":{"toolCallId":"t1","toolName":"bash","arguments":{"command":"swift test --filter Export","description":"Run the export tests"}},"id":"e6","timestamp":"2026-10-20T11:58:00.000Z","parentId":"e5"}
+{"type":"some.future_event","data":{},"id":"e7","timestamp":"2026-10-20T11:58:01.000Z","parentId":"e6"}

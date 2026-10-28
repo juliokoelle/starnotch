@@ -542,18 +542,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 system?.lidBusy = busy
             }
         }
-        lid.onNotice = { [weak self] notice in
+        lid.onNotice = { [weak self, weak system] notice in
             let title: String
             var detail: String?
             switch notice {
             case .ended(let reason):
                 title = "The Mac sleeps again with the lid closed"
                 detail = reason == .batteryLow ? "Battery at the floor" : reason == .tooHot ? "Too hot" : "Time is up"
+                // A safety stop, or a closed lid, also ends keep awake: its assertion would keep
+                // the Mac awake on its own.
+                if reason != .timeUp || LidAwakeController.closedLidSleeps() { self?.keepAwake.set(false) }
             case .refused(let reason):
                 title = reason == .tooHot ? "Too hot to stay awake with the lid closed" : "Battery too low to stay awake with the lid closed"
-                detail = reason == .tooHot ? "Let the Mac cool down first" : "Plug in, or pick a lower floor"
+                detail = reason == .tooHot ? "Let the Mac cool down first"
+                    : system?.lidFloor == LidAwake.floors.first ? "Plug in" : "Plug in, or pick a lower floor"
             case .alreadyOff: title = "Sleep was already switched off elsewhere"
             case .failed: title = "Couldn't keep the Mac awake with the lid closed"
+            case .stillOff:
+                title = "Couldn't let the Mac sleep again with the lid closed"
+                detail = "Trying again in a minute"
             case .ruleFailed: title = "Couldn't set up keeping awake with the lid closed"
             }
             self?.notch.sneak(Sneak(visual: .symbol("laptopcomputer", tint: notice.isEnd ? .neutral : .waiting),

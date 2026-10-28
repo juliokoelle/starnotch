@@ -5,8 +5,9 @@ import Foundation
 // for the password once); after that the switch runs them through `sudo -n`, which never prompts.
 // It runs on the power adapter and on battery. It ends after the chosen time, on battery when the
 // charge reaches the floor, and when the Mac gets too hot; plugging in or out changes nothing.
-// Starnotch switches it off when it quits or, after a crash, at the next launch (a marker in the
-// support folder says that Starnotch was the one who switched it on).
+// Starnotch switches it off when it quits; after a crash or a forced quit a small watchdog it
+// started does, or else the next launch (a marker in the support folder says that Starnotch was
+// the one who switched it on). A hung Starnotch is not covered: the watchdog waits while it runs.
 
 /// How long the Mac stays awake with the lid closed.
 public enum LidAwakeLimit: String, CaseIterable, Codable, Sendable {
@@ -25,6 +26,7 @@ public enum LidAwakeLimit: String, CaseIterable, Codable, Sendable {
 /// What the Mac says right now, for the safety checks.
 public struct LidAwakeReadings: Equatable, Sendable {
     /// The charge in percent while on battery; nil on the power adapter (or without a battery).
+    /// 0 on battery when the charge can't be read: the floor stops it rather than let it drain unseen.
     public var batteryPercent: Int?
     public var thermal: ProcessInfo.ThermalState
 
@@ -34,8 +36,11 @@ public struct LidAwakeReadings: Equatable, Sendable {
     }
 
     /// From the power source as IOKit reports it: the floor counts only off the power adapter.
-    public init(battery: BatteryState?, thermal: ProcessInfo.ThermalState) {
-        self.init(batteryPercent: battery.flatMap { $0.pluggedIn ? nil : $0.percent }, thermal: thermal)
+    /// `onBattery`: the Mac runs on its battery (IOKit's providing power source), also when the
+    /// battery's own description says otherwise or can't be read.
+    public init(battery: BatteryState?, onBattery: Bool, thermal: ProcessInfo.ThermalState) {
+        let percent: Int? = if let battery { battery.pluggedIn && !onBattery ? nil : battery.percent } else { onBattery ? 0 : nil }
+        self.init(batteryPercent: percent, thermal: thermal)
     }
 
     /// `.serious` and `.critical`: macOS already slows the Mac down to cool it.
@@ -98,7 +103,8 @@ public struct LidAwake: Equatable, Sendable {
     public mutating func handle(_ event: Event, now: Date) -> Action {
         switch event {
         case .switchOn(let limit, let floor, let readings, let ruleInstalled):
-            if let reason = Self.refusal(floor: floor, readings) { return .refused(reason) }
+            // While on, a reason not to run ends it, as a check would.
+            if let reason = Self.refusal(floor: floor, readings) { return isOn ? turnOff(reason) : .refused(reason) }
             guard ruleInstalled else { return .installRule }
             let wasOn = isOn
             self.floor = floor
@@ -219,6 +225,26 @@ public enum LidAwakeCommands {
         var message = text.range(of: "execution error: ").map { String(text[$0.upperBound...]) } ?? text
         if let code = message.range(of: #" \(-?\d+\)$"#, options: .regularExpression) { message.removeSubrange(code) }
         return message.isEmpty ? unknownFailure : message
+    }
+
+    /// `/bin/sh` arguments for the watchdog that brings sleep back when Starnotch is gone without
+    /// switching it on again (a crash, a forced quit). In the background, so the shell returns at
+    /// once, it waits while the process `pid` runs and the marker exists. When the marker still
+    /// holds that pid, it runs `disablesleep 0`, removes the marker and, when the lid is closed and
+    /// closing it would put the Mac to sleep (no external display on power), sleeps the Mac.
+    /// A quit or a switch-off removes the marker first, so the watchdog then does nothing.
+    public static func watchdogArguments(pid: Int32, marker: String) -> [String] {
+        let restore = ([sudo] + sudoArguments(false)).joined(separator: " ")
+        let script = """
+        (while /bin/kill -0 "$1" 2>/dev/null && [ -f "$2" ]; do /bin/sleep 5; done
+        [ "$(/bin/cat "$2" 2>/dev/null)" = "$1" ] || exit 0
+        \(restore) || exit 0
+        /bin/rm -f "$2"
+        s=$(/usr/sbin/ioreg -r -k AppleClamshellState -d 1)
+        case "$s" in *'"AppleClamshellState" = Yes'*) case "$s" in *'"AppleClamshellCausesSleep" = Yes'*) \(pmset) sleepnow ;; esac ;; esac
+        ) >/dev/null 2>&1 &
+        """
+        return ["-c", script, "sh", String(pid), marker]
     }
 
     /// `SleepDisabled` from `pmset -g`; nil when the line is missing.

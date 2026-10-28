@@ -915,8 +915,13 @@ private struct LidAwakePicker: View {
             Image(systemName: "laptopcomputer").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
                 .padding(.leading, 4)
             if !onBattery {
-                Text("Stay awake with the lid closed for").font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody)
-                    .fixedSize()
+                // The words where they fit, else the short form: the row keeps the floor.
+                ViewThatFits(in: .horizontal) {
+                    Text("Stay awake with the lid closed for").fixedSize()
+                    Text("For").fixedSize()
+                }
+                .font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody)
+                .layoutPriority(2)
             }
             ForEach(LidAwakeLimit.allCases, id: \.self) { limit in
                 Button {
@@ -949,8 +954,13 @@ private struct LidAwakePicker: View {
                 }
                 .font(Theme.font(11))
                 .foregroundStyle(Theme.waiting)
-                .help("The Mac stays awake and warm with the lid closed, so not in a bag. It stops when the battery reaches the floor.")
+                .help("The Mac stays awake and warm with the lid closed, so not in a bag. Keeping it awake ends when the battery reaches the floor.")
                 .layoutPriority(1)
+                if module.lidNeedsPassword() {
+                    Image(systemName: "lock").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.textTertiary)
+                        .frame(width: 28, height: 28)
+                        .help("Asks for your password once")
+                }
             } else if module.lidNeedsPassword() {
                 // The words where they fit, else the lock that says it in its tooltip.
                 ViewThatFits(in: .horizontal) {

@@ -544,11 +544,15 @@
 "Awake and warm with the lid closed: not in a bag" = "Zugeklappt wach und warm: nicht in die Tasche";
 "Warm with the lid closed: not in a bag" = "Zugeklappt warm: nicht in die Tasche";
 "Not in a bag" = "Nicht in die Tasche";
-"The Mac stays awake and warm with the lid closed, so not in a bag. It stops when the battery reaches the floor." = "Der Mac bleibt mit geschlossenem Deckel wach und warm, also nicht in die Tasche. Er stoppt, wenn der Akku die Untergrenze erreicht.";
+"The Mac stays awake and warm with the lid closed, so not in a bag. Keeping it awake ends when the battery reaches the floor." = "Der Mac bleibt mit geschlossenem Deckel wach und warm, also nicht in die Tasche. Das Wachhalten endet, wenn der Akku die Untergrenze erreicht.";
 "Battery at the floor" = "Akku an der Untergrenze";
 "Too hot" = "Zu heiß";
 "Too hot to stay awake with the lid closed" = "Zu heiß, um mit geschlossenem Deckel wach zu bleiben";
 "Battery too low to stay awake with the lid closed" = "Akku zu schwach, um mit geschlossenem Deckel wach zu bleiben";
 "Let the Mac cool down first" = "Lass den Mac erst abkühlen";
 "Plug in, or pick a lower floor" = "Einstecken oder eine niedrigere Untergrenze wählen";
+"Plug in" = "Einstecken";
+"For" = "Für";
+"Couldn't let the Mac sleep again with the lid closed" = "Der Mac konnte mit geschlossenem Deckel nicht wieder schlafen";
+"Trying again in a minute" = "Neuer Versuch in einer Minute";
 "Your Mac stays awake with the lid closed, on power or on battery" = "Dein Mac bleibt zugeklappt wach, am Strom oder im Akkubetrieb";

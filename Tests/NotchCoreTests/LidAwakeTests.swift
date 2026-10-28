@@ -40,7 +40,20 @@ import Testing
         // The same charge on the power adapter, or with a lower floor, is fine.
         #expect(lid.handle(on(floor: 10, battery(19)), now: now) == .enable)
         var plugged = LidAwake()
-        #expect(plugged.handle(on(floor: 50), now: now) == .enable)
+        let pluggedIn = LidAwakeReadings(battery: BatteryState(percent: 19, charging: false, pluggedIn: true, minutesLeft: nil),
+                                         onBattery: false, thermal: .nominal)
+        #expect(plugged.handle(on(floor: 50, pluggedIn), now: now) == .enable)
+    }
+
+    @Test func aRefusalWhileOnEndsIt() {
+        var hot = LidAwake()
+        _ = hot.handle(on(.untilOff, battery(80)), now: now)
+        #expect(hot.handle(on(.oneHour, battery(80, .serious)), now: now) == .disable(.tooHot))
+        #expect(!hot.isOn)
+        var low = LidAwake()
+        _ = low.handle(on(.untilOff, floor: 20, battery(40)), now: now)
+        #expect(low.handle(on(.threeHours, floor: 50, battery(40)), now: now) == .disable(.batteryLow))
+        #expect(!low.isOn)
     }
 
     @Test func refusedWhenTooHot() {
@@ -71,13 +84,30 @@ import Testing
         var lid = LidAwake()
         _ = lid.handle(on(.untilOff, floor: 50), now: now)
         // IOKit says 12 % but on power: no floor.
-        let charging = LidAwakeReadings(battery: BatteryState(percent: 12, charging: true, pluggedIn: true, minutesLeft: nil), thermal: .nominal)
+        let charging = LidAwakeReadings(battery: BatteryState(percent: 12, charging: true, pluggedIn: true, minutesLeft: nil),
+                                        onBattery: false, thermal: .nominal)
         #expect(charging.batteryPercent == nil)
         #expect(lid.handle(.check(charging), now: now) == .none)
-        let unplugged = LidAwakeReadings(battery: BatteryState(percent: 12, charging: false, pluggedIn: false, minutesLeft: nil), thermal: .nominal)
+        let unplugged = LidAwakeReadings(battery: BatteryState(percent: 12, charging: false, pluggedIn: false, minutesLeft: nil),
+                                         onBattery: true, thermal: .nominal)
         #expect(unplugged.batteryPercent == 12)
         #expect(lid.handle(.check(unplugged), now: now) == .disable(.batteryLow))
-        #expect(LidAwakeReadings(battery: nil, thermal: .nominal).batteryPercent == nil)
+        // A desktop: no battery, no floor.
+        #expect(LidAwakeReadings(battery: nil, onBattery: false, thermal: .nominal).batteryPercent == nil)
+    }
+
+    @Test func theFloorFailsClosedOnBattery() {
+        // On battery but the charge can't be read: it counts as empty.
+        let unreadable = LidAwakeReadings(battery: nil, onBattery: true, thermal: .nominal)
+        #expect(unreadable.batteryPercent == 0)
+        var lid = LidAwake()
+        #expect(lid.handle(on(floor: 10, unreadable), now: now) == .refused(.batteryLow))
+        _ = lid.handle(on(.untilOff, floor: 10, battery(80)), now: now)
+        #expect(lid.handle(.check(unreadable), now: now) == .disable(.batteryLow))
+        // IOKit runs on the battery although its description says the adapter: the floor counts.
+        let mixed = LidAwakeReadings(battery: BatteryState(percent: 15, charging: false, pluggedIn: true, minutesLeft: nil),
+                                     onBattery: true, thermal: .nominal)
+        #expect(mixed.batteryPercent == 15)
     }
 
     @Test func heatEndsIt() {
@@ -195,6 +225,21 @@ import Testing
     @Test func appleScriptEscapesQuotesAndBackslashes() {
         let script = LidAwakeCommands.appleScript(shell: #"printf '%s\n' "$tmp""#, prompt: #"Say "yes""#)
         #expect(script == #"do shell script "printf '%s\\n' \"$tmp\"" with prompt "Say \"yes\"" with administrator privileges"#)
+    }
+
+    @Test func theWatchdogRunsOnlyTheRuleAndSleep() {
+        let arguments = LidAwakeCommands.watchdogArguments(pid: 4242, marker: "/tmp/a b/lid-awake")
+        // The pid and the marker go in as $1 and $2, never into the script: no quoting needed.
+        #expect(arguments.first == "-c")
+        #expect(Array(arguments.suffix(3)) == ["sh", "4242", "/tmp/a b/lid-awake"])
+        let script = arguments[1]
+        #expect(!script.contains("4242") && !script.contains("lid-awake"))
+        #expect(script.contains("/usr/bin/sudo -n /usr/bin/pmset -a disablesleep 0 || exit 0"))
+        #expect(!script.contains("disablesleep 1"))
+        // Only when the marker still holds this pid: a quit or a switch-off removed it.
+        #expect(script.contains(#"[ "$(/bin/cat "$2" 2>/dev/null)" = "$1" ] || exit 0"#))
+        #expect(script.contains("/usr/bin/pmset sleepnow"))
+        #expect(script.hasSuffix(") >/dev/null 2>&1 &"))
     }
 
     @Test func readsSleepDisabledFromPmset() {

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import privacy
 from memory import DEFAULT_DIR, Commitment, Decision, Line, Meeting, Memory, _seconds
 
 JAMIE_URL = "https://mcp.meetjamie.ai/mcp"
@@ -710,6 +711,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.logout:
         print(json.dumps({"type": "status", "state": "logged_out", "removed": logout()}), flush=True)
+        return 0
+    refused = privacy.load().why_not("meetings") if not args.list_tools else ""
+    if refused:  # paused or switched off in Settings › Tara's memory: nothing comes in
+        print(json.dumps({"type": "status", "state": "paused", "message": refused}), flush=True)
         return 0
     if args.no_login and not FileTokenStorage()._read().get("tokens"):  # registering the client alone writes the file
         print(json.dumps({"type": "status", "state": "login_required"}), flush=True)

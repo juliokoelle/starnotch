@@ -38,7 +38,13 @@ final class SetupCenter {
         let installed = (paths, ledger)
         DispatchQueue.global(qos: .utility).async { SetupActions.refreshInstalledCopies(installed.0, ledger: installed.1) }
         // The other agent tools change how those tools ask: off until chosen.
-        selected = Set(offered.filter { isAvailable($0) && !isSetUp($0) && !Self.moreAgentItems.contains($0) })
+        // Sharing Tara's memory with an AI app is a choice of its own: off until chosen too.
+        selected = Set(offered.filter { isAvailable($0) && !isSetUp($0) && !Self.moreAgentItems.contains($0)
+                && !SetupItem.memoryItems.contains($0) })
+    }
+
+    static func installed(_ bundleID: String) -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
     }
 
     /// Setup items of the tools beyond Claude Code and Codex (strand agents).
@@ -94,6 +100,13 @@ final class SetupCenter {
             // Answering is offered once the tool's status is set up (or right away in recordings).
             case .cursorApprovals: previewMoreAgents || isSetUp(.cursorHooks) || isSetUp(.cursorApprovals)
             case .copilotApprovals: previewMoreAgents || isSetUp(.copilotHooks) || isSetUp(.copilotApprovals)
+            // Tara's memory in the AI apps found on this Mac.
+            case .memoryClaudeDesktop:
+                preview || Self.installed("com.anthropic.claudefordesktop")
+                    || FileManager.default.fileExists(atPath: paths.claudeDesktopConfig.deletingLastPathComponent().path)
+            case .memoryClaudeCode: preview || FileManager.default.fileExists(atPath: paths.home.appending(path: ".claude").path)
+            case .memoryCursor: preview || FileManager.default.fileExists(atPath: paths.cursorHome.path)
+            case .memoryChatGPT: preview || Self.installed("com.openai.chat")
             }
         }
     }
@@ -114,6 +127,15 @@ final class SetupCenter {
             return paths.hookScriptSource.map { FileManager.default.fileExists(atPath: $0.path) } == true ? nil : "This build has no hook script."
         case .opencodePlugin:
             return paths.opencodePluginSource.map { FileManager.default.fileExists(atPath: $0.path) } == true ? nil : "This build has no opencode plugin."
+        case .memoryClaudeDesktop, .memoryClaudeCode, .memoryCursor, .memoryChatGPT:
+            if item == .memoryClaudeCode, paths.claudeBinary == nil { return "The claude command wasn't found." }
+            if item == .memoryClaudeDesktop, !FileManager.default.fileExists(atPath: paths.claudeDesktopConfig.deletingLastPathComponent().path) {
+                return "Open Claude Desktop once first."
+            }
+            if item == .memoryChatGPT, !FileManager.default.fileExists(atPath: paths.codexHome.path) {
+                return "Start a task on your Mac in ChatGPT once first: it keeps its local tools in ~/.codex."
+            }
+            return paths.uvBinary == nil ? "Needs uv: Settings › Meeting agent › Install uv." : nil
         default: return nil
         }
     }
@@ -137,15 +159,16 @@ final class SetupCenter {
         }
         let order = offered.filter { items.contains($0) && !isSetUp($0) }
         for item in order { status[item] = .running }
-        // The MCP server runs from the agent's copy in the support folder.
-        if order.contains(.mcpServer) { _ = MeetingAgentSetup.ensureInstalled() }
+        // The MCP servers run from the agent's copy in the support folder.
+        if order.contains(.mcpServer) || order.contains(where: SetupItem.memoryItems.contains) { _ = MeetingAgentSetup.ensureInstalled() }
         let paths = paths
         Task {
             for item in order {
                 let result: Status
                 switch item {
                 case .claudePlugin, .codexHook, .statusLine, .mcpServer, .shellHook,
-                     .cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin, .cursorApprovals, .copilotApprovals:
+                     .cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin, .cursorApprovals, .copilotApprovals,
+                     .memoryClaudeDesktop, .memoryClaudeCode, .memoryCursor, .memoryChatGPT:
                     let outcome = await Task.detached(priority: .userInitiated) { () -> Result<SetupLedger.Entry, Error> in
                         Result {
                             switch item {
@@ -159,6 +182,8 @@ final class SetupCenter {
                             case .opencodePlugin: try SetupActions.installOpencodePlugin(paths)
                             case .cursorApprovals: try SetupActions.installCursorApprovals(paths)
                             case .copilotApprovals: try SetupActions.installCopilotApprovals(paths)
+                            case .memoryClaudeDesktop, .memoryClaudeCode, .memoryCursor, .memoryChatGPT:
+                                try SetupActions.installMemory(item, paths)
                             default: try SetupActions.installShellHook(paths)
                             }
                         }
@@ -287,6 +312,8 @@ final class SetupCenter {
                         case .opencodePlugin: try SetupActions.removeOpencodePlugin(paths)
                         case .cursorApprovals: try SetupActions.removeCursorApprovals(paths, entry: entry)
                         case .copilotApprovals: try SetupActions.removeCopilotApprovals(paths)
+                        case .memoryClaudeDesktop, .memoryClaudeCode, .memoryCursor, .memoryChatGPT:
+                            try SetupActions.removeMemory(item, paths, entry: entry)
                         default: break
                         }
                     }
@@ -341,7 +368,7 @@ final class SetupCenter {
     func resetForPreview() {
         preview = true
         ledger = SetupLedger()
-        selected = Set(offered).subtracting(Self.moreAgentItems)
+        selected = Set(offered).subtracting(Self.moreAgentItems).subtracting(SetupItem.memoryItems)
     }
 
     /// Recordings: a page as it looks after setting up.
@@ -374,7 +401,7 @@ struct SetupItemRow: View {
         let reason = center.unavailableReason(item)
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(LocalizedStringKey(item.title)).font(.system(size: 13, weight: .medium))
+                Text(LocalizedStringKey(item.appName ?? item.title)).font(.system(size: 13, weight: .medium))
                 Text(LocalizedStringKey(reason ?? Self.summary(item)))
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -431,6 +458,8 @@ struct SetupItemRow: View {
         case .opencodePlugin: "opencode's sessions in the notch; approve its requests there"
         case .cursorApprovals: "Every shell and MCP command asks in the notch first"
         case .copilotApprovals: "Copilot's requests ask in the notch first"
+        case .memoryClaudeDesktop, .memoryClaudeCode, .memoryCursor, .memoryChatGPT:
+            "Can search your meetings, captures and notes, read only"
         }
     }
 }

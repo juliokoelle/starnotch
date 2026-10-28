@@ -89,8 +89,17 @@ final class JamieConnect {
         if found != blocker { blocker = found }
     }
 
+    /// Tara's privacy switches: no sync while her memory is paused or meetings are off.
+    @ObservationIgnored var privacy: () -> MemoryPrivacy = { MemoryPrivacy() }
+
+    static let pausedLine = "Tara's memory is paused or meetings are off, so nothing comes in from Jamie"
+
     func connect() {
         loginLost = false
+        guard privacy().records(.meetings, at: Date()) else {
+            set(.failed(Localization.string(Self.pausedLine)))
+            return
+        }
         run("exec uv run python jamie_sync.py")
     }
 
@@ -127,7 +136,7 @@ final class JamieConnect {
         guard ticker != nil else { return }
         schedule.connected = !loginLost && hasLogin
         schedule.meetingEnds = meetingEnds()
-        guard schedule.shouldSync(trigger, now: Date()) else { return }
+        guard schedule.shouldSync(trigger, now: Date()), privacy().records(.meetings, at: Date()) else { return }
         run("exec uv run python jamie_sync.py --no-login --limit 10", automatic: true)
     }
 
@@ -187,6 +196,8 @@ final class JamieConnect {
         switch parsed {
         case .status("login", let url):
             set(.login(url.flatMap(URL.init(string:))))
+        case .status("paused", _):
+            set(.failed(Localization.string(Self.pausedLine)))
         case .status("login_required", _):
             loginLost = true
             set(.failed("Jamie signed you out; connect again to keep your meetings in sync"))

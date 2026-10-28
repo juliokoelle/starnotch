@@ -127,6 +127,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public var remindersInToday: Bool
     /// Tab order, set by dragging a tab in the island (`ModuleOrder`); empty = the built-in order.
     public var moduleOrder: [ModuleKind]
+    /// Tara's memory: paused, sources switched off, apps kept out (Settings › Tara's memory).
+    public var privacy: MemoryPrivacy
 
     public init(
         slots: [SlotApp?] = Array(repeating: nil, count: slotCount),
@@ -153,7 +155,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         watchTimer: WatchTimer = .twoHours,
         disabledProviders: [String] = [],
         remindersInToday: Bool = false,
-        moduleOrder: [ModuleKind] = []
+        moduleOrder: [ModuleKind] = [],
+        privacy: MemoryPrivacy = MemoryPrivacy()
     ) {
         self.slots = Self.normalized(slots)
         self.modules = Self.normalized(modules)
@@ -181,6 +184,7 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         self.disabledProviders = disabledProviders
         self.remindersInToday = remindersInToday
         self.moduleOrder = moduleOrder
+        self.privacy = privacy
     }
 
     /// The app in a slot. Assigning an app replaces the slot's module.
@@ -279,7 +283,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             watchTimer: (try? c.decodeIfPresent(WatchTimer.self, forKey: .watchTimer)) ?? .twoHours,
             disabledProviders: (try? c.decodeIfPresent([String].self, forKey: .disabledProviders)) ?? [],
             remindersInToday: (try? c.decodeIfPresent(Bool.self, forKey: .remindersInToday)) ?? false,
-            moduleOrder: (try? c.decodeIfPresent([ModuleKind].self, forKey: .moduleOrder)) ?? []
+            moduleOrder: (try? c.decodeIfPresent([ModuleKind].self, forKey: .moduleOrder)) ?? [],
+            privacy: (try? c.decodeIfPresent(MemoryPrivacy.self, forKey: .privacy)) ?? MemoryPrivacy()
         )
         // Saved by an older version: tools added since start off. Without the stamp the settings
         // come from before it, and every tool of this version counts as known.

@@ -367,7 +367,8 @@ private struct AgentsStep: View {
     var body: some View {
         let setup = model.setup
         let agents = setup.offered.filter { Self.agentItems.contains($0) }
-        let mac = setup.offered.filter { !Self.agentItems.contains($0) }
+        let memory = setup.offered.filter { SetupItem.memoryItems.contains($0) }
+        let mac = setup.offered.filter { !Self.agentItems.contains($0) && !SetupItem.memoryItems.contains($0) }
         VStack(alignment: .leading, spacing: 18) {
             if setup.foundAgents.isEmpty {
                 Text("No coding agents yet. \(Brand.displayName) picks up Claude Code and Codex as soon as they're installed.")
@@ -391,6 +392,15 @@ private struct AgentsStep: View {
                 VStack(alignment: .leading, spacing: 8) {
                     OnboardingLabel("For your agents")
                     CardList(items: agents) { SetupItemRow(center: setup, item: $0, detailed: model.detailed) }
+                }
+            }
+            if !memory.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    OnboardingLabel("Tara's memory in your AI apps")
+                    CardList(items: memory) { SetupItemRow(center: setup, item: $0, detailed: model.detailed) }
+                    Text("Read only, on this Mac. Settings › Tara's memory decides what they see.")
+                        .font(.system(size: 11.5)).foregroundStyle(.tertiary)
+                        .padding(.leading, 2)
                 }
             }
             if !mac.isEmpty {

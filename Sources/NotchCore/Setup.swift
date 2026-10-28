@@ -260,13 +260,7 @@ public enum SetupActions {
         if added.output.localizedCaseInsensitiveContains("already"),
            let registered = (try? Data(contentsOf: paths.knownMarketplaces)).flatMap(ClaudePluginCheck.marketplace), registered != .absent {
             if !ClaudePluginCheck.isCurrent(registered, stableCopy: paths.claudePluginCopy, exists: { FileManager.default.fileExists(atPath: $0) }) {
-                let local = try placeClaudePluginCopy(paths)
-                _ = run(claude, ["plugin", "marketplace", "remove", SetupPaths.marketplaceName], env)
-                let readded = run(claude, ["plugin", "marketplace", "add", local.path], env)
-                guard readded.status == 0 else {
-                    throw SetupError.failed("Couldn't add the marketplace: \(readded.output.trimmingCharacters(in: .whitespacesAndNewlines))")
-                }
-                source = local.path
+                source = try registerClaudePluginCopy(paths, claude: claude, previous: registered, run: run, env: env).path
             } else if case .directory(let path) = registered {
                 source = path
             } else {

@@ -39,25 +39,62 @@ import TestSupport
         #expect(Self.decide(Self.marketplaces(Self.github), copyStale: true) == .refreshCopy)
     }
 
-    @Test func aFolderElsewhereOrGoneIsRegisteredAgain() {
-        // A build folder that still exists, but isn't the app's copy.
-        #expect(Self.decide(Self.marketplaces(Self.directory("/old/build/integrations/claude-code")),
-                            existing: [Self.copy.path, "/old/build/integrations/claude-code"]) == .reregister)
-        // A deleted build folder.
+    @Test func aFolderInsideAnAppOrGoneIsRegisteredAgain() {
+        // Inside a build or an installed app: it still works, but goes with the app.
+        let inApp = "/old/build/Starnotch.app/Contents/Resources/integrations/claude-code"
+        #expect(Self.decide(Self.marketplaces(Self.directory(inApp)),
+                            existing: [Self.copy.path, inApp, inApp + "/.claude-plugin/marketplace.json"]) == .reregister)
+        let translocated = "/private/var/folders/x/AppTranslocation/1/d/integrations/claude-code"
+        #expect(Self.decide(Self.marketplaces(Self.directory(translocated)),
+                            existing: [translocated, translocated + "/.claude-plugin/marketplace.json"]) == .reregister)
+        // A deleted build folder, or one without the marketplace in it.
         #expect(Self.decide(Self.marketplaces(Self.directory("/old/build/integrations/claude-code"))) == .reregister)
+        #expect(Self.decide(Self.marketplaces(Self.directory("/old/build/integrations/claude-code")),
+                            existing: ["/old/build/integrations/claude-code"]) == .reregister)
         // The app's copy, deleted.
         #expect(Self.decide(Self.marketplaces(Self.directory(Self.copy.path)), existing: []) == .reregister)
-        // Another GitHub repository, another kind of source, or none at all.
+        // Another GitHub repository or another kind of source.
         #expect(Self.decide(Self.marketplaces(#"{"source":"github","repo":"someone/fork"}"#)) == .reregister)
         #expect(Self.decide(Self.marketplaces(#"{"source":"url","url":"https://example.com/m.json"}"#)) == .reregister)
-        #expect(Self.decide(Self.marketplaces(nil)) == .reregister)
+    }
+
+    @Test func aWorkingFolderOutsideAnAppIsLeftAlone() {
+        // Another build's copy in its own support folder, or a checkout: both keep working.
+        for folder in ["/home/Library/Application Support/StarnotchPrivate/integrations/claude-code", "/src/starnotch/integrations/claude-code"] {
+            #expect(Self.decide(Self.marketplaces(Self.directory(folder)),
+                                existing: [folder, folder + "/.claude-plugin/marketplace.json"]) == .fine)
+        }
+    }
+
+    @Test func theRepositoryByURLIsFine() {
+        for url in ["https://github.com/juliokoelle/starnotch.git", "https://github.com/JulioKoelle/starnotch/", "git@github.com:juliokoelle/starnotch.git"] {
+            #expect(Self.decide(Self.marketplaces(#"{"source":"git","url":"\#(url)"}"#)) == .fine)
+        }
+        #expect(Self.decide(Self.marketplaces(#"{"source":"git","url":"https://github.com/someone/starnotch.git"}"#)) == .reregister)
+    }
+
+    @Test func aMarketplaceTheUserRemovedStaysRemoved() {
+        #expect(Self.decide(Self.marketplaces(nil)) == .fine)
+        #expect(Self.decide(Self.marketplaces(nil), installed: Self.notInstalled, settings: Data("{}".utf8)) == .fine)
+        #expect(Self.decide(Self.marketplaces(nil), copyStale: true) == .refreshCopy)
     }
 
     @Test func aMissingPluginIsInstalled() {
         #expect(Self.decide(Self.marketplaces(Self.github), installed: Self.notInstalled) == .install)
-        // Not in enabledPlugins at all counts as missing; so does a missing settings file.
-        #expect(Self.decide(Self.marketplaces(Self.github), settings: Data(#"{"model":"opus"}"#.utf8)) == .install)
-        #expect(Self.decide(Self.marketplaces(Self.directory(Self.copy.path)), settings: nil) == .install)
+        #expect(Self.decide(Self.marketplaces(Self.github),
+                            installed: Data(#"{"version":2,"plugins":{"starnotch-approvals@starnotch":[]}}"#.utf8)) == .install)
+    }
+
+    @Test func anInstalledPluginIsLeftAsItIs() {
+        // Without an enabledPlugins entry or a settings file: nothing is installed over it.
+        #expect(Self.decide(Self.marketplaces(Self.github), settings: Data(#"{"model":"opus"}"#.utf8)) == .fine)
+        #expect(Self.decide(Self.marketplaces(Self.directory(Self.copy.path)), settings: nil) == .fine)
+        // Installed for one project only: not widened to every project.
+        let project = Data(#"{"version":2,"plugins":{"starnotch-approvals@starnotch":[{"scope":"project","projectPath":"/p"}]}}"#.utf8)
+        #expect(Self.decide(Self.marketplaces(Self.github), installed: project, settings: Data("{}".utf8)) == .fine)
+        // The older format, an object per plugin.
+        let version1 = Data(#"{"version":1,"plugins":{"starnotch-approvals@starnotch":{"version":"0.1.0"}}}"#.utf8)
+        #expect(Self.decide(Self.marketplaces(Self.github), installed: version1) == .fine)
     }
 
     @Test func aPluginTheUserSwitchedOffStaysOff() {
@@ -128,10 +165,10 @@ import TestSupport
         #expect(SetupSandbox.read(paths.knownMarketplaces).contains("/deleted/build"))
     }
 
-    @Test func aStaleFolderThatStillExistsIsRegisteredAgain() throws {
+    @Test func aFolderInsideAnAppIsRegisteredAgain() throws {
         let (paths, ledger) = Self.home(marketplace: nil)
         defer { Fixtures.remove(paths.home) }
-        let old = paths.home.appending(path: "old-build/integrations/claude-code")
+        let old = paths.home.appending(path: "Applications/Starnotch.app/Contents/Resources/integrations/claude-code")
         try FileManager.default.createDirectory(at: old.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: try #require(paths.claudePluginBundle), to: old)
         try Self.marketplaces(Self.directory(old.path)).write(to: paths.knownMarketplaces)
@@ -139,6 +176,58 @@ import TestSupport
         #expect(try SetupActions.checkClaudePlugin(paths, ledger: ledger, run: fake.run) == .reregister)
         #expect(fake.calls.first == "plugin marketplace remove starnotch")
         #expect(fake.calls.count == 3)
+    }
+
+    /// A working folder inside the app, as a stale-looking but live registration.
+    static func appFolder(_ paths: SetupPaths) throws -> URL {
+        let old = paths.home.appending(path: "Applications/Starnotch.app/Contents/Resources/integrations/claude-code")
+        try FileManager.default.createDirectory(at: old.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: try #require(paths.claudePluginBundle), to: old)
+        try marketplaces(directory(old.path)).write(to: paths.knownMarketplaces)
+        return old
+    }
+
+    @Test func aFailedAddPutsTheWorkingFolderBack() throws {
+        let (paths, ledger) = Self.home(marketplace: nil)
+        defer { Fixtures.remove(paths.home) }
+        let old = try Self.appFolder(paths)
+        let fake = FakeRunner()
+        fake.answers["plugin marketplace add \(paths.claudePluginCopy.path)"] = (1, "Error: invalid marketplace")
+        #expect(throws: SetupError.failed("Couldn't add the marketplace: Error: invalid marketplace")) {
+            try SetupActions.checkClaudePlugin(paths, ledger: ledger, run: fake.run)
+        }
+        #expect(fake.calls == ["plugin marketplace remove starnotch",
+                               "plugin marketplace add \(paths.claudePluginCopy.path)",
+                               "plugin marketplace add \(old.path)"])
+    }
+
+    @Test func anotherBuildsCopyIsLeftAlone() throws {
+        let (paths, ledger) = Self.home(marketplace: nil)
+        defer { Fixtures.remove(paths.home) }
+        let other = paths.home.appending(path: "Library/Application Support/StarnotchOther/integrations/claude-code")
+        try FileManager.default.createDirectory(at: other.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: try #require(paths.claudePluginBundle), to: other)
+        try Self.marketplaces(Self.directory(other.path)).write(to: paths.knownMarketplaces)
+        let fake = FakeRunner()
+        #expect(try SetupActions.checkClaudePlugin(paths, ledger: ledger, run: fake.run) == .fine)
+        #expect(fake.calls.isEmpty)
+        // Set up from this build: it stays registered where it is.
+        fake.answers["plugin marketplace add"] = (0, "Marketplace 'starnotch' is already installed")
+        let entry = try SetupActions.installClaudePlugin(paths, run: fake.run)
+        #expect(fake.calls == ["plugin marketplace add juliokoelle/starnotch", "plugin install starnotch-approvals@starnotch"])
+        #expect(entry.previous == other.path)
+    }
+
+    @Test func onceRepairedTheNextLaunchRunsNothing() throws {
+        let (paths, ledger) = Self.home(marketplace: Self.directory("/deleted/build/integrations/claude-code"))
+        defer { Fixtures.remove(paths.home) }
+        let fake = FakeRunner()
+        #expect(try SetupActions.checkClaudePlugin(paths, ledger: ledger, run: fake.run) == .reregister)
+        // What the real command would have written.
+        try Self.marketplaces(Self.directory(paths.claudePluginCopy.path)).write(to: paths.knownMarketplaces)
+        let next = FakeRunner()
+        #expect(try SetupActions.checkClaudePlugin(paths, ledger: ledger, run: next.run) == .fine)
+        #expect(next.calls.isEmpty)
     }
 
     @Test func gitHubFineDoesNothing() throws {
@@ -214,7 +303,7 @@ import TestSupport
         #expect(throws: SetupError.failed("Couldn't add the marketplace: Error: something broke")) {
             try SetupActions.checkClaudePlugin(paths, ledger: ledger, run: fake.run)
         }
-        #expect(fake.calls.count == 2)  // no install after a failed add, no retry
+        #expect(fake.calls.count == 2)  // no install after a failed add, no retry, nothing to put back
     }
 
     // MARK: Set up and Remove
@@ -242,6 +331,60 @@ import TestSupport
         #expect(fake.calls == ["plugin marketplace add juliokoelle/starnotch", "plugin install starnotch-approvals@starnotch"])
         #expect(entry.previous == "juliokoelle/starnotch")
         #expect(!FileManager.default.fileExists(atPath: paths.claudePluginCopy.path))
+    }
+
+    @Test func theAppsCopyAlreadyAddedStaysAsItIs() throws {
+        let (paths, _) = Self.home(marketplace: nil)
+        defer { Fixtures.remove(paths.home) }
+        try SetupActions.placeClaudePluginCopy(paths)
+        try Self.marketplaces(Self.directory(paths.claudePluginCopy.path)).write(to: paths.knownMarketplaces)
+        let fake = FakeRunner()
+        fake.answers["plugin marketplace add juliokoelle"] = (1, "Error: network unreachable")
+        fake.answers["plugin marketplace add /"] = (1, "Marketplace 'starnotch' is already installed")
+        let entry = try SetupActions.installClaudePlugin(paths, run: fake.run)
+        #expect(fake.calls == ["plugin marketplace add juliokoelle/starnotch",
+                               "plugin marketplace add \(paths.claudePluginCopy.path)",
+                               "plugin install starnotch-approvals@starnotch"])
+        #expect(entry.previous == paths.claudePluginCopy.path)
+    }
+
+    @Test func theAppsCopyAlreadyAddedButStaleIsPointedAtTheCopy() throws {
+        let (paths, _) = Self.home(marketplace: Self.directory("/deleted/build/integrations/claude-code"))
+        defer { Fixtures.remove(paths.home) }
+        let fake = FakeRunner()
+        fake.answers["plugin marketplace add juliokoelle"] = (1, "Error: network unreachable")
+        fake.answers["plugin marketplace add /"] = (0, "Marketplace 'starnotch' is already installed")
+        let entry = try SetupActions.installClaudePlugin(paths, run: fake.run)
+        #expect(fake.calls == ["plugin marketplace add juliokoelle/starnotch",
+                               "plugin marketplace add \(paths.claudePluginCopy.path)",
+                               "plugin marketplace remove starnotch",
+                               "plugin marketplace add \(paths.claudePluginCopy.path)",
+                               "plugin install starnotch-approvals@starnotch"])
+        #expect(entry.previous == paths.claudePluginCopy.path)
+    }
+
+    @Test func alreadyAddedWithAnUnreadableRegistryIsTakenAsGitHub() throws {
+        let (paths, _) = Self.home(marketplace: Self.github)
+        defer { Fixtures.remove(paths.home) }
+        try "{ not json".write(to: paths.knownMarketplaces, atomically: true, encoding: .utf8)
+        let fake = FakeRunner()
+        fake.answers["plugin marketplace add"] = (0, "Marketplace 'starnotch' is already installed")
+        let entry = try SetupActions.installClaudePlugin(paths, run: fake.run)
+        #expect(fake.calls == ["plugin marketplace add juliokoelle/starnotch", "plugin install starnotch-approvals@starnotch"])
+        #expect(entry.previous == "juliokoelle/starnotch")
+        #expect(SetupSandbox.read(paths.knownMarketplaces) == "{ not json")
+    }
+
+    @Test func theCopyIsSwappedWithoutLeftovers() throws {
+        let paths = SetupSandbox.make()
+        defer { Fixtures.remove(paths.home) }
+        try SetupActions.placeClaudePluginCopy(paths)
+        let script = paths.claudePluginCopy.appending(path: "starnotch-approvals/scripts/ask-notch.sh")
+        try "old".write(to: script, atomically: true, encoding: .utf8)
+        try SetupActions.placeClaudePluginCopy(paths)
+        #expect(!SetupActions.isClaudePluginCopyStale(paths))
+        let siblings = try FileManager.default.contentsOfDirectory(atPath: paths.claudePluginCopy.deletingLastPathComponent().path)
+        #expect(siblings == ["claude-code"])
     }
 
     @Test func removeTakesTheCopyAlong() throws {

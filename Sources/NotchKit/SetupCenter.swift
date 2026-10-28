@@ -196,6 +196,8 @@ final class SetupCenter {
 
     /// At most once per launch.
     private static var checkedClaudePlugin = false
+    /// The launch check while it runs; Remove waits for it.
+    private var pluginCheck: Task<Void, Never>?
 
     /// At launch, for a plugin the user set up: a registration Claude Code would skip (its folder
     /// is gone, or the plugin is missing) is repaired off the main thread; a failure stays on the
@@ -205,7 +207,7 @@ final class SetupCenter {
         Self.checkedClaudePlugin = true
         let paths = paths
         let ledger = ledger
-        Task {
+        pluginCheck = Task {
             let outcome = await Task.detached(priority: .utility) {
                 Result { try SetupActions.checkClaudePlugin(paths, ledger: ledger) }
             }.value
@@ -223,7 +225,7 @@ final class SetupCenter {
             case .success:
                 break
             case .failure(let error):
-                status[.claudePlugin] = .failed(String(format: Localization.string("Couldn't repair the plugin's registration: %@"), String(describing: error)))
+                status[.claudePlugin] = .failed(String(describing: error))
             }
         }
     }
@@ -252,6 +254,11 @@ final class SetupCenter {
         let paths = paths
         status[item] = .running
         Task {
+            if item == .claudePlugin, let check = pluginCheck {
+                // The launch check may be registering the plugin right now: Remove comes after it.
+                await check.value
+                status[item] = .running
+            }
             let outcome: Result<Void, Error>
             switch item {
             case .launchAtLogin:

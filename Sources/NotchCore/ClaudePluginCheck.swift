@@ -33,17 +33,36 @@ public enum ClaudePluginCheck {
         guard let entry = root[SetupPaths.marketplaceName] as? [String: Any] else { return .absent }
         let source = entry["source"] as? [String: Any] ?? [:]
         if source["source"] as? String == "github", let repo = source["repo"] as? String { return .github(repo) }
+        if let url = source["url"] as? String, namesRepo(url) { return .github(SetupPaths.marketplaceRepo) }
         if let path = source["path"] as? String { return .directory(path) }
         return .other
     }
 
-    /// The GitHub repository, or the app's copy while it is there.
+    /// A git or URL source that names the GitHub repository.
+    static func namesRepo(_ url: String) -> Bool {
+        var url = url.lowercased()
+        while url.hasSuffix("/") { url.removeLast() }
+        if url.hasSuffix(".git") { url.removeLast(4) }
+        let repo = SetupPaths.marketplaceRepo.lowercased()
+        return url.hasSuffix("github.com/\(repo)") || url.hasSuffix("github.com:\(repo)")
+    }
+
+    /// The GitHub repository, the app's copy while it is there, or another folder that holds the
+    /// marketplace outside an app (another build's copy, a checkout): a folder inside an app goes
+    /// when the app is moved, updated or deleted.
     public static func isCurrent(_ source: MarketplaceSource, stableCopy: URL, exists: (String) -> Bool) -> Bool {
         switch source {
         case .github(let repo): repo.caseInsensitiveCompare(SetupPaths.marketplaceRepo) == .orderedSame
-        case .directory(let path): samePath(path, stableCopy.path) && exists(path)
+        case .directory(let path) where samePath(path, stableCopy.path): exists(path)
+        case .directory(let path): !insideApp(path) && exists(URL(fileURLWithPath: path).appending(path: ".claude-plugin/marketplace.json").path)
         case .other, .absent: false
         }
+    }
+
+    /// Inside an app bundle, or a translocated copy of one.
+    static func insideApp(_ path: String) -> Bool {
+        let path = path.lowercased()
+        return path.contains(".app/") || path.contains("/apptranslocation/")
     }
 
     static func samePath(_ a: String, _ b: String) -> Bool {
@@ -53,7 +72,8 @@ public enum ClaudePluginCheck {
 
     /// Decides from Claude Code's registry: `known_marketplaces.json`, `installed_plugins.json`
     /// and `settings.json` (nil when a file isn't there). A file that can't be read leaves Claude
-    /// Code alone; `enabledPlugins` false means the user switched the plugin off, and stays so.
+    /// Code alone; `enabledPlugins` false means the user switched the plugin off, and stays so; a
+    /// marketplace Claude Code doesn't know (the user removed it) isn't skipped, and stays away.
     public static func decide(marketplaces: Data?, installed: Data?, settings: Data?, stableCopy: URL,
                               copyStale: Bool, exists: (String) -> Bool) -> ClaudePluginRepair {
         let keep: ClaudePluginRepair = copyStale ? .refreshCopy : .fine
@@ -66,10 +86,11 @@ public enum ClaudePluginCheck {
             enabledPlugins = object["enabledPlugins"] as? [String: Any] ?? [:]
         }
         let enabled = enabledPlugins[SetupPaths.pluginID]
-        if (enabled as? Bool) == false { return keep }
+        if (enabled as? Bool) == false || source == .absent { return keep }
         guard isCurrent(source, stableCopy: stableCopy, exists: exists) else { return .reregister }
-        let isInstalled = (plugins[SetupPaths.pluginID] as? [Any])?.isEmpty == false
-        return isInstalled && enabled != nil ? keep : .install
+        // Installed in any scope and any format; an empty list is none.
+        let isInstalled = plugins[SetupPaths.pluginID].map { ($0 as? [Any])?.isEmpty != true } ?? false
+        return isInstalled ? keep : .install
     }
 }
 
@@ -114,11 +135,15 @@ extension SetupActions {
         if let current = contents(copy), current == contents(bundled) { return copy }
         try fm.createDirectory(at: paths.support, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try fm.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let fresh = copy.deletingLastPathComponent().appending(path: "claude-code.new")
-        try? fm.removeItem(at: fresh)
+        // Swapped in one step from a folder of its own: a session starting meanwhile still finds it.
+        let fresh = copy.deletingLastPathComponent().appending(path: "claude-code.\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: fresh) }
         try fm.copyItem(at: bundled, to: fresh)
-        try? fm.removeItem(at: copy)
-        try fm.moveItem(at: fresh, to: copy)
+        if fm.fileExists(atPath: copy.path) {
+            _ = try fm.replaceItemAt(copy, withItemAt: fresh)
+        } else {
+            try fm.moveItem(at: fresh, to: copy)
+        }
         return copy
     }
 
@@ -127,14 +152,35 @@ extension SetupActions {
         output.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
     }
 
+    /// Registers the marketplace again from the app's copy. When that fails, `previous` goes back
+    /// in while it is still there, so a working registration isn't lost.
+    @discardableResult
+    static func registerClaudePluginCopy(_ paths: SetupPaths, claude: String, previous: MarketplaceSource,
+                                         run: SetupRunner, env: [String: String]) throws -> URL {
+        let copy = try placeClaudePluginCopy(paths)
+        _ = run(claude, ["plugin", "marketplace", "remove", SetupPaths.marketplaceName], env)
+        let added = run(claude, ["plugin", "marketplace", "add", copy.path], env)
+        guard added.status == 0 else {
+            let back: String? = switch previous {
+            case .github(let repo): repo
+            case .directory(let path) where FileManager.default.fileExists(atPath: URL(fileURLWithPath: path).appending(path: ".claude-plugin/marketplace.json").path): path
+            default: nil
+            }
+            if let back { _ = run(claude, ["plugin", "marketplace", "add", back], env) }
+            throw SetupError.failed("Couldn't add the marketplace: \(firstLine(added.output))")
+        }
+        return copy
+    }
+
     /// At launch, for a plugin the user set up: reads Claude Code's registry and repairs what
     /// `ClaudePluginCheck.decide` finds. Throws a short reason; the caller runs it once.
     @discardableResult
     public static func checkClaudePlugin(_ paths: SetupPaths, ledger: SetupLedger, run: SetupRunner = processRunner) throws -> ClaudePluginRepair {
         guard ledger.entry(.claudePlugin) != nil else { return .fine }
         let stale = isClaudePluginCopyStale(paths)
+        let marketplaces = try? Data(contentsOf: paths.knownMarketplaces)
         let repair = ClaudePluginCheck.decide(
-            marketplaces: try? Data(contentsOf: paths.knownMarketplaces),
+            marketplaces: marketplaces,
             installed: try? Data(contentsOf: paths.installedPlugins),
             settings: try? Data(contentsOf: paths.claudeSettings),
             stableCopy: paths.claudePluginCopy, copyStale: stale,
@@ -149,10 +195,8 @@ extension SetupActions {
         case .refreshCopy: try placeClaudePluginCopy(paths)
         case .reregister:
             guard let claude = paths.claudeBinary else { throw SetupError.missing("The claude command") }
-            let copy = try placeClaudePluginCopy(paths)
-            _ = run(claude, ["plugin", "marketplace", "remove", SetupPaths.marketplaceName], env)
-            let added = run(claude, ["plugin", "marketplace", "add", copy.path], env)
-            guard added.status == 0 else { throw SetupError.failed("Couldn't add the marketplace: \(firstLine(added.output))") }
+            let previous = marketplaces.flatMap(ClaudePluginCheck.marketplace) ?? .absent
+            try registerClaudePluginCopy(paths, claude: claude, previous: previous, run: run, env: env)
             try install(claude)
         case .install:
             guard let claude = paths.claudeBinary else { throw SetupError.missing("The claude command") }

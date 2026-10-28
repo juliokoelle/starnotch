@@ -533,4 +533,3 @@
 /* Wave 3: the approvals plugin registration heals itself */
 "Registered again from the app's copy. Restart running sessions." = "Erneut aus der Kopie der App registriert. Laufende Sitzungen neu starten.";
 "Installed again. Restart running sessions." = "Erneut installiert. Laufende Sitzungen neu starten.";
-"Couldn't repair the plugin's registration: %@" = "Die Registrierung des Plugins ließ sich nicht reparieren: %@";

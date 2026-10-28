@@ -194,6 +194,40 @@ final class SetupCenter {
         }
     }
 
+    /// At most once per launch.
+    private static var checkedClaudePlugin = false
+
+    /// At launch, for a plugin the user set up: a registration Claude Code would skip (its folder
+    /// is gone, or the plugin is missing) is repaired off the main thread; a failure stays on the
+    /// setup page and isn't retried until the next launch.
+    func checkClaudePlugin() {
+        guard !preview, !Self.checkedClaudePlugin, isSetUp(.claudePlugin) else { return }
+        Self.checkedClaudePlugin = true
+        let paths = paths
+        let ledger = ledger
+        Task {
+            let outcome = await Task.detached(priority: .utility) {
+                Result { try SetupActions.checkClaudePlugin(paths, ledger: ledger) }
+            }.value
+            switch outcome {
+            case .success(.reregister):
+                if var entry = self.ledger.entry(.claudePlugin) {
+                    entry.previous = paths.claudePluginCopy.path
+                    entry.note = "Marketplace: \(paths.claudePluginCopy.path). Restart running sessions."
+                    self.ledger.record(entry)
+                    try? self.ledger.save(paths.ledgerFile)
+                }
+                status[.claudePlugin] = .done(Localization.string("Registered again from the app's copy. Restart running sessions."))
+            case .success(.install):
+                status[.claudePlugin] = .done(Localization.string("Installed again. Restart running sessions."))
+            case .success:
+                break
+            case .failure(let error):
+                status[.claudePlugin] = .failed(String(format: Localization.string("Couldn't repair the plugin's registration: %@"), String(describing: error)))
+            }
+        }
+    }
+
     /// Asks macOS for permission to control the players that run now; the others are asked the
     /// first time they play (an Apple event to a closed app would launch it).
     static func askMusicPermission() -> String {

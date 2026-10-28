@@ -48,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Command palette and agents inbox (strand cmdk).
     private var paletteHotKey: HotKey?
     private var agentsInboxHotKey: HotKey?
+    // Ask Tara (strand ask)
+    private var ask: AskTara?
+    private var askHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -218,6 +221,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         agents.onFigurePull = pull
         meeting.onListening = { companion.listening = $0 }
+        // MARK: Ask Tara (strand ask): ⌃⌥T (see applyAskTara) or a click on the floating Tara opens
+        // a question bubble beside her; the answer comes from an agent.py of its own (on the demo
+        // meetings with sample data or a preview).
+        let ask = AskTara(demo: sample)
+        self.ask = ask
+        companion.ask = ask
+        ask.onOpen = { companion.showAsk() }
+        ask.onClose = { companion.hideAsk() }
+        if let name = options.preview, name.hasPrefix("ask-") { ask.preview(name) }
         meeting.onCard = { [weak self] entry in
             // Popped out, the bubble beside the character takes the sneak's place.
             if companion.isOpen {
@@ -367,7 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 perform: { [weak self] in self?.showSetup(at: step) })
                 }
         }]
-        // `paletteSources.askTara` stays nil here: Ask Tara sets it in applyTools while its tool is on.
+        // `paletteSources.askTara` is set in applyAskTara while the Ask Tara tool is on.
         // The palette is core, like the island it opens from: ⌃⌥K always. ⌃⌥A follows the
         // Agents tab (applyTools).
         paletteHotKey = HotKey.controlOptionK { [weak self] in self?.notch.togglePalette() }
@@ -429,6 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lidAwake?.quit()
         approvals?.stop()
         meeting?.shutdown()
+        ask?.shutdown()
     }
 
     /// Reopening the app from Finder or Spotlight shows the settings.
@@ -599,6 +612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let agentsShown = notchModel.modules.contains { $0.kind == .agents }
         agentsInboxHotKey = agentsShown ? agentsInboxHotKey ?? HotKey.controlOptionA { [weak self] in self?.notch.toggleInbox() } : nil
         // end of strand cmdk
+        applyAskTara(isOn(.askTara))
 
         let awake = isOn(.keepAwake)
         system?.offersKeepAwake = awake
@@ -747,6 +761,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let agent = agents.main else { return }
         agents.markFinished(agent.id)
         agents.onFinished?(agent)
+    }
+
+    /// Ask Tara (strand ask): ⌃⌥T and the click on the floating Tara while the tool is on; off, an
+    /// open question bubble closes.
+    private func applyAskTara(_ on: Bool) {
+        guard let ask else { return }
+        askHotKey = on ? askHotKey ?? HotKey.controlOptionT(action: { [weak ask] in ask?.hotKeyPressed() },
+                                                            release: { [weak ask] in ask?.hotKeyReleased() }) : nil
+        companion?.onTapFigure = on ? { [weak ask] in ask?.toggle() } : nil
+        companion?.onDrop = on ? { [weak ask] point in ask?.droppedOnWindow(at: point) } : nil
+        // The palette's Ask Tara rows: open her, or ask straight away what was typed.
+        notch.paletteSources.askTara = on ? { [weak ask] query in
+            guard let ask else { return }
+            ask.open()
+            if !query.isEmpty {
+                ask.text = query
+                ask.send()
+            }
+        } : nil
+        if !on { ask.close() }
     }
 
     private func applyDemoSlots() {

@@ -21,6 +21,7 @@ Meet Tara, a little star that lives in your MacBook's notch. Starnotch turns the
 | **Quick capture** | ⌃⌥N: one line out of the notch, dates and people recognised as you type (English and German). Everything lands in `Inbox.md`, ⌃⌥I opens it. | Nothing |
 | **Command palette** | ⌃⌥K, or ⌘K while the island is open: one search over tabs, sessions, loops, today's events, tools, clipboard, shelf and settings. ↵ runs a row, ⌘↵ its second action; what you pick often comes first. | Nothing |
 | **Agents inbox** | ⌃⌥A: everything that needs you, one at a time: permission prompts from Claude Code and Codex, MCP questions, sessions the Claude app says need you, finished turns, failed loops. The card in front stays until you move on. ↵ answers or opens, ⌘↵ jumps to the session, esc moves on. The count sits in the Agents ear. Comes with the Agents tab. | Claude Code or Codex |
+| **Ask Tara** | ⌃⌥T or a click on the floating Tara: ask about your meetings, quick captures and notes; hold the keys to speak. The answer comes with its sources (meeting and date, the note), follow-ups keep the thread, esc closes. Drop her on a window to ask about it. | Claude Code on your plan or an API key (without one she only finds words); uv |
 
 Modules whose source isn't on your Mac hide themselves. You can switch any module off in Settings.
 
@@ -65,11 +66,13 @@ The second step of the first launch lists what it found (Claude Code, Codex, cal
 | System Audio Recording (optional) | Volume per app, asked the first time you move an app's slider | The mixer points to System Settings; apps keep their own volume |
 | Accessibility (optional) | Escape cancels the wheel while you hold the notch over other apps; the open island ends between two menu bar icons instead of cutting one | Release in the center to cancel; the island keeps its fixed width |
 | Automation (System Events, optional) | The dark mode switch in the System tab, asked the first time you use it | The switch flips back and the notch points to System Settings › Privacy & Security › Automation |
+| Speech recognition and microphone (optional) | Speaking to Tara: hold ⌃⌥T or her mic button, asked the first time. Recognised on the Mac when the language allows it | Type the question |
+| Screen Recording (optional) | Dropping Tara on a window to ask about it, asked the first time | She answers without the picture |
 | Administrator password (once, optional) | Keep awake with the lid closed: installs `/etc/sudoers.d/starnotch-pmset`, which lets you run only `pmset -a disablesleep 1` and `0` without a password (checked by visudo first). Settings › What's set up removes it | Keep awake works only with the lid open |
 
 ## Privacy
 
-Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. Synced lyrics, when you switch them on, ask LRCLIB (lrclib.net) with the track's title, artist, album and length. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API, and the Jamie import reads from your Jamie account.
+Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. Synced lyrics, when you switch them on, ask LRCLIB (lrclib.net) with the track's title, artist, album and length. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API, and the Jamie import reads from your Jamie account. Ask Tara sends your question, the meeting memory, your quick captures, any connector snapshots and, when you drop her on a window, its picture to the brain you chose (Claude Code on your plan, or Anthropic's API); with rules nothing leaves the Mac.
 
 ## Now playing from any app
 

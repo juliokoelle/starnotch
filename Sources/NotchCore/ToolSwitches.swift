@@ -6,6 +6,7 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
     case weather, dayProgress, notes, health
     // Media strand: synced lyrics (LRCLIB), the lyric line on hover, volume per app.
     case lyrics, lyricsOnHover, appVolume
+    case askTara
 
     /// The tab it lives in; nil for tools outside the tabs (the menu, a shortcut, the plus button).
     public var module: ModuleKind? {
@@ -15,6 +16,7 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .notes: .tools
         case .weather, .dayProgress, .health: nil
         case .lyrics, .lyricsOnHover, .appVolume: .nowPlaying
+        case .askTara: nil
         }
     }
 
@@ -43,6 +45,7 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .lyrics: "Synced lyrics"
         case .lyricsOnHover: "Lyrics on hover"
         case .appVolume: "Volume per app"
+        case .askTara: "Ask Tara"
         }
     }
 }

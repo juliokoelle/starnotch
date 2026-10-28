@@ -9,5 +9,7 @@
     <key>com.apple.security.personal-information.calendars</key><true/>
     <!-- Weather where the Mac is, approximate, when Weather is on and no city is set. -->
     <key>com.apple.security.personal-information.location</key><true/>
+    <!-- Speaking to Tara (Ask Tara: hold ⌃⌥T or her mic button). -->
+    <key>com.apple.security.device.audio-input</key><true/>
 </dict>
 </plist>

@@ -217,3 +217,32 @@ def test_cli_ready_names_the_brain(fake, tmp_path):
     assert lines[0]["type"] == "ready" and lines[0]["brain"] == "claude-code" and lines[0]["model"] == "sonnet"
     assert lines[1]["type"] == "answer" and lines[1]["reply_to"] == 1
     assert "Kickoff Lumen-Abo" in fake()[0]["system"]
+
+
+def test_a_screenshot_is_read_from_the_brain_folder(fake, tmp_path):
+    shot = tmp_path / "window.png"
+    shot.write_bytes(b"\x89PNG fake")
+    assert code(tmp_path).json("system", "What is this?", {"type": "object"}, images=[shot]) == {"a": 1}
+    seen = fake()[0]
+    args = seen["args"]
+    first = seen["stdin"].splitlines()[0]
+    name = first.split("./")[1].split(" ")[0]
+    assert args[args.index("--tools") + 1] == "Read" and args[args.index("--allowedTools") + 1] == f"Read(./{name})"
+    assert first.startswith("Screenshot of the window the user asks about: ./starnotch-image-") and first.endswith(".png (read it first)")
+    assert seen["stdin"].endswith("\n\nWhat is this?")
+    assert not list((tmp_path / "brain").glob("starnotch-image-*"))  # deleted after the call
+
+
+def test_api_sends_a_screenshot_as_an_image_block(tmp_path):
+    from types import SimpleNamespace
+
+    shot = tmp_path / "window.jpg"
+    shot.write_bytes(b"jpeg")
+    requests = []
+    response = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text='{"a": 1}')])
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(
+        create=lambda **request: requests.append(request) or response)))
+    assert claude.Claude(client=client).json("s", "What is this?", {}, images=[shot]) == {"a": 1}
+    content = requests[0]["messages"][0]["content"]
+    assert content[0] == {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "anBlZw=="}}
+    assert content[1] == {"type": "text", "text": "What is this?"}

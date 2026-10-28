@@ -184,12 +184,14 @@ def test_prep_for_strangers_is_empty(memory_dir):
 
 
 def test_ask_with_source(memory_dir):
-    llm = FakeLLM({"answer": "30 Euro im Monat.", "sources": [{"meeting_id": "2026-10-12-kickoff", "quote": "kostet 30 Euro im Monat"}]})
+    llm = FakeLLM({"answer": "30 Euro im Monat.",
+                   "sources": [{"kind": "meeting", "id": "2026-10-12-kickoff", "quote": "kostet 30 Euro im Monat"}]})
     agent, out = make(memory_dir, llm)
     agent.handle({"cmd": "ask", "question": "Welcher Preis?", "id": "q1"})
     assert out == [{
-        "type": "answer", "question": "Welcher Preis?", "text": "30 Euro im Monat.", "reply_to": "q1",
-        "sources": [{"quote": "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.", "speaker": "Jonas",
+        "type": "answer", "question": "Welcher Preis?", "text": "30 Euro im Monat.", "reply_to": "q1", "brain": "claude",
+        "sources": [{"kind": "meeting", "title": "Kickoff Lumen-Abo",
+                     "quote": "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.", "speaker": "Jonas",
                      "meeting": "Kickoff Lumen-Abo", "meeting_id": "2026-10-12-kickoff", "date": "2026-10-12"}],
     }]
     assert llm.calls[0].schema is ASK_SCHEMA and llm.calls[0].user == "Welcher Preis?"

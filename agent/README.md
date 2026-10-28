@@ -14,6 +14,7 @@ The Swift app starts these programs and reads their JSON lines; [PROTOCOL.md](PR
 | `jamie_sync.py` | Pulls meetings from [Jamie](https://meetjamie.ai) over its MCP server (OAuth login in the browser) into the memory |
 | `transcribe.py` | Live transcription with Reson8 Realtime, from the microphone or an audio file streamed in real time |
 | `captures.py` | Reads Starnotch's quick-capture queue, so the agent knows the user's own tasks, questions and notes |
+| `connectors.py` | Reads the snapshots other tools leave in `connectors/*.json` (a vault's tasks and today's note), for Ask Tara |
 | `feed.py` | The full text behind each notch card: a page on 127.0.0.1 (a click on the card opens it) and `Meeting-Agent.md` |
 | `notch_bridge.py` | Shows the agent's events in the running Starnotch app, through its local status API (no Swift change) |
 | `demo/` | Two made-up meetings, a script that replays a third one, and a macOS script that turns it into audio |
@@ -49,7 +50,7 @@ in, it uses rules, never the API. Every call runs without `ANTHROPIC_API_KEY`, `
 silently bills the key).
 
 Each call is a bare session so it reads little: an empty folder of its own
-(`~/Library/Application Support/Starnotch/brain`, so no CLAUDE.md or project loads), no tools (`--tools ""`), no
+(`~/Library/Application Support/Starnotch/brain`, so no CLAUDE.md or project loads), no tools (`--tools ""`; a question about a screenshot gets `Read`, allowed for that one file), no
 MCP servers (`--strict-mcp-config` with an empty config), no user or project settings (`--setting-sources ""`: no
 hooks, plugins, memory or `apiKeyHelper`), no slash commands, no saved transcript (`--no-session-persistence`); the
 system prompt comes from a file (`--system-prompt-file`), the prompt on stdin, the answer as `--output-format json`
@@ -68,6 +69,19 @@ others); a longer transcript keeps its lines with numbers first, then its earlie
 six transcript lines that share the most words with what was just said (or with a question) come along in the
 prompt, so the parts the excerpt left out still count. The system prompt only changes when the memory does, so it
 stays cacheable.
+
+## Ask Tara
+
+⌃⌥T (or a click on Tara floating beside the notch) opens a small question bubble; type or hold the keys to speak.
+The app sends `ask` to its own `agent.py` and shows the answer in Tara's speech bubble, with its sources: the
+meeting and date, a quick capture, or a note from a connector snapshot (a click opens it). Follow-ups carry the last
+six turns. Without a brain Tara says what she can do: find words in the meetings, captures and notes. Try it from
+the terminal:
+
+```sh
+echo '{"cmd": "ask", "question": "Welchen Preis haben wir beschlossen?"}' \
+  | uv run python agent.py --memory demo/meetings --connectors ''
+```
 
 ## Demo
 

@@ -82,6 +82,7 @@ enum ToolInfo {
         case .feature(.lyrics): "quote.bubble"
         case .feature(.lyricsOnHover): "text.line.first.and.arrowtriangle.forward"
         case .feature(.appVolume): "slider.horizontal.3"
+        case .feature(.askTara): "bubble.left.and.text.bubble.right"
         }
     }
 
@@ -121,6 +122,7 @@ enum ToolInfo {
         case .feature(.lyrics): "The line being sung, looked up on LRCLIB by the track's name"
         case .feature(.lyricsOnHover): "The current lyric line when you hover the notch"
         case .feature(.appVolume): "A mixer for each app's volume; asks to capture system audio"
+        case .feature(.askTara): "Ask about your meetings and notes, on ⌃⌥T or a click on Tara"
         }
     }
 }

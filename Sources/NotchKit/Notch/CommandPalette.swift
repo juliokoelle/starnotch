@@ -138,9 +138,9 @@ struct PaletteView: View {
     @FocusState private var focused: Bool
 
     /// Row height and how many show without scrolling (the island keeps one height).
-    static let rowHeight: CGFloat = 34
-    static let visibleRows: CGFloat = 6
-    static let fieldHeight: CGFloat = 40
+    nonisolated static let rowHeight: CGFloat = 34
+    nonisolated static let visibleRows: CGFloat = 6
+    nonisolated static let fieldHeight: CGFloat = 40
 
     var body: some View {
         VStack(spacing: 0) {

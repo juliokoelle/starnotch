@@ -109,7 +109,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSCalendarsFullAccessUsageDescription</key><string>Shows your next meeting in the notch with a countdown and a Join button.</string>
     <key>NSCalendarsWriteOnlyAccessUsageDescription</key><string>Adds the event you type in quick capture to your calendar.</string>
     <key>NSAudioCaptureUsageDescription</key><string>Volume per app turns one app down or up by playing its sound again at the level you set. The sound stays on this Mac and is never recorded.</string>
-    <key>NSMicrophoneUsageDescription</key><string>The meeting agent transcribes your meeting from the microphone while you have started it in the notch.</string>
+    <key>NSMicrophoneUsageDescription</key><string>The meeting agent transcribes your meeting from the microphone while you have started it in the notch, and Tara listens while you hold ⌃⌥T or her mic button to ask her something.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Turns what you say to Tara into text, on this Mac when your language allows it, while you hold ⌃⌥T or her mic button.</string>
     <key>NSLocationUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on. Approximate is enough.</string>
     <key>NSLocationWhenInUseUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on. Approximate is enough.</string>
     <key>NSRemindersFullAccessUsageDescription</key><string>Shows your reminders due today in Today, when you switch this on.</string>

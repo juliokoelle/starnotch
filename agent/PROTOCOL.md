@@ -29,7 +29,7 @@ Run everything from the `agent/` folder with uv (it creates the environment on f
 
 ```sh
 cd agent
-uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captures FILE] [--watch-captures]
+uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captures FILE] [--watch-captures] [--connectors DIR]
 uv run python transcribe.py (--file AUDIO [--speed N] | --mic) [--names Max,Lisa]
 uv run python jamie_sync.py [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--query TEXT] [--force]
 uv run python jamie_sync.py --logout
@@ -42,6 +42,19 @@ The agent also reads what the user noted with quick capture (⌃⌥N): the app's
 folder (`--captures` points elsewhere, `--captures ''` ignores it). Those tasks, questions and notes, with their
 dates and due dates, count as memory for `ask`, the live analysis and the prep card. With `--watch-captures`,
 each new **question** typed into quick capture is answered like an `ask`, with `"reply_to": "capture:<id>"`.
+
+Other tools can leave snapshots for Tara in `~/Library/Application Support/Starnotch/connectors/*.json`
+(`--connectors` points elsewhere, `--connectors ''` ignores them); they count for `ask` only. No schema is required:
+every object with a `title`, `name` or `text` becomes an item, with its body (`text`, `content`, `body`, `summary`,
+`notes`, `description`), a date (`date`, `due`, `updated`), where it lives (`url`, `link`, `uri`, or an absolute
+`path`) and the key it sits under as its group. A top-level `name` names the source, else the file name does. A
+missing folder, or a file that isn't JSON, is skipped. Example, as a vault connector might write it:
+
+```json
+{"name": "vault",
+ "today": {"title": "2026-10-28", "path": "/Users/…/Daily/2026-10-28.md", "content": "…"},
+ "tasks": [{"text": "Send the deck", "due": "2026-10-29", "path": "/Users/…/Tasks.md"}]}
+```
 
 During a meeting the app reads `transcribe.py`'s stdout and writes each `utterance` line, unchanged, into
 `agent.py`'s stdin (it may show the line as a live caption on the way). For a test without the app:
@@ -76,10 +89,16 @@ Commands. `id` is optional (string or number); the reply carries it back as `rep
 | Command | Line | Reply |
 |---|---|---|
 | Prep card | `{"cmd": "prep", "participants": ["Max", "Lisa"], "id": 1}` | `prep` |
-| Question to the memory | `{"cmd": "ask", "question": "Welchen Preis haben wir beschlossen?", "id": 2}` | `answer` |
+| Ask Tara | `{"cmd": "ask", "question": "Welchen Preis haben wir beschlossen?", "id": 2}` | `answer` |
 | Store the live meeting | `{"cmd": "save", "title": "Launch-Check", "date": "2026-10-26", "meeting_id": "…", "id": 3}` | `status` `saved` |
 | Start a new meeting | `{"cmd": "reset"}` | `status` `reset` |
 | Re-read the memory folder | `{"cmd": "reload"}` (after `jamie_sync.py`) | `status` `reloaded` |
+
+`ask` answers from the meetings, the quick captures and the connector snapshots, through the brain (rules without
+one). Optional fields: `history`, the conversation so far for a follow-up, oldest first
+(`[{"question": "…", "answer": "…"}]`, the last 6 count); `image`, the path of a screenshot (PNG or JPEG) of the window
+the question is about. Claude Code gets the screenshot as a copy in its brain folder, readable with `Read` for that
+file only, and deleted after the call; the API gets it as an image block.
 
 `save` writes the utterances since the last `reset` (and the commitments found in them) as a meeting file;
 `title`, `date` (default today) and `meeting_id` (default `<date>-<title>`) are optional.
@@ -170,13 +189,27 @@ today. `captures` are quick-capture tasks and questions that tag or name a parti
   "type": "answer",
   "question": "Welchen Preis haben wir beschlossen?",
   "text": "30 Euro im Monat; 25 Euro wurde im Kickoff verworfen.",
-  "sources": [{"quote": "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.", "speaker": "Jonas",
-               "meeting": "Kickoff Lumen-Abo", "meeting_id": "2026-10-12-kickoff", "date": "2026-10-12"}],
+  "sources": [
+    {"kind": "meeting", "title": "Kickoff Lumen-Abo", "quote": "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.",
+     "speaker": "Jonas", "meeting": "Kickoff Lumen-Abo", "meeting_id": "2026-10-12-kickoff", "date": "2026-10-12"},
+    {"kind": "capture", "id": "c1", "title": "Preis mit Max klären", "quote": "Preis mit Max klären", "date": "2026-10-24"},
+    {"kind": "note", "id": "vault:0", "title": "2026-10-28", "quote": "…", "source": "vault", "date": "2026-10-28",
+     "url": "file:///Users/…/Daily/2026-10-28.md"}
+  ],
+  "brain": "claude-code",
   "reply_to": 2
 }
 ```
 
-`sources` may be empty (then the memory had no answer). Every source quote exists in the memory.
+`sources` may be empty (then nothing in the material answered it, or it was a general question). Every source
+exists: a meeting quote is a line of that meeting, a capture is in the queue, a note is an item of a snapshot (its
+`quote` is empty unless the words are in the item; `url` is empty when the item names no place). `brain` is what
+answered: `claude-code`, `api`, or `rules` (no brain, or Claude failed just now and the rules found a line). On rules
+the answer is the line that shares the most words with the question, stop words left out (at least two; one for a
+question about a decision); a captured question is never an answer, least of all to itself. When nothing matches,
+the answer is a sentence in the question's language: without a brain, what Tara can do without one; with a brain
+that gave no answer this time (a refusal, a failed call), that she has no answer, and `brain` names the brain. A
+missing screenshot is left out, and a failed question doesn't rest Claude for the questions after it.
 
 **status**
 

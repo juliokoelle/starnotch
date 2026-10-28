@@ -249,7 +249,8 @@ final class AgentsModule: NotchModule {
                 if let threshold = PaceForecast.crossed(previous: previous, current: window.usedPercent) {
                     _ = threshold
                     // Short for the sneak; the full sentence is in the header's tooltip.
-                    let outcome = PaceForecast.forecast(samples: samples, resetsAt: window.resetsAt, now: now)
+                    let outcome = PaceForecast.projection(usedPercent: window.usedPercent, minutes: window.minutes,
+                                                          resetsAt: window.resetsAt, samples: samples, now: now)
                     let short: String? = switch outcome {
                     case .hitsLimit(let at): "full at \(TimeText.clock(at))"
                     case .lasts: "lasts"
@@ -261,11 +262,41 @@ final class AgentsModule: NotchModule {
         }
     }
 
-    /// "At this pace you hit the 5 h limit at 14:20" / "Lasts until the reset at 16:00".
-    func forecast(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> String? {
+    /// When the window runs out at the current pace: the recent rate once there are samples,
+    /// before that the window's average since it opened.
+    func pace(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> PaceForecast.Outcome {
         let samples = usageSamples["\(provider).\(window.label)"] ?? []
-        let outcome = PaceForecast.forecast(samples: samples, resetsAt: window.resetsAt, now: now)
-        return PaceForecast.sentence(outcome, window: window.label, clock: TimeText.clock)
+        return PaceForecast.projection(usedPercent: window.usedPercent, minutes: window.minutes, resetsAt: window.resetsAt,
+                                       samples: samples, now: now)
+    }
+
+    /// "At this pace your 5-hour limit is full at 16:40" / "Lasts until the reset at 18:00".
+    func forecast(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> String? {
+        switch pace(provider, window, now: now) {
+        case .hitsLimit(let at):
+            let name = window.label == "week" ? Localization.string("weekly") : window.label == "5 h" ? Localization.string("5-hour") : window.label
+            return String(format: Localization.string("At this pace your %@ limit is full at %@"), name, TimeText.clock(at))
+        case .lasts(let until):
+            return until.map { String(format: Localization.string("Lasts until the reset at %@"), TimeText.clock($0)) }
+                ?? Localization.string("Lasts until the reset")
+        case .unknown:
+            return nil
+        }
+    }
+
+    /// The earliest "full 16:40" among a tool's windows.
+    func paceShort(of usage: AgentUsage, now: Date = Date()) -> String? {
+        let hits = [usage.primary, usage.secondary].compactMap { $0 }.compactMap { window -> Date? in
+            guard case .hitsLimit(let at) = pace(usage.provider, window, now: now), at > now.addingTimeInterval(60) else { return nil }
+            return at
+        }
+        return hits.min().map { String(format: Localization.string("full %@"), TimeText.clock($0)) }
+    }
+
+    /// "full 16:40" for a header pill: only when the window runs out before its reset.
+    func paceShort(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> String? {
+        guard case .hitsLimit(let at) = pace(provider, window, now: now), at > now.addingTimeInterval(60) else { return nil }
+        return String(format: Localization.string("full %@"), TimeText.clock(at))
     }
 
     /// More than one tool has sessions: chips carry a small tool badge.

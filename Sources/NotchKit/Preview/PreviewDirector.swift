@@ -22,7 +22,9 @@ final class PreviewDirector {
                         "watch-peek", "watch-sneak", "watch-summary", "providers", "approval-codex", "extras", "media-compact", "media-peek", "limit-sneak", "shell-sneak",
                         "battery-sneak", "capture-event", "setup-consent", "setup-done",
                         "music-compact", "music-peek", "ears-crowded", "sizes",
-                        "music-agents", "crowded-sneak"]
+                        "music-agents", "crowded-sneak",
+                        // Media strand: synced lyrics in the panel and on hover, the mixer.
+                        "np-lyrics", "np-peek-lyrics", "np-mixer"]
 
     let notch: NotchController
     let agents: AgentsModule
@@ -454,6 +456,16 @@ final class PreviewDirector {
             }
             return
         }
+        if name == "np-peek-lyrics" {
+            // Media strand: no agents, so the music holds the ears; the hover line sings along.
+            agents.usePreview(AgentSnapshot())
+            music.start()
+            Task {
+                await pause(0.8)
+                notch.tourPeek()
+            }
+            return
+        }
         if name == "media-compact" || name == "media-peek" {
             agents.usePreview(Self.snapshot(agentsActive: false))
             useSystemSample(tight: false)
@@ -644,6 +656,11 @@ final class PreviewDirector {
         case "np-sneak":
             await pause(0.4)
             music.next()
+        case "np-lyrics": notch.expand(.nowPlaying, pinned: true)
+        case "np-mixer":
+            notch.expand(.nowPlaying, pinned: true)
+            await pause(0.6)
+            withAnimation(Theme.snappy) { music.showsMixer = true }
         case "capture-empty": notch.openCapture()
         case "capture-typed":
             notch.openCapture()

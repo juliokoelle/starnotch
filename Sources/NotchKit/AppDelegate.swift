@@ -339,7 +339,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startDaily(tools: tools, sample: sample)
         applyTools()
         notch.inbox.loadPeople(from: people)
-        music.onTrackChange = { [weak self] track in
+        music.onTrackChange = { [weak self, weak music] track in
+            guard music?.musicOn == true else { return }  // media strand: Music off, no cover sneak
             self?.notch.sneak(Sneak(visual: .cover(track.cover), title: track.title, detail: track.artist),
                               key: "music", onlyAtRest: true, counts: false)
         }
@@ -560,6 +561,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let awake = isOn(.keepAwake)
         system?.offersKeepAwake = awake
         if !awake { keepAwake.set(false) }
+
+        // Media strand: Music itself (its helper and clock stop when off), synced lyrics, the lyric
+        // line on hover and volume per app, inside Music.
+        if let music = allModules.lazy.compactMap({ $0 as? NowPlayingModule }).first {
+            music.musicOn = sample || ModuleAvailability.isShown(.nowPlaying, settings: settings)
+            music.lyricsOn = isOn(.lyrics)
+            music.lyricsOnHover = isOn(.lyricsOnHover)
+            music.mixerOn = isOn(.appVolume) && AppVolumeMixer.isSupported
+        }
 
         guard let tools else { return }
         daily.apply(on: Set(ToolFeature.allCases.filter(isOn)))

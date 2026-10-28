@@ -46,6 +46,13 @@ if [[ -d "$BIN_DIR/Sparkle.framework" ]]; then
     cp -R "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/"
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$EXECUTABLE" 2>/dev/null || true
 fi
+# Now Playing from any app: the MediaRemote helper that /usr/bin/perl loads for the app
+# (helpers/mediaremote, see MediaRemoteBridge.swift). Without it, Spotify and Music via AppleScript.
+mkdir -p "$APP/Contents/Frameworks"
+clang -dynamiclib -fobjc-arc -O2 -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \
+    -framework Foundation -framework AppKit \
+    helpers/mediaremote/StarnotchMediaRemote.m -o "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib"
+codesign --force --sign - --timestamp=none "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Character packs: the public ones (Astra, Cat, Pebbles), plus any the build adds.
 cp -R Resources/Characters/*.notchpack "$APP/Contents/Resources/Characters/"
@@ -99,6 +106,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSAppleEventsUsageDescription</key><string>Shows what Spotify or Music is playing in the notch and lets you pause or skip, and brings an agent's own Terminal or iTerm2 tab to the front when you click it, and switches dark mode when you ask for it.</string>
     <key>NSCalendarsFullAccessUsageDescription</key><string>Shows your next meeting in the notch with a countdown and a Join button.</string>
     <key>NSCalendarsWriteOnlyAccessUsageDescription</key><string>Adds the event you type in quick capture to your calendar.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>Volume per app turns one app down or up by playing its sound again at the level you set. The sound stays on this Mac and is never recorded.</string>
     <key>NSMicrophoneUsageDescription</key><string>The meeting agent transcribes your meeting from the microphone while you have started it in the notch.</string>
     <key>NSLocationUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on. Approximate is enough.</string>
     <key>NSLocationWhenInUseUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on. Approximate is enough.</string>

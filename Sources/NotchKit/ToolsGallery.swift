@@ -36,6 +36,7 @@ enum ModuleAvailability {
             default: return Status(available: false, detail: "Calendar access is off in System Settings")
             }
         case .nowPlaying:
+            if MediaRemoteBridge.isUsable { return Status(available: true, detail: "Any app that plays, browsers included") }
             let found = PlayerBridge.bundleIDs.values.contains {
                 NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
             }
@@ -78,6 +79,9 @@ enum ToolInfo {
         case .feature(.dayProgress): "circle.lefthalf.filled"
         case .feature(.notes): "note.text"
         case .feature(.health): "heart"
+        case .feature(.lyrics): "quote.bubble"
+        case .feature(.lyricsOnHover): "text.line.first.and.arrowtriangle.forward"
+        case .feature(.appVolume): "slider.horizontal.3"
         }
     }
 
@@ -93,11 +97,12 @@ enum ToolInfo {
     }
 
     /// What it does, in one line.
-    static func line(_ item: ToolItem) -> String {
+    @MainActor static func line(_ item: ToolItem) -> String {
         switch item {
         case .module(.agents): "Your coding agents, their approvals and plan limits"
         case .module(.calendar): "Your next meeting, its countdown and Join"
-        case .module(.nowPlaying): "What plays in Spotify or Music, with controls"
+        case .module(.nowPlaying): MediaRemoteBridge.isUsable ? "What plays on this Mac, from any app, with controls"
+                                                              : "What plays in Spotify or Music, with controls"
         case .module(.meeting): "Tara listens in meetings and remembers what was said"
         case .module(.today): "Tasks and reminders due today"
         case .module(.system): "CPU, GPU, memory and the apps behind them"
@@ -113,6 +118,9 @@ enum ToolInfo {
         case .feature(.dayProgress): "How much of your work day is done, as a thin ring"
         case .feature(.notes): "Plain text notes in the Tools tab, saved as Markdown files"
         case .feature(.health): "Last night's sleep and readiness from Oura or WHOOP"
+        case .feature(.lyrics): "The line being sung, looked up on LRCLIB by the track's name"
+        case .feature(.lyricsOnHover): "The current lyric line when you hover the notch"
+        case .feature(.appVolume): "A mixer for each app's volume; asks to capture system audio"
         }
     }
 }
@@ -165,8 +173,12 @@ struct ToolRow: View {
     }
 
     private var availability: ModuleAvailability.Status {
-        guard case .module(let kind) = item else { return .init(available: true, detail: "") }
-        return ModuleAvailability.status(kind, settings: state.settings)
+        switch item {
+        case .module(let kind): ModuleAvailability.status(kind, settings: state.settings)
+        // Media strand: process taps came with macOS 14.2.
+        case .feature(.appVolume) where !AppVolumeMixer.isSupported: .init(available: false, detail: "Needs macOS 14.2 or later")
+        case .feature: .init(available: true, detail: "")
+        }
     }
 
     /// Today without a connector: switching it on turns on Apple Reminders, asking macOS on the

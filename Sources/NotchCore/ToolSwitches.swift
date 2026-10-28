@@ -4,6 +4,8 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
     /// The daily tools: weather and day progress in the calendar's header (and the ears), notes in
     /// the Tools tab, sleep and recovery from a wearable.
     case weather, dayProgress, notes, health
+    // Media strand: synced lyrics (LRCLIB), the lyric line on hover, volume per app.
+    case lyrics, lyricsOnHover, appVolume
 
     /// The tab it lives in; nil for tools outside the tabs (the menu, a shortcut, the plus button).
     public var module: ModuleKind? {
@@ -12,11 +14,19 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .keepAwake, .quickCapture: nil
         case .notes: .tools
         case .weather, .dayProgress, .health: nil
+        case .lyrics, .lyricsOnHover, .appVolume: .nowPlaying
         }
     }
 
-    /// Works only with this other tool on (the converter acts on the shelf's files).
-    public var requires: ToolFeature? { self == .imageConverter ? .shelf : nil }
+    /// Works only with this other tool on (the converter acts on the shelf's files, the hover
+    /// line shows the lyrics' current line).
+    public var requires: ToolFeature? {
+        switch self {
+        case .imageConverter: .shelf
+        case .lyricsOnHover: .lyrics
+        default: nil
+        }
+    }
 
     public var title: String {
         switch self {
@@ -30,6 +40,9 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .dayProgress: "Day progress"
         case .notes: "Notes"
         case .health: "Sleep and recovery"
+        case .lyrics: "Synced lyrics"
+        case .lyricsOnHover: "Lyrics on hover"
+        case .appVolume: "Volume per app"
         }
     }
 }
@@ -61,6 +74,15 @@ public enum ToolSwitches {
     public static var known: [String] {
         ModuleKind.allCases.map { "module.\($0.rawValue)" } + ToolFeature.allCases.map { "feature.\($0.rawValue)" }
     }
+
+    /// Settings from before the stamp (`knownTools`) keep every tool the gallery started with, as
+    /// it was then; any tool added since starts off for them too. Frozen: never add to it.
+    public static let knownBeforeStamp: [String] = [
+        "module.agents", "module.today", "module.dictation", "module.calendar", "module.nowPlaying",
+        "module.system", "module.meeting", "module.tools",
+        "feature.clipboard", "feature.timers", "feature.shelf", "feature.imageConverter",
+        "feature.keepAwake", "feature.quickCapture",
+    ]
 
     /// Settings saved by a version that knew only `known`: what came since starts off.
     public static func switchOffNew(since known: [String], in settings: inout SwitcherSettings) {
@@ -103,8 +125,9 @@ public enum ToolSwitches {
             if let required = feature.requires, !isOn(required, in: settings) { set(required, on: true, in: &settings) }
         } else {
             disable(feature, in: &settings)
-            // The tab shows while one of its tools is on.
-            if let module {
+            // The Tools tab shows while one of its tools is on; a tab with its own content
+            // (Music) stays when an extra inside it goes off.
+            if let module, module == .tools {
                 let anyOn = ToolFeature.allCases.contains { $0.module == module && ownSwitch($0, in: settings) }
                 setModule(module, on: anyOn, in: &settings)
             }

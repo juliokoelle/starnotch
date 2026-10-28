@@ -381,3 +381,20 @@
 "Choose your tasks in Settings › Notes." = "Wähle deine Aufgaben unter Einstellungen › Notizen.";
 "Meetings and notes" = "Meetings und Notizen";
 "Needs your notes folder (Settings › Notes) or Apple Reminders" = "Braucht deinen Notizordner (Einstellungen › Notizen) oder Apple Erinnerungen";
+/* Media strand: Now Playing from any app, synced lyrics, volume per app */
+"Synced lyrics" = "Synchronisierte Songtexte";
+"Lyrics on hover" = "Songtext beim Überfahren";
+"Volume per app" = "Lautstärke pro App";
+"The line being sung, looked up on LRCLIB by the track's name" = "Die gerade gesungene Zeile, über den Titel bei LRCLIB gesucht";
+"The current lyric line when you hover the notch" = "Die aktuelle Songtextzeile, wenn du über die Notch fährst";
+"A mixer for each app's volume; asks to capture system audio" = "Ein Mixer für die Lautstärke jeder App; fragt nach Systemaudio-Aufnahme";
+"Any app that plays, browsers included" = "Jede App, die abspielt, auch Browser";
+"What plays on this Mac, from any app, with controls" = "Was auf diesem Mac läuft, aus jeder App, mit Steuerung";
+"Play something in any app and it shows up here." = "Spiel in einer beliebigen App etwas ab, dann erscheint es hier.";
+"Allow System Audio Recording" = "Systemaudio-Aufnahme erlauben";
+"No app is playing sound" = "Keine App spielt gerade Ton";
+"Muted" = "Stumm";
+"Mute" = "Stummschalten";
+"Unmute" = "Ton an";
+"Lyrics" = "Songtext";
+"Needs macOS 14.2 or later" = "Braucht macOS 14.2 oder neuer";

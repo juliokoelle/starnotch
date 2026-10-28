@@ -62,9 +62,12 @@ import TestSupport
         #expect(loaded.activeSlot == SlotPosition.top)
         #expect(loaded.holdDuration == 0.25)
         #expect(loaded.modules == ModuleKind.defaultLayout)
-        // Saved before the Tools gallery: every tool stays on, the brain is the agent's pick.
-        #expect(loaded.disabledModules.isEmpty)
-        #expect(loaded.disabledFeatures.isEmpty)
+        // Saved before the Tools gallery: every tool the gallery started with stays on, the brain
+        // is the agent's pick. Tools added since (lyrics, volume per app) start off all the same.
+        let stamp = Set(ToolSwitches.knownBeforeStamp)
+        #expect(loaded.disabledModules.allSatisfy { !stamp.contains("module.\($0.rawValue)") })
+        #expect(Set(loaded.disabledFeatures) == Set(ToolFeature.allCases.filter { !stamp.contains("feature.\($0.rawValue)") }))
+        #expect(loaded.disabledFeatures.contains(.lyrics) && loaded.disabledFeatures.contains(.appVolume))
         #expect(loaded.brain == .auto)
     }
 

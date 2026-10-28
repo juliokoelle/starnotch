@@ -285,6 +285,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         // come from before it, and every tool of this version counts as known.
         if let known = try? c.decodeIfPresent([String].self, forKey: .knownTools) {
             ToolSwitches.switchOffNew(since: known, in: &self)
+        } else {
+            ToolSwitches.switchOffNew(since: ToolSwitches.knownBeforeStamp, in: &self)
         }
     }
 }

@@ -365,6 +365,30 @@ def test_quoted_transcript_lines_labels_and_speaker_tags_leave_the_answer(memory
     # an answer that is nothing but a quoted line keeps its words rather than vanish
     ("'Jonas: Super. Nächste Woche gleiche Zeit, dann schauen wir auf den Stand.'",
      "Super. Nächste Woche gleiche Zeit, dann schauen wir auf den Stand."),
+    # a clause that carries the answer stays, as a sentence, when the line it introduced goes
+    ("Im Kickoff am 12. Oktober habt ihr 30 Euro im Monat festgelegt: "
+     "'Jonas: Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.'",
+     "Im Kickoff am 12. Oktober habt ihr 30 Euro im Monat festgelegt."),
+    ("Jonas hat entschieden, dass das Abo 30 Euro kostet: "
+     "„Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.“",
+     "Jonas hat entschieden, dass das Abo 30 Euro kostet."),
+    ('Am 19. Oktober wurde bestätigt: "Preis bleibt bei 30 Euro, die Landingpage geht damit diese Woche live."',
+     "Am 19. Oktober wurde bestätigt."),
+    ("Der Preis bleibt bei 30 Euro: 'Okay. Und wir bleiben beim Preis von 30 Euro, die Landingpage geht damit diese "
+     "Woche live.'", "Der Preis bleibt bei 30 Euro."),
+    # an intro after a comma goes, and the comma ends the sentence when a new one follows
+    ('Der Preis beträgt 30 Euro, wie Jonas sagte: "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im '
+     'Monat." Max rechnet bis Freitag.', "Der Preis beträgt 30 Euro. Max rechnet bis Freitag."),
+    # an unquoted line after a speaker tag goes with its intro; alone, its words stay
+    ("Im Meeting wurde erwähnt: Speaker 0: Mit 25 Euro tragen wir die Supportkosten nicht. Ich bin für 30 Euro. "
+     "(meeting)", "Mit 25 Euro tragen wir die Supportkosten nicht. Ich bin für 30 Euro."),
+    # "Name:" in a quote is a speaker only for a speaker of the meetings: titles stay
+    ("Die Aufgabe heißt „Hinweis: Budget prüfen“ und ist bis Freitag offen.",
+     "Die Aufgabe heißt „Hinweis: Budget prüfen“ und ist bis Freitag offen."),
+    ('The task is called "Launch: final checks" and is due Friday.',
+     'The task is called "Launch: final checks" and is due Friday.'),
+    # line breaks and lists stay
+    ("- Max schickt die Zahlen.\n- Lisa bucht den Raum.", "- Max schickt die Zahlen.\n- Lisa bucht den Raum."),
 ])
 def test_the_on_device_answer_reads_as_a_reply(memory_dir, raw, clean):
     llm = FakeLLM({"answer": raw, "sources": []})

@@ -53,6 +53,11 @@ clang -dynamiclib -fobjc-arc -O2 -arch arm64 -arch x86_64 -mmacosx-version-min=1
     -framework Foundation -framework AppKit \
     helpers/mediaremote/StarnotchMediaRemote.m -o "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib"
 codesign --force --sign - --timestamp=none "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib"
+# Tara's free brain: the Apple Intelligence helper the agent runs per question (Sources/AppleModel; it needs
+# macOS 26 and says so on older systems). Built from this repo, also for a private build of another package.
+swift build --package-path "$REPO" -c release --product AppleModel
+cp "$(swift build --package-path "$REPO" -c release --show-bin-path)/AppleModel" "$APP/Contents/MacOS/AppleModel"
+codesign --force --sign - --timestamp=none "$APP/Contents/MacOS/AppleModel"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Character packs: the public ones (Astra, Cat, Pebbles), plus any the build adds.
 cp -R Resources/Characters/*.notchpack "$APP/Contents/Resources/Characters/"

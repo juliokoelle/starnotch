@@ -24,6 +24,8 @@ let package = Package(
         .target(name: "NotchKit", dependencies: ["NotchCore"] + (sparkle ? [.product(name: "Sparkle", package: "Sparkle")] : [])),
         // The public app: the kit without connectors.
         .executableTarget(name: "Starnotch", dependencies: ["NotchKit"]),
+        // Tara's free brain: one call to Apple's on-device model per run, for the sidecar (agent/claude.py).
+        .executableTarget(name: "AppleModel"),
         // Foundation helpers for the tests. The Command Line Tools ship Swift Testing without the
         // Foundation cross-import overlay, so test files must not import Foundation themselves.
         .target(

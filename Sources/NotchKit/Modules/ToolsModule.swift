@@ -414,10 +414,18 @@ private struct ClipboardList: View {
         NotchCard(padding: 6) {
             let items = module.history.list()
             if items.isEmpty {
-                Text("Copied text shows up here. Click an entry to copy it again. Copies from password apps are never kept, and the list lives in memory only.")
-                    .font(Theme.font(12)).foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(8)
+                // Centred like the empty shelf, so the panel doesn't read as half built.
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.on.clipboard").font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("Nothing copied yet").font(Theme.font(13, .semibold)).foregroundStyle(Theme.textPrimary)
+                    Text("Copied text shows up here. Click an entry to copy it again. Copies from password apps are never kept, and the list lives in memory only.")
+                        .font(Theme.font(12)).foregroundStyle(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 400)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {

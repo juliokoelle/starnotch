@@ -181,9 +181,9 @@ private struct DictationBody: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            AvatarView(character: module.cast.main, mood: .listening, height: 96, colorway: module.cast.colorway,
+            AvatarView(character: module.cast.main, mood: .listening, height: 112, colorway: module.cast.colorway,
                        emergeOnAppear: false)
-                .frame(width: 112, alignment: .bottom)
+                .frame(width: 128, alignment: .bottom)
                 .padding(.leading, 6)
             HStack(spacing: 16) {
                 Button {
@@ -193,7 +193,7 @@ private struct DictationBody: View {
                         Circle().fill(module.phaseIsListening ? Theme.accent : Theme.accent.opacity(0.16))
                         ListeningGlyph(active: module.phaseIsListening, size: 18, tint: module.phaseIsListening ? .white : Theme.accent)
                     }
-                    .frame(width: 48, height: 48)
+                    .frame(width: 56, height: 56)
                     .overlay {
                         if module.phaseIsListening { Pulse() }
                     }
@@ -202,18 +202,25 @@ private struct DictationBody: View {
                 .accessibilityLabel(module.phaseIsListening ? "Stop dictation" : "Start dictation")
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
+                    Text(LocalizedStringKey(title))
                         .font(Theme.font(14, .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .contentTransition(.opacity)
-                    Text(subtitle)
+                    Text(LocalizedStringKey(subtitle))
                         .font(Theme.font(12))
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if module.phase != .unavailable {
+                        HStack(spacing: 14) {
+                            KeyHint(key: "↩", text: "Starts and stops it here")
+                            KeyHint(key: "fn", text: "Hold in any app")
+                        }
+                        .padding(.top, 8)
+                    }
                 }
                 Spacer()
             }
-            .padding(.leading, 130)
+            .padding(.leading, 150)
             .padding(.trailing, 16)
             .frame(maxHeight: .infinity)
         }
@@ -236,7 +243,25 @@ private struct DictationBody: View {
         switch module.phase {
         case .listening: "Talk. Click again to stop, the text goes where your cursor is."
         case .unavailable: "Install Wispr Flow to dictate from the notch."
-        default: "Click and talk, the text goes where your cursor is. Wispr Flow hands-free; holding fn still works."
+        default: "Click and talk, the text goes where your cursor is. Wispr Flow listens hands-free."
+        }
+    }
+}
+
+/// A key as a small cap with what it does beside it.
+private struct KeyHint: View {
+    let key: String
+    let text: LocalizedStringKey
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(verbatim: key)
+                .font(Theme.font(10.5, .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(minWidth: 20, minHeight: 18)
+                .padding(.horizontal, 3)
+                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            Text(text).font(Theme.font(11.5)).foregroundStyle(Theme.textTertiary)
         }
     }
 }

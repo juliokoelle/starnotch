@@ -32,6 +32,16 @@
 "Spotify or Music isn't installed" = "Spotify oder Musik ist nicht installiert";
 "Wispr Flow hands-free" = "Wispr Flow freihändig";
 "Wispr Flow isn't installed" = "Wispr Flow ist nicht installiert";
+"Starting…" = "Startet…";
+"Listening" = "Hört zu";
+"Sent to Wispr Flow" = "An Wispr Flow geschickt";
+"Talk. Click again to stop, the text goes where your cursor is." = "Sprich. Nochmal klicken zum Beenden, der Text landet, wo dein Cursor ist.";
+"Install Wispr Flow to dictate from the notch." = "Installiere Wispr Flow, um aus der Notch zu diktieren.";
+"Click and talk, the text goes where your cursor is. Wispr Flow listens hands-free." = "Klicken und sprechen, der Text landet, wo dein Cursor ist. Wispr Flow hört freihändig zu.";
+"Starts and stops it here" = "Startet und stoppt hier";
+"Hold in any app" = "In jeder App halten";
+"Nothing copied yet" = "Noch nichts kopiert";
+"Copied text shows up here. Click an entry to copy it again. Copies from password apps are never kept, and the list lives in memory only." = "Kopierter Text erscheint hier. Ein Klick auf einen Eintrag kopiert ihn erneut. Kopien aus Passwort-Apps werden nie behalten, und die Liste lebt nur im Arbeitsspeicher.";
 
 /* Settings */
 "Projects" = "Projekte";

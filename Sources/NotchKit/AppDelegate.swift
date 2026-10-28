@@ -41,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shell: ShellMonitor?
     private let updater = Updater()
     private var approvals: ApprovalCenter?
+    /// Daily tools (strand daily): weather, day progress, notes, sleep and recovery.
+    private let daily = DailyStore.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -305,6 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.demoAgentFinished()
             }
         }
+        startDaily(tools: tools, sample: sample)
         applyTools()
         notch.inbox.loadPeople(from: people)
         music.onTrackChange = { [weak self] track in
@@ -528,7 +531,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !awake { keepAwake.set(false) }
 
         guard let tools else { return }
-        let tabs: [(ToolsModule.Tab, ToolFeature)] = [(.clipboard, .clipboard), (.timer, .timers), (.shelf, .shelf)]
+        daily.apply(on: Set(ToolFeature.allCases.filter(isOn)))
+        let tabs: [(ToolsModule.Tab, ToolFeature)] = [(.clipboard, .clipboard), (.timer, .timers), (.shelf, .shelf), (.notes, .notes)]
         tools.tabs = tabs.filter { isOn($0.1) }.map(\.0)
         tools.converts = isOn(.imageConverter)
         guard toolsLive else { return }
@@ -584,6 +588,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `<scheme>://status?title=…&detail=…&tint=ok` (`Brand.urlScheme`)
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == Brand.urlScheme {
+            if url.host == "oauth" {
+                daily.handleOAuth(url)
+                continue
+            }
             if url.host == "meeting" {
                 showMeetingCard(url)
                 continue
@@ -661,5 +669,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyDemoSlots() {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.calculator") else { return }
         state.settings[.bottom] = SlotApp(bundleID: "com.apple.calculator", name: "Calculator", path: url.path)
+    }
+}
+
+// MARK: Daily tools (strand daily)
+
+extension AppDelegate {
+    /// Weather and day progress in the calendar's header and the ears, notes in the Tools tab,
+    /// last night's scores as a morning line. Previews and sample data use made-up values and
+    /// never touch the network, the Keychain or the location.
+    fileprivate func startDaily(tools: ToolsModule, sample: Bool) {
+        tools.notes = daily.notes
+        let ears = DailyEars(store: daily)
+        notchModel.restEars = { ears.shown }
+        if sample {
+            DailyPreview.prepare(options.preview, store: daily)
+        }
+        daily.onMorningLine = { [weak self] health, weather in
+            let level = health.headline.map { HealthDay.level($0, source: health.source) } ?? .good
+            self?.notch.sneak(Sneak(visual: .symbol("heart.fill", tint: level == .good ? .ok : level == .fair ? .waiting : .critical),
+                                    title: DailyText.health(health), detail: weather.map { WeatherReport.degrees($0.temperature) }, duration: 5),
+                              key: "daily.morning", onlyAtRest: true)
+        }
+        if options.preview == "daily-settings" {
+            // Settings › Daily with every daily tool on (in memory only: previews don't save).
+            for feature in [ToolFeature.weather, .dayProgress, .notes, .health] { ToolSwitches.set(feature, on: true, in: &state.settings) }
+            DailyPreview.showSettings(state: state)
+        }
+        if let name = options.preview, DailyPreview.handles(name) {
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(900))
+                guard let self else { return }
+                DailyPreview.run(name, store: self.daily, notch: self.notch, tools: tools, agents: self.agents)
+            }
+        }
     }
 }

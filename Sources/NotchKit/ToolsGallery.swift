@@ -73,6 +73,10 @@ enum ToolInfo {
         case .feature(.imageConverter): "photo.on.rectangle.angled"
         case .feature(.keepAwake): "cup.and.saucer"
         case .feature(.quickCapture): "square.and.pencil"
+        case .feature(.weather): "cloud.sun"
+        case .feature(.dayProgress): "circle.lefthalf.filled"
+        case .feature(.notes): "note.text"
+        case .feature(.health): "heart"
         }
     }
 
@@ -104,6 +108,10 @@ enum ToolInfo {
         case .feature(.imageConverter): "Turns images on the shelf into PNG, JPEG, HEIC or TIFF"
         case .feature(.keepAwake): "Keeps the Mac and the display awake, from the menu"
         case .feature(.quickCapture): "A note or a task in a second, on ⌃⌥N"
+        case .feature(.weather): "Now, today's high and low and the next hours, in the calendar"
+        case .feature(.dayProgress): "How much of your work day is done, as a thin ring"
+        case .feature(.notes): "Plain text notes in the Tools tab, saved as Markdown files"
+        case .feature(.health): "Last night's sleep and readiness from Oura or WHOOP"
         }
     }
 }

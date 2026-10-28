@@ -114,6 +114,9 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // The daily tools' details (strand daily), only while one of them is on.
+            DailySettingsSection(state: state)
+
             Section {
                 Picker("Island on", selection: $state.settings.islandDisplay) {
                     ForEach(IslandDisplay.allCases, id: \.self) { display in

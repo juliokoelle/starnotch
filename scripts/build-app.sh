@@ -100,6 +100,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSCalendarsFullAccessUsageDescription</key><string>Shows your next meeting in the notch with a countdown and a Join button.</string>
     <key>NSCalendarsWriteOnlyAccessUsageDescription</key><string>Adds the event you type in quick capture to your calendar.</string>
     <key>NSMicrophoneUsageDescription</key><string>The meeting agent transcribes your meeting from the microphone while you have started it in the notch.</string>
+    <key>NSLocationUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on. Approximate is enough.</string>
+    <key>NSLocationWhenInUseUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on. Approximate is enough.</string>
     <key>NSRemindersFullAccessUsageDescription</key><string>Shows your reminders due today in Today, when you switch this on.</string>
     <key>NSHumanReadableCopyright</key><string>$COPYRIGHT</string>
 $( [[ -n "${SPARKLE_FEED_URL:-}" ]] && printf '    <key>SUFeedURL</key><string>%s</string>\n' "$SPARKLE_FEED_URL" )

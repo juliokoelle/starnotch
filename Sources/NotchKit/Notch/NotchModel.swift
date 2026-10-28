@@ -87,8 +87,17 @@ final class NotchModel {
         return urgent ? nil : held
     }
 
+    /// Ears at rest when no module has anything to show: the weather or the day's progress, when
+    /// the user put them beside the notch (`DailyEars`). Not while watching or with ears set to Never.
+    @ObservationIgnored var restEars: () -> NotchModule? = { nil }
+
+    private var restEarsShown: NotchModule? {
+        guard interaction == .rest, ambient == nil, !watching, earsMode != .never else { return nil }
+        return restEars()
+    }
+
     /// The module whose ears and peek line show while not expanded.
-    var earModule: NotchModule { ambient ?? current }
+    var earModule: NotchModule { ambient ?? restEarsShown ?? current }
 
     enum Presentation: Equatable { case closed, compact, sneak, peek, expanded, capture }
 
@@ -96,7 +105,8 @@ final class NotchModel {
         switch interaction {
         case .rest:
             sneak != nil ? .sneak
-                : ambient != nil && (held != nil && !watching || Quiet.showsEars(ambientLevel, mode: earsMode, watching: watching)) ? .compact : .closed
+                : ambient != nil && (held != nil && !watching || Quiet.showsEars(ambientLevel, mode: earsMode, watching: watching)) ? .compact
+                : restEarsShown != nil ? .compact : .closed
         case .peek: .peek
         case .expanded: .expanded
         case .capture: .capture

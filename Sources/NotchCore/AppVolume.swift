@@ -64,6 +64,13 @@ public enum AppVolume {
         return channel < inputChannels ? channel : nil
     }
 
+    /// Which of the aggregate device's input channels carry the tap: the output device's own
+    /// inputs (a headset's microphone) come first, the tap's `tapChannels` last. Never the mic.
+    public static func tapChannels(inputChannels: Int, tapChannels: Int) -> Range<Int> {
+        let total = max(0, inputChannels)
+        return (total - min(max(0, tapChannels), total))..<total
+    }
+
     /// The level one sample gets, clipped to full scale.
     @inline(__always)
     public static func apply(_ gain: Float, to sample: Float) -> Float {

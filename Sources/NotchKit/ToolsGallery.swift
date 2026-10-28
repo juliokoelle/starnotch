@@ -164,8 +164,12 @@ struct ToolRow: View {
     }
 
     private var availability: ModuleAvailability.Status {
-        guard case .module(let kind) = item else { return .init(available: true, detail: "") }
-        return ModuleAvailability.status(kind, settings: state.settings)
+        switch item {
+        case .module(let kind): ModuleAvailability.status(kind, settings: state.settings)
+        // Media strand: process taps came with macOS 14.2.
+        case .feature(.appVolume) where !AppVolumeMixer.isSupported: .init(available: false, detail: "Needs macOS 14.2 or later")
+        case .feature: .init(available: true, detail: "")
+        }
     }
 
     /// Today without a connector: switching it on turns on Apple Reminders, asking macOS on the

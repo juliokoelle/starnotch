@@ -25,6 +25,8 @@ final class AppVolumeMixer {
 
     @ObservationIgnored private var taps: [String: AppTap] = [:]
     @ObservationIgnored private var listening = false
+    /// CoreAudio removes a listener only with the very block it was added with.
+    @ObservationIgnored private var listeners: [(selector: AudioObjectPropertySelector, block: AudioObjectPropertyListenerBlock)] = []
     @ObservationIgnored private var refresh: Task<Void, Never>?
     private static let saved = "media.appVolumeLevels"
     private let system = AudioObjectID(kAudioObjectSystemObject)
@@ -47,11 +49,12 @@ final class AppVolumeMixer {
         listening = true
         for selector in [kAudioHardwarePropertyProcessObjectList, kAudioHardwarePropertyDefaultOutputDevice] {
             var address = Self.address(selector)
-            AudioObjectAddPropertyListenerBlock(system, &address, .main) { [weak self] _, _ in
+            let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 MainActor.assumeIsolated {
                     if selector == kAudioHardwarePropertyDefaultOutputDevice { self?.rebuildAll() } else { self?.reload() }
                 }
             }
+            if AudioObjectAddPropertyListenerBlock(system, &address, .main, block) == noErr { listeners.append((selector, block)) }
         }
         // "Is running output" changes per process without a list change: a slow look while on.
         refresh = Task { [weak self] in
@@ -69,8 +72,11 @@ final class AppVolumeMixer {
         for tap in taps.values { tap.stop() }
         taps.removeAll()
         apps = []
-        // The property listeners stay (CoreAudio wants the same block to remove them); with no
-        // taps and `listening` false they do nothing.
+        for listener in listeners {
+            var address = Self.address(listener.selector)
+            AudioObjectRemovePropertyListenerBlock(system, &address, .main, listener.block)
+        }
+        listeners.removeAll()
         listening = false
     }
 
@@ -256,7 +262,9 @@ final class AppTap {
             Log.app.error("App volume: no tap")
             return false
         }
-        guard let output = Self.defaultOutputUID() else { return false }
+        // The IO block reads only the tap's channels (its format; a stereo mixdown has 2).
+        let tapChannels = Self.channelCount(ofTap: tapID) ?? 2
+        guard let (outputID, output) = Self.defaultOutput() else { return false }
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "\(Brand.name) volume",
             kAudioAggregateDeviceUIDKey: "\(Brand.identifier).volume.\(UUID().uuidString)",
@@ -273,8 +281,11 @@ final class AppTap {
             Log.app.error("App volume: no aggregate device")
             return false
         }
-        let status = AudioDeviceCreateIOProcIDWithBlock(&procID, deviceID, nil, Self.block(level))
+        let status = AudioDeviceCreateIOProcIDWithBlock(&procID, deviceID, nil, Self.block(level, tapChannels: tapChannels))
         guard status == noErr, let procID else { return false }
+        // An output with inputs of its own (a headset, AirPods, an audio interface) brings its
+        // microphone into the aggregate: switched off for this IO block, which never asks for it.
+        Self.switchOff(firstInputStreams: Self.inputStreamCount(of: outputID), of: deviceID, for: procID)
         return AudioDeviceStart(deviceID, procID) == noErr
     }
 
@@ -293,25 +304,26 @@ final class AppTap {
     }
 
     /// Built outside the main actor: CoreAudio calls it on its real-time thread.
-    private nonisolated static func block(_ level: Level) -> AudioDeviceIOBlock {
-        { _, input, _, output, _ in render(input: input, output: output, gain: level.value) }
+    private nonisolated static func block(_ level: Level, tapChannels: Int) -> AudioDeviceIOBlock {
+        { _, input, _, output, _ in render(input: input, output: output, gain: level.value, tapChannels: tapChannels) }
     }
 
     /// Real-time: no allocation, no locks. Float32 samples on both sides (the HAL's IO format),
-    /// interleaved or not.
+    /// interleaved or not. The inputs are the output device's own (switched off) and then the tap's.
     private nonisolated static func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>,
-                                           gain: Float) {
+                                           gain: Float, tapChannels: Int) {
         let inputs = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outputs = UnsafeMutableAudioBufferListPointer(output)
         var inChannels = 0
         for buffer in inputs { inChannels += Int(buffer.mNumberChannels) }
+        let tap = AppVolume.tapChannels(inputChannels: inChannels, tapChannels: tapChannels)
         var outChannel = 0
         for buffer in outputs {
             guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
             let channels = max(1, Int(buffer.mNumberChannels))
             let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.size * channels)
             for c in 0..<channels {
-                let source = AppVolume.source(forOutput: outChannel + c, inputChannels: inChannels)
+                let source = AppVolume.source(forOutput: outChannel + c, inputChannels: tap.count).map { tap.lowerBound + $0 }
                 let feed = source.flatMap { sample(in: inputs, channel: $0) }
                 for frame in 0..<frames {
                     var value: Float = 0
@@ -338,13 +350,56 @@ final class AppTap {
         return nil
     }
 
-    private static func defaultOutputUID() -> String? {
+    private static func defaultOutput() -> (id: AudioDeviceID, uid: String)? {
         var address = AppVolumeMixer.address(kAudioHardwarePropertyDefaultOutputDevice)
         var id = AudioDeviceID(0)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id) == noErr,
-              id != 0 else { return nil }
-        return AppVolumeMixer.string(id, kAudioDevicePropertyDeviceUID)
+              id != 0, let uid = AppVolumeMixer.string(id, kAudioDevicePropertyDeviceUID) else { return nil }
+        return (id, uid)
+    }
+
+    /// Channels per frame of the tap's sound (a stereo mixdown: 2).
+    @available(macOS 14.2, *)
+    private static func channelCount(ofTap tap: AudioObjectID) -> Int? {
+        var address = AppVolumeMixer.address(kAudioTapPropertyFormat)
+        var format = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        guard AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &format) == noErr, format.mChannelsPerFrame > 0 else { return nil }
+        return Int(format.mChannelsPerFrame)
+    }
+
+    /// How many input streams a device has (a microphone; built-in speakers have none).
+    private static func inputStreamCount(of device: AudioDeviceID) -> Int {
+        var address = AppVolumeMixer.address(kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr else { return 0 }
+        return Int(size) / MemoryLayout<AudioStreamID>.size
+    }
+
+    /// Marks the aggregate's first `count` input streams (the output device's own, which come
+    /// before the tap's) as unused by `procID`: their buffers arrive empty and nothing records.
+    private static func switchOff(firstInputStreams count: Int, of device: AudioDeviceID, for procID: AudioDeviceIOProcID) {
+        guard count > 0 else { return }
+        var address = AppVolumeMixer.address(kAudioDevicePropertyIOProcStreamUsage, scope: kAudioObjectPropertyScopeInput)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr,
+              Int(size) >= MemoryLayout<AudioHardwareIOProcStreamUsage>.size else { return }
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioHardwareIOProcStreamUsage>.alignment)
+        defer { raw.deallocate() }
+        raw.initializeMemory(as: UInt8.self, repeating: 0, count: Int(size))
+        let usage = raw.bindMemory(to: AudioHardwareIOProcStreamUsage.self, capacity: 1)
+        usage.pointee.mIOProc = unsafeBitCast(procID, to: UnsafeMutableRawPointer.self)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, raw) == noErr,
+              let offset = MemoryLayout<AudioHardwareIOProcStreamUsage>.offset(of: \.mStreamIsOn) else { return }
+        let streams = Int(usage.pointee.mNumberStreams)
+        // Keep at least the tap's stream on.
+        guard streams > count else { return }
+        let isOn = (raw + offset).assumingMemoryBound(to: UInt32.self)
+        for index in 0..<count { isOn[index] = 0 }
+        if AudioObjectSetPropertyData(device, &address, 0, nil, size, raw) != noErr {
+            Log.app.error("App volume: the output's microphone stays in the aggregate")
+        }
     }
 }
 

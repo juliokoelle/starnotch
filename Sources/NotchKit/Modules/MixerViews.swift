@@ -151,9 +151,7 @@ private struct MixerRow: View {
                 .lineLimit(1)
                 .frame(width: 96, alignment: .leading)
 
-            Slider(value: Binding(get: { level }, set: { mixer.set($0, for: app.bundleID) }), in: AppVolume.range)
-                .controlSize(.mini)
-                .tint(level > 1.001 ? Theme.accent : Color.white.opacity(0.8))
+            LevelSlider(level: level) { mixer.set($0, for: app.bundleID) }
                 .accessibilityLabel(Text(PlayerBridge.name(forApp: app.bundleID)))
 
             Text(LocalizedStringKey(AppVolume.label(level)))
@@ -163,5 +161,52 @@ private struct MixerRow: View {
         }
         .padding(.horizontal, 4)
         .frame(height: MixerPopover.row)
+    }
+}
+
+/// A thin level line the height of the row (28 pt to hit): white up to 100 %, the accent past it,
+/// a hairline mark at 100 %. A click or drag anywhere along it sets the level.
+private struct LevelSlider: View {
+    let level: Double
+    let set: (Double) -> Void
+    @State private var dragging = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let range = AppVolume.range
+            let width = proxy.size.width
+            let fraction = (level - range.lowerBound) / (range.upperBound - range.lowerBound)
+            let full = (1 - range.lowerBound) / (range.upperBound - range.lowerBound)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.14))
+                Capsule().fill(level > 1.001 ? Theme.accent : Color.white.opacity(0.8))
+                    .frame(width: width * fraction)
+                Rectangle().fill(Color.white.opacity(0.35))
+                    .frame(width: 1, height: 7)
+                    .offset(x: width * full)
+            }
+            .frame(height: 3)
+            .scaleEffect(x: 1, y: dragging ? 1.7 : 1)
+            .animation(Theme.snappy, value: dragging)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    dragging = true
+                    let x = min(1, max(0, value.location.x / max(1, width)))
+                    set(range.lowerBound + x * (range.upperBound - range.lowerBound))
+                }
+                .onEnded { _ in dragging = false })
+        }
+        .frame(height: 28)
+        .accessibilityElement()
+        .accessibilityValue(Text(LocalizedStringKey(AppVolume.label(level))))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: set(level + 0.1)
+            case .decrement: set(level - 0.1)
+            @unknown default: break
+            }
+        }
     }
 }

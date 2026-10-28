@@ -152,6 +152,15 @@ import Testing
         #expect(AppVolume.source(forOutput: 0, inputChannels: 0) == nil)
     }
 
+    @Test func onlyTheTapIsPlayedNeverTheMicrophone() {
+        // Built-in speakers: the aggregate's inputs are the tap alone.
+        #expect(AppVolume.tapChannels(inputChannels: 2, tapChannels: 2) == 0..<2)
+        // A headset: its microphone (1 channel) comes first, the tap last.
+        #expect(AppVolume.tapChannels(inputChannels: 3, tapChannels: 2) == 1..<3)
+        #expect(AppVolume.tapChannels(inputChannels: 1, tapChannels: 2) == 0..<1)
+        #expect(AppVolume.tapChannels(inputChannels: 0, tapChannels: 2).isEmpty)
+    }
+
     @Test func gainClipsAtFullScale() {
         #expect(AppVolume.apply(0.5, to: 0.8) == 0.4)
         #expect(AppVolume.apply(1.5, to: 0.9) == 1)

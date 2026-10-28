@@ -73,7 +73,7 @@ Everything stays on your Mac. There is no telemetry and no account. The app read
 
 macOS 15.4 closed the MediaRemote framework to apps not signed by Apple. Starnotch therefore runs `/usr/bin/perl`, which macOS still lets through, and perl loads a small helper library inside the app (`helpers/mediaremote`, the technique of [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), BSD 3-Clause, rewritten). The helper only prints what plays to the app and passes play, pause, skip and seek on; nothing leaves the Mac. If a later macOS closes this door too, Starnotch falls back to Spotify and Music through AppleScript.
 
-Volume per app uses CoreAudio process taps (macOS 14.2+), no audio driver: an app you turn down or up is muted at the source and played again at your level through a private aggregate device. Limits: it needs the System Audio Recording permission; a tapped app sounds a few milliseconds later; switching the output rebuilds the taps with a short gap; apps that bring their own audio driver or take the device exclusively can't be tapped. Apps at 100 % run untouched.
+Volume per app uses CoreAudio process taps (macOS 14.2+), no audio driver: an app you turn down or up is muted at the source and played again at your level through a private aggregate device. Limits: it needs the System Audio Recording permission; a tapped app sounds a few milliseconds later; switching the output rebuilds the taps with a short gap; on an output with its own microphone (a headset, AirPods) the mixer leaves the microphone off and reads only the tap; apps that bring their own audio driver or take the device exclusively can't be tapped. Apps at 100 % run untouched.
 
 ## Plan limits and context
 

@@ -3,16 +3,27 @@ import NotchCore
 import SwiftUI
 
 /// A made-up notes vault for previews and screenshots (`--preview today:vault`,
-/// `--preview onboarding:2:notes`): written fresh into a temporary folder on each launch, so
-/// ticking a task off there touches nothing of the user's.
+/// `--preview onboarding:2:notes`, `--preview notes-settings[-edit]`): written fresh into a
+/// temporary folder on each launch, so ticking a task off there touches nothing of the user's.
 enum VaultSamples {
     static var folder: URL { FileManager.default.temporaryDirectory.appending(path: "starnotch-sample/Notes") }
 
-    /// The sample vault, or with `empty` a connector with no folder (nothing set up yet).
-    static func connector(empty: Bool = false) -> VaultConnector {
+    /// The sample vault from config.toml, or with `picked` as picked in Settings (so Settings
+    /// shows its buttons), or with `empty` a connector with no folder (nothing set up yet).
+    static func connector(empty: Bool = false, picked: Bool = false) -> VaultConnector {
         let defaults = UserDefaults(suiteName: Brand.identifier + ".preview-vault") ?? .standard
+        for key in [VaultConnector.Key.folder, VaultConnector.Key.tasks, VaultConnector.Key.daily, VaultConnector.Key.inbox] {
+            defaults.removeObject(forKey: key)
+        }
         guard !empty else { return VaultConnector(config: ConfigSection(), defaults: defaults, snapshotURL: nil) }
         write(now: Date())
+        if picked {
+            defaults.set(folder.path, forKey: VaultConnector.Key.folder)
+            defaults.set("Tasks.md", forKey: VaultConnector.Key.tasks)
+            defaults.set("Daily/YYYY-MM-DD.md", forKey: VaultConnector.Key.daily)
+            defaults.set("Inbox.md", forKey: VaultConnector.Key.inbox)
+            return VaultConnector(config: ConfigSection(), defaults: defaults, snapshotURL: nil)
+        }
         let config = ConfigSection(name: "connectors.vault", values: [
             "folder": .string(folder.path), "tasks": .string("Tasks.md"),
             "daily": .string("Daily/YYYY-MM-DD.md"), "inbox": .string("Inbox.md"),
@@ -73,7 +84,8 @@ enum VaultSamples {
     }
 }
 
-/// `--preview notes-settings`: Settings › Notes on its own, on the sample vault.
+/// `--preview notes-settings`: Settings › Notes on its own, on the sample vault from config.toml;
+/// `notes-settings-edit`: as picked in Settings, with its buttons.
 @MainActor
 enum NotesSettingsPreview {
     private static var window: NSWindow?

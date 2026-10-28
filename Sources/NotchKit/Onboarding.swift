@@ -411,24 +411,20 @@ private struct AgentsStep: View {
 private struct MeetingsStep: View {
     @Bindable var model: Onboarding
 
-    private enum Source { case jamie, wispr, granola }
+    private enum Source { case jamie, notes, wispr, granola }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
-                OnboardingLabel("Meetings")
-                CardList(items: [Source.jamie, .wispr, .granola]) { source in
+                OnboardingLabel(Runtime.vault != nil ? "Meetings and notes" as LocalizedStringKey : "Meetings")
+                // Your notes sit next to Jamie (vault strand).
+                CardList(items: Runtime.vault != nil ? [Source.jamie, .notes, .wispr, .granola] : [.jamie, .wispr, .granola]) { source in
                     switch source {
                     case .jamie: JamieRow(jamie: model.jamie)
+                    case .notes: NotesRow(state: model.state)
                     case .wispr: ComingSoonRow(name: "Wispr Flow", symbol: "mic")
                     case .granola: ComingSoonRow(name: "Granola", symbol: "note.text")
                     }
-                }
-            }
-            if Runtime.vault != nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    OnboardingLabel("Notes")
-                    CardList(items: [0]) { _ in NotesRow(state: model.state) }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {

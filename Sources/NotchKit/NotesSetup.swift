@@ -4,11 +4,21 @@ import SwiftUI
 
 /// Picking the notes folder (`VaultConnector`), shared by onboarding (one row) and Settings ›
 /// Notes (the folder and its files). A pick guesses the files from what is there; each one can be
-/// changed after. config.toml's `[connectors.vault]` wins, and Settings then only shows it.
+/// changed after. config.toml's `[connectors.vault]` wins key by key, and Settings then only
+/// shows those keys.
 @MainActor
 @Observable
 final class VaultSetup {
-    enum Field { case tasks, inbox }
+    enum Field {
+        case tasks, inbox
+
+        var defaultsKey: String { self == .tasks ? VaultConnector.Key.tasks : VaultConnector.Key.inbox }
+        var configKey: String { self == .tasks ? "tasks" : "inbox" }
+    }
+
+    /// The run log path taken from the vault, so removing or changing the vault takes it back
+    /// (and leaves one picked by hand alone).
+    static let runLogKey = "vault.runlog"
 
     /// Previews show this vault instead of the real one, and nothing is saved.
     static var preview: VaultConnector?
@@ -32,6 +42,8 @@ final class VaultSetup {
     var isAvailable: Bool { connector != nil }
     var isConnected: Bool { folder != nil }
     var isFromConfig: Bool { connector?.isFromConfig ?? false }
+    /// config.toml sets this key: Settings shows it without buttons.
+    func isLocked(_ configKey: String) -> Bool { connector?.setsInConfig(configKey) ?? false }
     var name: String { folder?.lastPathComponent ?? "" }
 
     func refresh() {
@@ -67,9 +79,12 @@ final class VaultSetup {
             Self.set(found.tasks, VaultConnector.Key.tasks, in: defaults)
             Self.set(found.daily, VaultConnector.Key.daily, in: defaults)
             Self.set(found.inbox, VaultConnector.Key.inbox, in: defaults)
-            // A run log among the notes feeds the loops, unless one is picked already.
+            // A run log among the notes feeds the loops, unless one is picked by hand.
+            Self.forgetRunLog(in: defaults)
             if let loops = found.loops, defaults.string(forKey: RunLogConnector.defaultsKey) == nil {
-                defaults.set(url.appending(path: loops).path, forKey: RunLogConnector.defaultsKey)
+                let path = url.appending(path: loops).path
+                defaults.set(path, forKey: RunLogConnector.defaultsKey)
+                defaults.set(path, forKey: Self.runLogKey)
             }
         }
         onConnected?()
@@ -80,7 +95,15 @@ final class VaultSetup {
             for key in [VaultConnector.Key.folder, VaultConnector.Key.tasks, VaultConnector.Key.daily, VaultConnector.Key.inbox] {
                 defaults.removeObject(forKey: key)
             }
+            Self.forgetRunLog(in: defaults)
         }
+    }
+
+    /// Takes back the run log the vault set, if it is still the one in use.
+    private static func forgetRunLog(in defaults: UserDefaults) {
+        guard let path = defaults.string(forKey: runLogKey) else { return }
+        if defaults.string(forKey: RunLogConnector.defaultsKey) == path { defaults.removeObject(forKey: RunLogConnector.defaultsKey) }
+        defaults.removeObject(forKey: runLogKey)
     }
 
     /// A tasks file or folder, or the inbox file, inside the vault (kept relative to it).
@@ -98,16 +121,18 @@ final class VaultSetup {
         let base = folder.standardizedFileURL.path + "/"
         let path = url.standardizedFileURL.path
         let value = path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path
-        save { Self.set(value, field == .tasks ? VaultConnector.Key.tasks : VaultConnector.Key.inbox, in: $0) }
+        save { Self.set(value, field.defaultsKey, in: $0) }
     }
 
+    /// None (`""`, so a folder from config.toml doesn't guess it again).
     func clear(_ field: Field) {
-        save { $0.removeObject(forKey: field == .tasks ? VaultConnector.Key.tasks : VaultConnector.Key.inbox) }
+        save { $0.set("", forKey: field.defaultsKey) }
     }
 
     func setDaily(_ pattern: String) {
         let trimmed = pattern.trimmingCharacters(in: .whitespaces)
-        save { Self.set(trimmed.isEmpty ? nil : trimmed, VaultConnector.Key.daily, in: $0) }
+        guard trimmed != (layout.daily ?? "") else { return }
+        save { $0.set(trimmed, forKey: VaultConnector.Key.daily) }
     }
 
     /// Writes the choice (not in previews), tells the live parts, reads it back.
@@ -178,6 +203,7 @@ struct NotesSettings: View {
     let state: AppState
     @State private var setup: VaultSetup
     @State private var daily = ""
+    @FocusState private var editingDaily: Bool
 
     init(state: AppState) {
         self.state = state
@@ -191,6 +217,9 @@ struct NotesSettings: View {
                 setup.onConnected = { [state] in NotesTools.switchOnToday(state) }
             }
             .onChange(of: setup.layout.daily) { _, value in daily = value ?? "" }
+            // Typed and left (or Settings closed) counts like Return.
+            .onChange(of: editingDaily) { _, editing in if !editing { setup.setDaily(daily) } }
+            .onDisappear { setup.setDaily(daily) }
     }
 
     @ViewBuilder private var rows: some View {
@@ -216,7 +245,8 @@ struct NotesSettings: View {
                 Text(setup.layout.daily == nil ? "Not set" as LocalizedStringKey
                      : setup.hasDailyNote ? "Today's note found" : "No note for today yet")
             }
-            .disabled(setup.isFromConfig)
+            .focused($editingDaily)
+            .disabled(setup.isLocked("daily"))
             .onSubmit { setup.setDaily(daily) }
             fileRow("Inbox", setup.layout.inbox, field: .inbox, detail: "Quick capture appends here")
         }
@@ -229,7 +259,9 @@ struct NotesSettings: View {
                     .foregroundStyle(path == nil ? .secondary : .primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if !setup.isFromConfig {
+                if setup.isLocked(field.configKey) {
+                    Text("config.toml").foregroundStyle(.secondary)
+                } else {
                     Button(path == nil ? "Choose…" : "Change…") { setup.choose(field) }
                     if path != nil && field == .inbox { Button("Remove") { setup.clear(field) } }
                 }

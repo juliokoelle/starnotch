@@ -90,7 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The notes folder is watched (no polling): a changed note rewrites Tara's snapshot and
         // reloads Today; a folder picked in Settings makes Today available at once. Previews show
         // a made-up vault and write nothing.
-        if preview { VaultSetup.preview = VaultSamples.connector(empty: !(options.preview ?? "").contains("notes")) }
+        if preview {
+            let name = options.preview ?? ""
+            VaultSetup.preview = VaultSamples.connector(empty: !name.contains("notes"), picked: name == "notes-settings-edit")
+        }
         if !sample, let vault = Runtime.vault {
             let live = VaultLive(connector: vault)
             live.onChange = { [weak today] in today?.reload() }
@@ -331,7 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agents.onLoopFinished = { [weak self] loop in self?.loopFinished(loop) }
         if let name = options.preview, let agendaPreview {
             agendaPreview.run(name, notch: notch, agents: agents)
-        } else if options.preview == "notes-settings" {
+        } else if options.preview?.hasPrefix("notes-settings") == true {
             NotesSettingsPreview.show(state: state)   // Notes (vault strand)
         } else if let name = options.preview, name == "setup-consent" || name == "setup-done" || name.hasPrefix("onboarding") {
             // The setup pages with nothing behind them (the center is in preview mode).

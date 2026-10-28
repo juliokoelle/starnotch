@@ -360,7 +360,9 @@ private struct NotchStage: View {
 private struct AgentsStep: View {
     @Bindable var model: Onboarding
 
-    private static let agentItems: [SetupItem] = [.claudePlugin, .statusLine, .mcpServer, .codexHook, .shellHook]
+    private static let agentItems: [SetupItem] = [.claudePlugin, .statusLine, .mcpServer, .codexHook, .shellHook,
+                                                  .cursorHooks, .copilotHooks, .geminiHooks, .opencodePlugin,
+                                                  .cursorApprovals, .copilotApprovals]
 
     var body: some View {
         let setup = model.setup
@@ -372,7 +374,8 @@ private struct AgentsStep: View {
                     .font(.system(size: 12.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                HStack(spacing: 6) {
+                // Up to six tools: the chips wrap onto a second line.
+                ChipFlow(spacing: 6) {
                     ForEach(setup.foundAgents) { found in
                         Label(found.name, systemImage: found.symbol)
                             .font(.system(size: 12, weight: .medium))
@@ -681,5 +684,46 @@ private struct ToolsStep: View {
                 CardList(items: ToolFeature.allCases.map(ToolItem.feature)) { ToolRow(item: $0, state: model.state) }
             }
         }
+    }
+}
+
+/// Lays chips out left to right and wraps them onto the next line when the row is full.
+private struct ChipFlow: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = rows(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map { $0.width }.max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private func rows(width: CGFloat, subviews: Subviews) -> [(indices: [Int], width: CGFloat, height: CGFloat)] {
+        var rows: [(indices: [Int], width: CGFloat, height: CGFloat)] = []
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if var last = rows.last, last.width + spacing + size.width <= width {
+                last.indices.append(index)
+                last.width += spacing + size.width
+                last.height = max(last.height, size.height)
+                rows[rows.count - 1] = last
+            } else {
+                rows.append(([index], size.width, size.height))
+            }
+        }
+        return rows
     }
 }

@@ -1,0 +1,1 @@
+{"starnotch_provider":"opencode","starnotch_pid":4242,"hook_event_name":"permission.asked","session_id":"ses_0001","cwd":"/Users/me/projects/harbor","permission":"bash","patterns":["npm run build"],"metadata":{},"title":"npm run build"}

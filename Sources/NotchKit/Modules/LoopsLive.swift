@@ -593,6 +593,9 @@ struct PlanBadge: View {
                 }
                 let reset = five.resetsAt.map { UsageText.left(until: $0, now: context.date) }
                 let percent = "\(Int(five.usedPercentage.rounded())) %"
+                // On pace to run out before the reset: when, instead of how much.
+                let pace = module.paceShort(ClaudeCodeProvider.id, .init(usedPercent: five.usedPercentage, minutes: 300, resetsAt: five.resetsAt), now: context.date)
+                let paceTint = pace != nil && level == .calm ? Theme.waiting : tint
                 let ring = ZStack {
                     Circle().stroke(Color.white.opacity(0.14), lineWidth: 2)
                     Circle().trim(from: 0, to: min(1, five.usedPercentage / 100))
@@ -602,12 +605,17 @@ struct PlanBadge: View {
                 .frame(width: 12, height: 12)
                 // "5 h 53 % · 53 m left", then "53 % · 53 m", then the ring; all of it in the tooltip.
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) { ring; Text("5 h \(percent)\(reset.map { " · \($0)" } ?? "")") }.fixedSize()
-                    HStack(spacing: 6) { ring; Text("\(percent)\(reset.map { " · \(UsageText.short($0))" } ?? "")") }.fixedSize()
+                    if let pace {
+                        HStack(spacing: 6) { ring; Text("5 h · \(pace)") }.fixedSize()
+                        HStack(spacing: 6) { ring; Text(pace) }.fixedSize()
+                    } else {
+                        HStack(spacing: 6) { ring; Text("5 h \(percent)\(reset.map { " · \($0)" } ?? "")") }.fixedSize()
+                        HStack(spacing: 6) { ring; Text("\(percent)\(reset.map { " · \(UsageText.short($0))" } ?? "")") }.fixedSize()
+                    }
                     ring
                 }
                 .font(Theme.font(12, .medium).monospacedDigit())
-                .foregroundStyle(tint)
+                .foregroundStyle(paceTint)
                 .help(help(plan, now: context.date))
             } else if module.statusBridgeInstalled {
                 ViewThatFits(in: .horizontal) {
@@ -772,12 +780,14 @@ struct UsagePill: View {
         let percent = "\(Int(used.rounded())) %"
         // The week only says so when it is the fuller window.
         let suffix = window.map { $0.label == "5 h" || $0.label.isEmpty ? "" : " \($0.label)" } ?? ""
+        // On pace to run out before a reset: when, instead of how much (the ring keeps the share).
+        let pace = module?.paceShort(of: usage, now: now)
         HStack(spacing: 5) {
             ring
             switch style {
             case .named:
                 ToolBadge(provider: usage.provider)
-                Text("\(percent)\(suffix)")
+                Text(pace ?? "\(percent)\(suffix)")
             case .short:
                 ToolBadge(provider: usage.provider)
                 Text(percent)
@@ -785,7 +795,7 @@ struct UsagePill: View {
             }
         }
         .font(Theme.font(12, .medium).monospacedDigit())
-        .foregroundStyle(tint)
+        .foregroundStyle(pace != nil && level == .calm ? Theme.waiting : tint)
         .help(help)
     }
 

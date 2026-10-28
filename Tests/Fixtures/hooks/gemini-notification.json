@@ -1,0 +1,1 @@
+{"session_id":"ab12cd34-0000-4000-8000-0000000000ge","transcript_path":"/Users/me/.gemini/tmp/harbor/chats/session-2026-10-20T11-50-ab12cd34.jsonl","cwd":"/Users/me/projects/harbor","hook_event_name":"Notification","timestamp":"2026-10-20T11:59:00.000Z","notification_type":"ToolPermission","message":"Allow shell command: rm -rf build?","details":{"type":"exec","title":"Shell"}}

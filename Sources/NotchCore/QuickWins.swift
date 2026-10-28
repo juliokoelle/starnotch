@@ -24,6 +24,23 @@ public enum PaceForecast {
         return .hitsLimit(at: hit)
     }
 
+    /// The forecast without waiting for samples: the recent rate once the samples span five
+    /// minutes (`forecast`), before that the window's average rate since it opened (`minutes`
+    /// before its reset). Too early to say (under a tenth of the window gone, under 2 % used): unknown.
+    public static func projection(usedPercent: Double, minutes: Int?, resetsAt: Date?,
+                                  samples: [(at: Date, used: Double)] = [], now: Date) -> Outcome {
+        let recent = forecast(samples: samples, resetsAt: resetsAt, now: now)
+        guard recent == .unknown else { return recent }
+        guard let minutes, minutes > 0, let resetsAt, resetsAt > now else { return .unknown }
+        if usedPercent >= 100 { return .hitsLimit(at: now) }
+        let length = Double(minutes) * 60
+        let elapsed = now.timeIntervalSince(resetsAt.addingTimeInterval(-length))
+        guard elapsed >= length * 0.1, elapsed <= length, usedPercent >= 2 else { return .unknown }
+        let rate = usedPercent / elapsed  // % per second
+        let hit = now.addingTimeInterval((100 - usedPercent) / rate)
+        return hit >= resetsAt ? .lasts(until: resetsAt) : .hitsLimit(at: hit)
+    }
+
     /// "At this pace you hit the 5 h limit at 14:20", "Lasts until the reset at 16:00".
     public static func sentence(_ outcome: Outcome, window: String, clock: (Date) -> String) -> String? {
         switch outcome {

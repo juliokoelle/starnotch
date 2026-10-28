@@ -20,10 +20,19 @@ actor AgentScanner {
     static var claudeDir: URL { Runtime.claudeDir }
 
     /// Every provider this build knows, in display order.
-    static let providerTypes: [any AgentProvider.Type] = [ClaudeCodeProvider.self, CodexProvider.self]
+    static let providerTypes: [any AgentProvider.Type] = [ClaudeCodeProvider.self, CodexProvider.self,
+                                                          CursorProvider.self, CopilotProvider.self, GeminiProvider.self,
+                                                          OpencodeProvider.self]
 
     private let claude = ClaudeCodeProvider(root: Runtime.claudeDir)
     private let codex = CodexProvider()
+    /// Tools whose live state comes from hooks (and their files where they keep any).
+    private let hooked: [any HookSessionSource] = [CursorProvider(), CopilotProvider(), GeminiProvider(), OpencodeProvider()]
+    /// Which hooked tools are on this Mac, checked once a minute.
+    private var detected: Set<String> = []
+    /// Tools a hook came from: here even where `detect()` doesn't look.
+    private var seenThroughHooks: Set<String> = []
+    private var detectedAt = Date.distantPast
     private var jobs: [LaunchdJob] = []
     private var jobsCheckedAt = Date.distantPast
     /// Providers switched off in Settings › Providers.
@@ -55,6 +64,15 @@ actor AgentScanner {
             sessions += result.sessions
             fileTimes.merge(await codex.fileTimes) { a, _ in a }
         }
+        if now.timeIntervalSince(detectedAt) > 60 {
+            detected = Set(hooked.map { type(of: $0) }.filter { $0.detect() }.map { $0.id }).union(seenThroughHooks)
+            detectedAt = now
+        }
+        for provider in hooked {
+            let id = type(of: provider).id
+            guard !disabled.contains(id), detected.contains(id) else { continue }
+            sessions += await provider.scan(now: now).sessions
+        }
         snapshot.agents = SessionMerge.ordered(SessionMerge.apply(events, to: sessions, fileTimes: fileTimes))
         snapshot.loops = Runtime.jobs?.loops(now: now) ?? []
         if includeJobs, now.timeIntervalSince(jobsCheckedAt) > 30 {
@@ -63,6 +81,24 @@ actor AgentScanner {
         }
         snapshot.jobs = jobs
         return snapshot
+    }
+
+    /// A status hook of another tool arrived on the approvals socket (see `HookUpdate`): to its
+    /// provider. True when it was one.
+    @discardableResult
+    func ingest(_ data: Data, now: Date = Date()) async -> Bool {
+        guard let update = HookUpdate.parse(data, now: now) else { return false }
+        return await ingest(update)
+    }
+
+    @discardableResult
+    func ingest(_ update: HookUpdate) async -> Bool {
+        guard let provider = hooked.first(where: { type(of: $0).id == update.provider }) else { return false }
+        // A hook proves the tool is here, even where its folder isn't.
+        seenThroughHooks.insert(update.provider)
+        detected.insert(update.provider)
+        await provider.ingest(update)
+        return true
     }
 
     /// Plan limits of the tools that report them without credentials (Codex; Claude's come from

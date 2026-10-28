@@ -69,6 +69,8 @@ cp docs/usage-setup.md "$APP/Contents/Resources/usage-setup.md"
 # The setup page installs from these copies when GitHub isn't reachable.
 mkdir -p "$APP/Contents/Resources/integrations"
 cp -R integrations/claude-code "$APP/Contents/Resources/integrations/"
+# Hooks and the opencode plugin for Cursor, Copilot CLI, Gemini CLI and opencode.
+cp -R integrations/agents "$APP/Contents/Resources/integrations/"
 cp scripts/statusline-bridge.sh "$APP/Contents/Resources/statusline-bridge.sh"
 # The meeting agent (Python, run with uv); the app copies it to Application Support on first use.
 rsync -a --exclude .venv --exclude __pycache__ --exclude .pytest_cache --exclude tests --exclude '*.wav' \

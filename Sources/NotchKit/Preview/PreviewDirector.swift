@@ -24,7 +24,9 @@ final class PreviewDirector {
                         "music-compact", "music-peek", "ears-crowded", "sizes",
                         "music-agents", "crowded-sneak",
                         // Media strand: synced lyrics in the panel and on hover, the mixer.
-                        "np-lyrics", "np-peek-lyrics", "np-mixer"]
+                        "np-lyrics", "np-peek-lyrics", "np-mixer",
+                        // Strand agents.
+                        "agents-more", "approval-cursor", "setup-agents"]
 
     let notch: NotchController
     let agents: AgentsModule
@@ -120,6 +122,29 @@ final class PreviewDirector {
             .init(id: "pv-api-claude", project: "api-server", title: "Rate limits", cwd: api, isBusy: false,
                   since: now.addingTimeInterval(-38 * 60), steps: [], branch: "main", level: .medium,
                   model: "claude-opus-5-5", effort: "medium", contextPercentage: 21),
+        ]
+        return snapshot
+    }
+
+    /// Every tool at once: Claude Code and Codex, plus Cursor waiting for an approval, Copilot CLI
+    /// working, Gemini CLI waiting at its own prompt and opencode resting.
+    static func moreProvidersSnapshot(now: Date = Date()) -> AgentSnapshot {
+        func step(_ kind: SessionStep.Kind, _ text: String) -> SessionStep { SessionStep(kind: kind, text: text) }
+        var snapshot = providerSnapshot(now: now)
+        let home = NSHomeDirectory()
+        snapshot.agents = Array(snapshot.agents.prefix(2)) + [
+            .init(id: "cursor:pv-cursor", project: "atlas", title: "Migrate the settings store", cwd: home + "/projects/atlas",
+                  isBusy: false, since: now.addingTimeInterval(-40), steps: [step(.shell, "npm run migrate -- --env staging")],
+                  model: "composer-2", provider: CursorProvider.id, needsYou: "Approve: npm run migrate -- --env staging"),
+            .init(id: "copilot:pv-copilot", project: "api-server", title: "Add pagination to /tasks", cwd: home + "/projects/api-server",
+                  isBusy: true, since: now.addingTimeInterval(-3 * 60), steps: [step(.edit, "Editing tasks.ts")],
+                  model: "gpt-6.1", provider: CopilotProvider.id),
+            .init(id: "gemini:pv-gemini", project: "harbor", title: "Report page speed", cwd: home + "/projects/harbor",
+                  isBusy: false, since: now.addingTimeInterval(-90), steps: [step(.shell, "rm -rf build")],
+                  model: "gemini-3-pro", provider: GeminiProvider.id, needsYou: "Allow shell command: rm -rf build?"),
+            .init(id: "opencode:pv-opencode", project: "notes", title: "Tidy the inbox script", cwd: home + "/projects/notes",
+                  isBusy: false, since: now.addingTimeInterval(-12 * 60), steps: [step(.message, "Done; the script runs in 0.4 s.")],
+                  provider: OpencodeProvider.id),
         ]
         return snapshot
     }
@@ -501,6 +526,30 @@ final class PreviewDirector {
                 await pause(0.8)
                 notch.openCapture()
                 await type("Call Ada tomorrow at 15:00")
+            }
+            return
+        }
+        if name == "agents-more" || name == "approval-cursor" {
+            // Six tools side by side, the plan limits saying when they run out; or a Cursor prompt.
+            agents.cast.previewCharacter = "astra"
+            agents.usePreview(Self.moreProvidersSnapshot())
+            let now = Date()
+            agents.previewPlan = StatusSnapshot(
+                sessionID: "preview", fiveHour: .init(usedPercentage: 62, resetsAt: now.addingTimeInterval(2 * 3600 + 14 * 60)),
+                sevenDay: .init(usedPercentage: 48, resetsAt: now.addingTimeInterval(4 * 86_400)), capturedAt: now)
+            agents.previewUsages = [AgentUsage(
+                provider: CodexProvider.id, displayName: CodexProvider.displayName,
+                primary: .init(usedPercent: 34, minutes: 300, resetsAt: now.addingTimeInterval(3 * 3600)),
+                secondary: .init(usedPercent: 71, minutes: 10_080, resetsAt: now.addingTimeInterval(3 * 86_400)),
+                plan: "plus", capturedAt: now)]
+            let json = #"{"starnotch_provider":"cursor","starnotch_event":"beforeShellExecution","starnotch_pid":99999,"conversation_id":"pv-cursor","hook_event_name":"beforeShellExecution","workspace_roots":["/Users/me/projects/atlas"],"command":"npm run migrate -- --env staging","cwd":"/Users/me/projects/atlas"}"#
+            Task {
+                await pause(0.8)
+                if name == "agents-more" {
+                    notch.expand(.agents, pinned: true)
+                } else if let request = ApprovalRequest.parse(Data(json.utf8), id: "preview") {
+                    notch.model.approvals?.preview(request)
+                }
             }
             return
         }

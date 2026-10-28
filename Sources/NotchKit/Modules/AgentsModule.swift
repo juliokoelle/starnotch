@@ -58,6 +58,8 @@ final class AgentsModule: NotchModule {
     @ObservationIgnored weak var inbox: AgentsInbox?
     var inboxCount: Int { inbox?.count ?? 0 }
     @ObservationIgnored private var previewMode = false
+    /// Pending approvals already turned into a step of their session.
+    @ObservationIgnored private var ingestedApprovals: Set<String> = []
 
     /// Idle sessions count as "waiting for you" this long after their last turn.
     static let waitingWindow: TimeInterval = 10 * 60
@@ -252,9 +254,10 @@ final class AgentsModule: NotchModule {
                 if let threshold = PaceForecast.crossed(previous: previous, current: window.usedPercent) {
                     _ = threshold
                     // Short for the sneak; the full sentence is in the header's tooltip.
-                    let outcome = PaceForecast.forecast(samples: samples, resetsAt: window.resetsAt, now: now)
+                    let outcome = PaceForecast.projection(usedPercent: window.usedPercent, minutes: window.minutes,
+                                                          resetsAt: window.resetsAt, samples: samples, now: now)
                     let short: String? = switch outcome {
-                    case .hitsLimit(let at): "full at \(TimeText.clock(at))"
+                    case .hitsLimit(let at): "full at \(TimeText.clock(at, from: now))"
                     case .lasts: "lasts"
                     case .unknown: nil
                     }
@@ -264,11 +267,41 @@ final class AgentsModule: NotchModule {
         }
     }
 
-    /// "At this pace you hit the 5 h limit at 14:20" / "Lasts until the reset at 16:00".
-    func forecast(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> String? {
+    /// When the window runs out at the current pace: the recent rate once there are samples,
+    /// before that the window's average since it opened.
+    func pace(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> PaceForecast.Outcome {
         let samples = usageSamples["\(provider).\(window.label)"] ?? []
-        let outcome = PaceForecast.forecast(samples: samples, resetsAt: window.resetsAt, now: now)
-        return PaceForecast.sentence(outcome, window: window.label, clock: TimeText.clock)
+        return PaceForecast.projection(usedPercent: window.usedPercent, minutes: window.minutes, resetsAt: window.resetsAt,
+                                       samples: samples, now: now)
+    }
+
+    /// "At this pace your 5-hour limit is full at 16:40" / "Lasts until the reset at 18:00".
+    func forecast(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> String? {
+        switch pace(provider, window, now: now) {
+        case .hitsLimit(let at):
+            let name = window.label == "week" ? Localization.string("weekly") : window.label == "5 h" ? Localization.string("5-hour") : window.label
+            return String(format: Localization.string("At this pace your %@ limit is full at %@"), name, TimeText.clock(at, from: now))
+        case .lasts(let until):
+            return until.map { String(format: Localization.string("Lasts until the reset at %@"), TimeText.clock($0, from: now)) }
+                ?? Localization.string("Lasts until the reset")
+        case .unknown:
+            return nil
+        }
+    }
+
+    /// The earliest "full 16:40" among a tool's windows.
+    func paceShort(of usage: AgentUsage, now: Date = Date()) -> String? {
+        let hits = [usage.primary, usage.secondary].compactMap { $0 }.compactMap { window -> Date? in
+            guard case .hitsLimit(let at) = pace(usage.provider, window, now: now), at > now.addingTimeInterval(60) else { return nil }
+            return at
+        }
+        return hits.min().map { String(format: Localization.string("full %@"), TimeText.clock($0, from: now)) }
+    }
+
+    /// "full 16:40" for a header pill: only when the window runs out before its reset.
+    func paceShort(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> String? {
+        guard case .hitsLimit(let at) = pace(provider, window, now: now), at > now.addingTimeInterval(60) else { return nil }
+        return String(format: Localization.string("full %@"), TimeText.clock(at, from: now))
     }
 
     /// More than one tool has sessions: chips carry a small tool badge.
@@ -279,6 +312,8 @@ final class AgentsModule: NotchModule {
         switch provider {
         case CodexProvider.id: "Codex"
         case ClaudeCodeProvider.id: "Claude"
+        case CopilotProvider.id: "Copilot"
+        case GeminiProvider.id: "Gemini"
         default: toolName(of: provider)
         }
     }
@@ -288,6 +323,7 @@ final class AgentsModule: NotchModule {
         switch provider {
         case CodexProvider.id: Color(hex: 0x4FC3B5)
         case ClaudeCodeProvider.id: Color(hex: 0xE0875F)
+        // The other tools: a neutral badge; their name tells them apart.
         default: Theme.textSecondary
         }
     }
@@ -310,9 +346,30 @@ final class AgentsModule: NotchModule {
         let events = requests.compactMap { request in
             request.agentID.map { AgentEvent(sessionID: $0, kind: .needsApproval(AgentEvent.approvalPrefix + (request.summary.isEmpty ? request.tool : request.summary)), at: Date()) }
         }
+        // A prompt from a hooked tool (Cursor, Copilot CLI, opencode) may be the first its session
+        // says: it makes the session known, with its process for the jump. Each request once.
+        let fresh = requests.filter { !ingestedApprovals.contains($0.id) }
+        ingestedApprovals = Set(requests.map(\.id))
+        let updates = fresh.compactMap { request -> HookUpdate? in
+            guard let session = request.sessionID, request.provider != ClaudeCodeProvider.id, request.provider != CodexProvider.id,
+                  request.provider != ApprovalRequest.mcpProvider else { return nil }
+            let step = SessionStep(kind: request.tool == "Bash" ? .shell : .tool, text: request.summary.isEmpty ? request.tool : request.summary)
+            return HookUpdate(provider: request.provider, sessionID: session, kind: .tool(step), at: Date(),
+                              cwd: request.cwd, pid: request.pid, tty: request.tty)
+        }
         Task { [weak self] in
             guard let self else { return }
+            for update in updates { await self.scanner.ingest(update) }
             await self.scanner.setEvents(events)
+            await self.refresh()
+        }
+    }
+
+    /// A status hook of Cursor, Copilot CLI, Gemini CLI or opencode, as the socket received it.
+    func ingestHook(_ data: Data) {
+        guard !previewMode else { return }
+        Task { [weak self] in
+            guard let self, await self.scanner.ingest(data) else { return }
             await self.refresh()
         }
     }

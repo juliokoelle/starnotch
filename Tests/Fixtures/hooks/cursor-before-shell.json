@@ -1,0 +1,1 @@
+{"conversation_id":"c0ffee00-0000-4000-8000-000000000001","generation_id":"g1","model":"composer-2","hook_event_name":"beforeShellExecution","cursor_version":"2.4.0","workspace_roots":["/Users/me/projects/harbor"],"command":"npm run migrate -- --env staging","cwd":"/Users/me/projects/harbor"}

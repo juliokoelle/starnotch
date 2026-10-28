@@ -331,12 +331,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 perform: { [weak self] in self?.showSetup(at: step) })
                 }
         }]
-        // Ask Tara: the ask strand listens for this (⌃⌥T); until then nothing answers.
-        notch.paletteSources.askTara = { text in
-            NotificationCenter.default.post(name: .starnotchAskTara, object: nil, userInfo: ["text": text])
-        }
+        // `paletteSources.askTara` stays nil here: Ask Tara sets it in applyTools while its tool is on.
+        // The palette is core, like the island it opens from: ⌃⌥K always. ⌃⌥A follows the
+        // Agents tab (applyTools).
         paletteHotKey = HotKey.controlOptionK { [weak self] in self?.notch.togglePalette() }
-        agentsInboxHotKey = HotKey.controlOptionA { [weak self] in self?.notch.toggleInbox() }
         // MARK: end of strand cmdk
 
         applyTools()
@@ -556,6 +554,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchModel.requestCapture = capture ? { [weak self] in self?.notch.openCapture() } : nil
         captureHotKey = capture ? captureHotKey ?? HotKey.controlOptionN { [weak self] in self?.notch.openCapture() } : nil
         inboxHotKey = capture ? inboxHotKey ?? HotKey.controlOptionI { if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) } } : nil
+
+        // Agents inbox (strand cmdk): ⌃⌥A only while the Agents tab is shown.
+        let agentsShown = notchModel.modules.contains { $0.kind == .agents }
+        agentsInboxHotKey = agentsShown ? agentsInboxHotKey ?? HotKey.controlOptionA { [weak self] in self?.notch.toggleInbox() } : nil
+        // end of strand cmdk
 
         let awake = isOn(.keepAwake)
         system?.offersKeepAwake = awake

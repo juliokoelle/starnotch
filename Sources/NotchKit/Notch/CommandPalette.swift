@@ -3,12 +3,6 @@ import NotchCore
 import Observation
 import SwiftUI
 
-extension Notification.Name {
-    /// "Ask Tara" from the palette, with what was typed in `userInfo["text"]` (may be empty).
-    /// Posted by the app's palette wiring; whatever answers Tara's questions observes it.
-    static let starnotchAskTara = Notification.Name("StarnotchAskTara")
-}
-
 /// Something to find in the command palette: a tab, a session, an event, a tool action.
 struct PaletteItem: Identifiable {
     enum Kind: String {
@@ -61,7 +55,8 @@ final class ClosurePaletteProvider: PaletteProvider {
 final class PaletteSources {
     /// Providers besides the modules.
     var providers: [any PaletteProvider] = []
-    /// Ask Tara with what was typed; the item shows only while this is set.
+    /// Ask Tara with what was typed; the items show only while this is set. Whoever owns Ask
+    /// Tara sets it while that tool is on (in `applyTools`), calling its own entry point.
     var askTara: ((String) -> Void)?
     /// Usage is saved unless previews or sample data run.
     var persists = true

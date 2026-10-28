@@ -688,7 +688,7 @@ final class NotchController {
                                      kind: .action, keywords: ["note", "task", "todo"],
                                      perform: { [weak self] in self?.openCapture() }))
         }
-        if let inbox = model.inbox {
+        if let inbox = model.inbox, model.modules.contains(where: { $0.kind == .agents }) {
             let count = inbox.count
             items.append(PaletteItem(id: "inbox", title: Localization.string("Agents inbox"),
                                      subtitle: count > 0 ? String(format: Localization.string("%d need you"), count) : "⌃⌥A",
@@ -729,7 +729,7 @@ final class NotchController {
     }
 
     func openInbox() {
-        guard let inbox = model.inbox else { return }
+        guard let inbox = model.inbox, model.modules.contains(where: { $0.kind == .agents }) else { return }
         hoverTask?.cancel()
         hoverTask = nil
         leaveTask?.cancel()

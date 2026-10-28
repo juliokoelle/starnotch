@@ -144,18 +144,15 @@ struct NotchRootView: View {
                     // Fixed halves beside the notch: what doesn't fit shortens (never pushes the
                     // panel wider, which used to shift and clip the whole body).
                     let side = max(0, (layout.innerWidth - notch.width) / 2)
-                    // The tabs keep their places in both panel sizes: they split as the compact
-                    // panel needs and the left part hugs the notch, so a size change only moves
-                    // the island's edges, never a tab from under the pointer.
-                    let tabSide = min(side, (PanelSize.compact.width - notch.width) / 2)
                     // Tabs that don't fit left of the notch continue right of it, before the status.
-                    let fit = TabStrip.fitting(in: tabSide - 10)
+                    // Each panel size splits for its own width; on a size change the tabs glide
+                    // with the island's edge.
+                    let fit = TabStrip.fitting(in: side - 10)
                     let split = model.modules.count > fit
                     HStack(spacing: 0) {
                         TabStrip(model: model, range: split ? 0..<fit : nil)
                             .padding(.leading, 10)
-                            .frame(width: tabSide, alignment: .leading)
-                            .frame(width: side, alignment: .trailing)
+                            .frame(width: side, alignment: .leading)
                         Color.clear.frame(width: notch.width)
                         HStack(spacing: 0) {
                             if split {

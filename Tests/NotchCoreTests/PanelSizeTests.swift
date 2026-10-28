@@ -25,4 +25,9 @@ import Testing
             #expect(size.widthRange.contains(size.width))
         }
     }
+
+    @Test func compactNeverNarrows() {
+        // The tab split in its header needs the full compact width.
+        #expect(PanelSize.compact.widthRange.lowerBound == PanelSize.compact.width)
+    }
 }

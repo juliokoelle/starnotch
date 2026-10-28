@@ -80,8 +80,15 @@ public enum PanelSize: String, Sendable, CaseIterable {
         }
     }
 
-    /// How far the island may narrow or widen around `width` to fit the menu bar icons.
-    public var widthRange: ClosedRange<CGFloat> { width - 48 ... width + 24 }
+    /// How far the island may narrow or widen around `width` to fit the menu bar icons. The
+    /// compact panel only widens: its header already splits the tabs around the notch, and any
+    /// narrower the tabs right of the notch would run over the status.
+    public var widthRange: ClosedRange<CGFloat> {
+        switch self {
+        case .large: width - 48 ... width + 24
+        case .compact: width ... width + 24
+        }
+    }
 }
 
 extension ModuleKind {

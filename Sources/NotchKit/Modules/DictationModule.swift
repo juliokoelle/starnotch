@@ -41,6 +41,9 @@ final class DictationModule: NotchModule {
 
     var isInstalled: Bool { NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.bundleID) != nil }
 
+    /// Wispr Flow is open, so a start dictates at once (Ask Tara's mic uses it then).
+    var isRunning: Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).isEmpty }
+
     var isActive: Bool {
         switch phase {
         case .starting, .listening, .sent: true

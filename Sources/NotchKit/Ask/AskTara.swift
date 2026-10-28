@@ -46,6 +46,10 @@ final class AskTara {
     /// The bubble opens beside Tara: the companion comes out if needed and takes the keyboard.
     @ObservationIgnored var onOpen: () -> Void = {}
     @ObservationIgnored var onClose: () -> Void = {}
+    /// Wispr Flow: while it runs, the mic starts its hands-free dictation, which pastes into the field.
+    @ObservationIgnored var wispr: DictationModule?
+    /// The mic started Wispr Flow from here (its own state says whether it still listens).
+    private var dictatingHere = false
 
     @ObservationIgnored private var process: MeetingProcess?
     @ObservationIgnored private var processBrain: TaraBrain?
@@ -93,6 +97,15 @@ final class AskTara {
 
     var isListening: Bool { phase == .listening }
 
+    /// Wispr Flow dictates into the field; it ends with a second press or by itself.
+    var isDictating: Bool {
+        guard dictatingHere, let wispr else { return false }
+        switch wispr.phase {
+        case .starting, .listening: return true
+        case .idle, .sent, .unavailable: return false
+        }
+    }
+
     init(demo: Bool = false) {
         self.demo = demo
         AskWindowShot.removeLeftovers(in: Self.shotFolder)  // a crash or force quit left them
@@ -101,6 +114,7 @@ final class AskTara {
     /// Tara's face while the bubble is open.
     var mood: AvatarMood? {
         guard isOpen else { return nil }
+        if isDictating { return .listening }
         switch phase {
         case .thinking: return .thinking
         case .listening: return .listening
@@ -131,6 +145,7 @@ final class AskTara {
         guard isOpen else { return }
         holdTask?.cancel()
         cancelSpeech()
+        stopDictating()
         timeout?.cancel()
         pending = nil
         withAnimation(Theme.reduceMotion ? nil : Theme.close) {
@@ -171,6 +186,7 @@ final class AskTara {
     /// The app quits.
     func shutdown() {
         cancelSpeech()
+        stopDictating()
         process?.terminate()
         process = nil
         removeAttachment()
@@ -201,12 +217,30 @@ final class AskTara {
 
     // MARK: Speaking
 
+    /// The mic: Wispr Flow's hands-free dictation while Wispr Flow runs (a second press stops it and it
+    /// pastes the words into the field), else Apple's recognizer. Holding ⌃⌥T always uses the recognizer.
     func toggleListening() {
-        isListening ? stopListening(andSend: true) : startListening()
+        if isDictating { return stopDictating() }
+        if isListening { return stopListening(andSend: true) }
+        if let wispr, wispr.isRunning, !isThinking {
+            focusRequest += 1  // the field has the keyboard, so Wispr's paste lands there
+            dictatingHere = true
+            wispr.start()
+        } else {
+            startListening()
+        }
+    }
+
+    private func stopDictating() {
+        let wasDictating = isDictating
+        dictatingHere = false
+        guard wasDictating else { return }
+        wispr?.stop()
+        focusRequest += 1
     }
 
     func startListening() {
-        guard !isListening, !isThinking else { return }
+        guard !isListening, !isThinking, !isDictating else { return }
         // Sample data never brings up a permission prompt (a recorded demo); speaking works if it's allowed.
         if AskSpeech.isDenied || (demo && !AskSpeech.isAuthorized) {
             fail("Tara needs speech recognition and the microphone: System Settings › Privacy & Security")
@@ -285,6 +319,8 @@ final class AskTara {
     func send() {
         // Return while speaking: the question goes once the last words are in.
         if isListening || collectingSpeech { return stopListening(andSend: true) }
+        // Return while Wispr Flow dictates: it stops and pastes; the question goes with the next return.
+        if isDictating { return stopDictating() }
         let question = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty, !isThinking else { return }
         if previewing { return }

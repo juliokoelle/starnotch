@@ -46,9 +46,9 @@ struct AskTaraView: View {
         .background(Color.black, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Theme.accent.opacity(focused || ask.isListening ? 0.6 : 0.3), lineWidth: 1)
+                .strokeBorder(Theme.accent.opacity(focused || listening ? 0.6 : 0.3), lineWidth: 1)
         }
-        .animation(Theme.snappy, value: ask.isListening)
+        .animation(Theme.snappy, value: listening)
         .animation(Theme.snappy, value: ask.text.isEmpty)
         .animation(Theme.snappy, value: ask.attachment)
         .help("Drop Tara on a window to ask about it")
@@ -86,6 +86,9 @@ struct AskTaraView: View {
         .background(Theme.accent.opacity(0.12), in: Capsule())
     }
 
+    /// Apple's recognizer or Wispr Flow is taking the words.
+    private var listening: Bool { ask.isListening || ask.isDictating }
+
     private var input: some View {
         HStack(spacing: 6) {
             TextField("Ask Tara…", text: $ask.text, axis: .vertical)
@@ -96,22 +99,22 @@ struct AskTaraView: View {
                 .focused($focused)
                 .onSubmit { ask.send() }
                 .onExitCommand { ask.close() }
-            if ask.isListening {
+            if listening {
                 ListeningGlyph(active: true, size: 14)
                     .transition(.opacity)
             }
             Button { ask.toggleListening() } label: {
-                Image(systemName: ask.isListening ? "mic.fill" : "mic")
+                Image(systemName: listening ? "mic.fill" : "mic")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ask.isListening ? .white : Theme.accent)
+                    .foregroundStyle(listening ? .white : Theme.accent)
                     .frame(width: 28, height: 28)
-                    .background(ask.isListening ? Theme.accent : Theme.accent.opacity(0.14), in: Circle())
+                    .background(listening ? Theme.accent : Theme.accent.opacity(0.14), in: Circle())
                     .contentShape(Circle())
             }
             .buttonStyle(PressScale())
             .disabled(ask.isThinking)
-            .help(Localization.string(ask.isListening ? "Stop and ask" : "Speak (or hold ⌃⌥T)"))
-            if !ask.text.trimmingCharacters(in: .whitespaces).isEmpty && !ask.isListening {
+            .help(Localization.string(ask.isDictating ? "Stop dictating" : ask.isListening ? "Stop and ask" : "Speak (or hold ⌃⌥T)"))
+            if !ask.text.trimmingCharacters(in: .whitespaces).isEmpty && !listening {
                 Button { ask.send() } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 12, weight: .bold))

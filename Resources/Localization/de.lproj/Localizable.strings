@@ -559,3 +559,5 @@
 "Couldn't let the Mac sleep again with the lid closed" = "Der Mac konnte mit geschlossenem Deckel nicht wieder schlafen";
 "Trying again in a minute" = "Neuer Versuch in einer Minute";
 "Your Mac stays awake with the lid closed, on power or on battery" = "Dein Mac bleibt zugeklappt wach, am Strom oder im Akkubetrieb";
+/* Wave 3: Ask Tara dictates with Wispr Flow */
+"Stop dictating" = "Diktat beenden";

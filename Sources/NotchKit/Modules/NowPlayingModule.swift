@@ -127,7 +127,7 @@ final class NowPlayingModule: NotchModule {
         guard let track else { return }
         let target = min(max(0, seconds), track.duration)
         if live, let source = track.source {
-            PlayerBridge.send("set player position to \(Int(target.rounded()))", to: source)
+            PlayerBridge.send("set player position to \(Int(target.rounded()))", to: source, cached: false)
         }
         position = target
     }
@@ -473,9 +473,11 @@ enum PlayerBridge {
         return PlayerStatus.parse(reply, source: source)
     }
 
-    static func send(_ command: String, to source: PlayerStatus.Source) {
+    /// `cached: false` for a command with a value in it (a seek), so the cache doesn't fill
+    /// with one compiled script per second of the track.
+    static func send(_ command: String, to source: PlayerStatus.Source, cached: Bool = true) {
         guard isRunning(source), let app = names[source] else { return }
-        _ = run("tell application \"\(app)\" to \(command)")
+        _ = run("tell application \"\(app)\" to \(command)", cached: cached)
     }
 
     static func artwork(for status: PlayerStatus) async -> NSImage? {
@@ -495,9 +497,9 @@ enum PlayerBridge {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
-    private static func run(_ source: String) -> String? {
+    private static func run(_ source: String, cached: Bool = true) -> String? {
         let script = scripts[source] ?? NSAppleScript(source: source)
-        scripts[source] = script
+        if cached { scripts[source] = script }
         var error: NSDictionary?
         guard let result = script?.executeAndReturnError(&error), error == nil else { return nil }
         return result.stringValue

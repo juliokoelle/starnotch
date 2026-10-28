@@ -180,6 +180,15 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                TaraUsageRows()
+            } header: {
+                Text("Tara's usage")
+            } footer: {
+                Text("What Tara's calls would cost at API prices. On a Claude plan they count against your plan's limits instead of costing money; with an API key this is what you pay.")
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Behavior") {
                 Toggle(isOn: $state.settings.keepOpenUntilClick) {
                     Text("Keep the panel open until I click outside")
@@ -284,6 +293,49 @@ struct MeetingAgentSettings: View {
         if !compact, let url = URL(string: "https://console.anthropic.com/settings/keys") {
             Link("Get an Anthropic key", destination: url)
         }
+    }
+}
+
+/// Today and the last 7 days from the sidecar's usage ledger (`usage.jsonl`), re-read while Settings is open.
+private struct TaraUsageRows: View {
+    @State private var summary = TaraUsage.Summary()
+
+    var body: some View {
+        Group {
+            LabeledContent("Today") { Text(Self.line(summary.today)) }
+            LabeledContent("Last 7 days") { Text(Self.line(summary.week)) }
+            if summary.week.calls > 0 {
+                LabeledContent("Calls in 7 days") { Text(Self.features(summary.week)) }
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                summary = TaraUsage.load(folder: Brand.supportFolder)
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    private static func line(_ totals: TaraUsage.Totals) -> String {
+        guard totals.calls > 0 else { return String(localized: "No calls") }
+        let calls = totals.calls == 1 ? String(localized: "1 call") : String(localized: "\(totals.calls) calls")
+        let tokens = TaraUsage.compact(totals.tokens)
+        let cost = TaraUsage.dollars(totals.costUSD)
+        return String(localized: "\(calls) · \(tokens) tokens · ≈ \(cost) at API prices")
+    }
+
+    private static func features(_ totals: TaraUsage.Totals) -> String {
+        let names: [String: String] = [
+            TaraUsage.Feature.ask.rawValue: String(localized: "Ask Tara"),
+            TaraUsage.Feature.capture.rawValue: String(localized: "Quick capture"),
+            TaraUsage.Feature.meeting.rawValue: String(localized: "Meeting analysis"),
+        ]
+        let order = TaraUsage.Feature.allCases.map(\.rawValue)
+        func rank(_ key: String) -> Int { order.firstIndex(of: key) ?? order.count }
+        return totals.byFeature.keys
+            .sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0 < $1 }
+            .map { "\(names[$0] ?? $0) \(totals.byFeature[$0] ?? 0)" }
+            .joined(separator: " · ")
     }
 }
 

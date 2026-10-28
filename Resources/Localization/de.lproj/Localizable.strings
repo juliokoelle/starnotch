@@ -511,3 +511,13 @@
 "Don't send the window" = "Fenster nicht mitschicken";
 "Tara needs Screen Recording to see a window: System Settings › Privacy & Security › Screen Recording" = "Tara braucht Bildschirmaufnahme, um ein Fenster zu sehen: Systemeinstellungen › Datenschutz & Sicherheit › Bildschirmaufnahme";
 "Couldn't take a picture of that window" = "Von diesem Fenster ließ sich kein Bild machen";
+/* Wave 3: Tara's usage in Settings */
+"Tara's usage" = "Taras Verbrauch";
+"What Tara's calls would cost at API prices. On a Claude plan they count against your plan's limits instead of costing money; with an API key this is what you pay." = "Was Taras Aufrufe zu API-Preisen kosten würden. Mit einem Claude-Abo zählen sie gegen die Limits deines Abos und kosten kein Geld; mit einem API-Schlüssel zahlst du genau das.";
+"Last 7 days" = "Letzte 7 Tage";
+"Calls in 7 days" = "Aufrufe in 7 Tagen";
+"No calls" = "Keine Aufrufe";
+"1 call" = "1 Aufruf";
+"%lld calls" = "%lld Aufrufe";
+"%@ · %@ tokens · ≈ %@ at API prices" = "%1$@ · %2$@ Tokens · ≈ %3$@ zu API-Preisen";
+"Meeting analysis" = "Meeting-Analyse";

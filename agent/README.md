@@ -63,24 +63,24 @@ at one (`CLAUDE_CODE_MAX_RETRIES=1`), so an overloaded or throttled API fails in
 timeout. The system prompt file sits in the brain folder and is deleted after the call (also when the app ends the
 agent with SIGTERM; one left by a hard kill is swept on the next start). stderr logs each call's tokens and duration.
 
-For Ask Tara the meeting memory in the system prompt is at most 60,000 characters: the summary, decisions and
-commitments of every meeting always, then notes and transcripts in equal parts per meeting (what a short one doesn't
-need goes to the others); a longer transcript keeps its lines with numbers first, then its earliest, with `…` for the
-gaps. The up to six transcript lines that share the most words with the question come along in the prompt, so the
-parts the excerpt left out still count.
+The meeting memory in the system prompt is at most 60,000 characters: the summary, decisions and commitments of every
+meeting always, then notes and transcripts in equal parts per meeting (what a short one doesn't need goes to the
+others); a longer transcript keeps its lines with numbers first, then its earliest, with `…` for the gaps. The up to
+six transcript lines that share the most words with a question, or with each utterance of a live batch (at most 16
+lines and 4,000 characters per batch), come along in the prompt, so the parts the excerpt left out still count. The
+system prompt only changes when the memory does, so it stays cacheable.
 
-The live analysis is the cost driver (one call per batch while people talk), so it sends less, and less often. Its
-system prompt carries only the facts of every meeting (summary, decisions, commitments with their quotes) and the
-quick captures: about 1,100 characters of facts for the demo meetings; for a memory at the full 60,000-character
-budget the whole system prompt is about 9,600 characters instead of 59,000. The transcripts come per batch: for each
-new utterance up to eight earlier lines that share its words, stop words left out, numbers counted double, and a
-figure in the same unit the more the closer it is ("25 Euro" finds the "30 Euro" decision before "4 Euro" support
-costs); at most 16 lines and 4,000 characters per batch. Notes stay out: the agent only reports a contradiction whose
-earlier words it finds in a transcript, decision or commitment, so one quoted from notes alone was dropped before too.
-And Claude is asked at most once every 25 seconds (`STARNOTCH_MEETING_GAP` or `--meeting-gap`; `0` asks for every
-batch): what is said in between waits and goes with the next call, a quiet stretch sends what waits once the gap is
-over, and saving or ending the meeting analyses the rest first. The rules, Ask Tara and captured questions aren't
-held back. Both system prompts only change when the memory does, so they stay cacheable.
+The live analysis is the cost driver, so Claude is asked at most once every 25 seconds (`STARNOTCH_MEETING_GAP` or
+`--meeting-gap`; `0` asks for every batch): what is said in between waits and goes with the next call, and a quiet
+stretch sends what waits once the gap is over. The rules, Ask Tara and captured questions aren't held back. `save`
+writes the meeting before it analyses what still waits, so a slow call can't cost the transcript; `reset` drops what
+waits, and stdin closing runs it through the rules only. The system prompt keeps the whole memory: read from the
+prompt cache, a token of it costs a fortieth of a token in the batch prompt (Claude Code writes each batch prompt to
+the one-hour cache), so moving the transcripts into the batch prompt would make a call dearer, not cheaper. With a
+memory at the full budget (about 33,000 tokens) and Sonnet's API list prices, a call costs about $0.010 for a
+one-line batch and up to about $0.026 for a busy one (10 new utterances, 12 of context, 20 items already reported and
+the recall at its 4,000-character cap: about 8,000 characters). A meeting hour of steady talk, 144 calls, comes to
+about $1.50 to $3.70 plus about $0.13 for the first call, against $2.60 to $10 when every call followed the last one.
 
 ## Ask Tara
 

@@ -249,11 +249,6 @@ class Memory:
         blocks = ["\n".join([f, *_excerpt(rows, share)]) for f, rows, share in zip(facts, details, shares)]
         return "\n\n".join(blocks)[:max_chars]
 
-    def as_facts(self, max_chars: int = 60_000) -> str:
-        """The facts of every meeting (summary, decisions, commitments with their quotes), newest first: as_context
-        without notes and transcripts, for the live analysis."""
-        return "\n\n".join(_facts(m) for m in reversed(self.meetings))[:max_chars]
-
 
 def _facts(m: Meeting) -> str:
     parts = [f"## Meeting id={m.id} | {m.title} | {m.date} | participants: {', '.join(m.participants)}"]

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import queue
 import re
@@ -30,21 +31,18 @@ from memory import Commitment, Line, Meeting, Memory, _words
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
 RECALL = 6  # earlier transcript lines that share words with the new ones, for transcripts the memory had to shorten
-MEETING_RECALL = 8  # the same per new utterance for the live analysis, whose system prompt carries no transcripts
-MEETING_RECALL_MAX = 16  # and at most this many per batch,
+MEETING_RECALL_MAX = 16  # the live analysis recalls RECALL per new utterance, at most this many per batch,
 RECALL_CHARS = 4000  # in at most this many characters: the batch's prompt isn't cached from call to call
 REST = 60  # seconds on the rules after a failed Claude call: better a rule now than Claude late, batch after batch
 MEETING_GAP = 25.0  # seconds at least between two live analysis calls; what's said in between goes with the next
+MEETING_GAP_MAX = 600.0  # a larger STARNOTCH_MEETING_GAP or --meeting-gap counts as this
 
-SYSTEM = """You listen along to a live meeting and compare it with the team's meeting memory: the facts of every
-earlier meeting below (summary, decisions, commitments), and the earlier transcript lines that share words with
-what was just said, which come with each batch under "Earlier lines with the same words".
+SYSTEM = """You listen along to a live meeting and compare it with the team's meeting memory below.
 Report, as JSON, only what helps the people in the meeting right now:
 
 - contradictions: something said now conflicts with an earlier decision or statement in the memory
   (a different number, a reversed decision, a wrong claim about what was agreed). Quote the new words exactly
-  in now_quote, and the earlier words exactly as they stand in the memory (a decision's or commitment's quote, or an
-  earlier line) in before_quote, with that meeting's id.
+  in now_quote, and the earlier words exactly as they stand in the memory in before_quote, with that meeting's id.
   A changed decision that people make knowingly is not a contradiction; a misremembered one is.
 - commitments: someone in the live meeting promises to do something ("I'll send...", "ich schicke ... bis ...").
   who is the speaker (or the person named), what is short, due is an ISO date (YYYY-MM-DD) resolved from today's date, or "".
@@ -252,8 +250,6 @@ class Agent:
         cmd = message.get("cmd")
         reply_to = message.get("id")
         try:
-            if cmd in ("save", "reset"):
-                self.flush()  # the meeting ends: what's still waiting is analysed first, and saved with it
             if cmd == "prep":
                 out = self.prep(list(message.get("participants") or []))
             elif cmd == "ask":
@@ -265,7 +261,8 @@ class Agent:
             elif cmd == "save":
                 out = self.save(message)
             elif cmd == "reset":
-                self.live, self.commitments, self.reported, self.reported_text = [], [], set(), []
+                # what still waits belongs to the meeting thrown away: no call for it, and no late cards
+                self.live, self.waiting, self.commitments, self.reported, self.reported_text = [], [], [], set(), []
                 out = {"type": "status", "state": "reset"}
             elif message.get("type") in ("status", "partial"):
                 return  # transcriber chatter piped through
@@ -281,10 +278,8 @@ class Agent:
         return quick.read(self.captures_path) if self.captures_path else []
 
     def context(self) -> str:
-        """For the live analysis: the facts of every meeting, plus what the user noted with quick capture (it's
-        theirs, so it counts as memory too). Transcript lines come per batch (`_evidence`), so this stays small and
-        the same from batch to batch while the memory is unchanged, and Claude's prompt cache keeps it."""
-        text = self.memory.as_facts()
+        """The meetings, plus what the user noted with quick capture (it's theirs, so it counts as memory too)."""
+        text = self.memory.as_context()
         noted = quick.as_context(self.captures())
         return text + ("\n\n# Quick capture: the user's own tasks, questions and notes\n" + noted if noted else "")
 
@@ -431,17 +426,26 @@ class Agent:
         return {"answer": (NO_BRAIN if self.llm is None else NO_ANSWER)[_language(question)], "sources": []}
 
     def save(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Writes the meeting, the utterances still waiting for the meeting gap included, before it analyses those:
+        the transcript doesn't depend on the analysis, and the app ends the agent if the save takes too long.
+        Commitments that analysis finds are written in a second go."""
         date = str(message.get("date") or self.today.isoformat())
         title = str(message.get("title") or "Meeting")
+        said = self.live + self.waiting
         meeting = Meeting(
             id=str(message.get("meeting_id") or f"{date}-{_norm(title).replace(' ', '-') or 'meeting'}"),
             title=title,
             date=date,
-            participants=sorted({u.speaker for u in self.live if u.speaker}),
-            transcript=[Line(u.speaker, u.text, u.t) for u in self.live],
+            participants=sorted({u.speaker for u in said if u.speaker}),
+            transcript=[Line(u.speaker, u.text, u.t) for u in said],
             commitments=list(self.commitments),
         )
         path = self.memory.save(meeting)
+        if self.waiting:
+            self.flush()
+            if len(self.commitments) > len(meeting.commitments):
+                meeting.commitments = list(self.commitments)
+                path = self.memory.save(meeting)
         return {"type": "status", "state": "saved", "meeting_id": meeting.id, "path": str(path)}
 
     # Listening
@@ -462,15 +466,15 @@ class Agent:
             return 0.0
         return max(0.0, self.last_call + self.gap - self.clock())
 
-    def flush(self) -> None:
-        """Analyses every waiting utterance in one call (rules when Claude rests or is gone)."""
+    def flush(self, claude: bool = True) -> None:
+        """Analyses every waiting utterance in one call (rules when Claude rests or is gone, or without `claude`)."""
         new, self.waiting = self.waiting, []
         if not new:
             return
         before = self.live[-WINDOW:]
         self.live += new
         result = None
-        if self._thinking():
+        if claude and self._thinking():
             self.last_call = self.clock()
             try:
                 result = self._think("meeting", SYSTEM.format(memory=self.context()),
@@ -561,25 +565,13 @@ class Agent:
                 for h in self.memory.search(text, RECALL) if h.score >= 2]
 
     def _evidence(self, new: list[Utterance]) -> list[str]:
-        """Earlier transcript lines for the live analysis, up to MEETING_RECALL per new utterance: its system prompt
-        carries only the facts, so the transcripts come this way. A line scores per topic word it shares (stop words
-        don't count, numbers double), plus up to 2 for a figure in the same unit, the more the closer the numbers:
-        "25 Euro" finds "30 Euro" before "4 Euro", since a misremembered figure is usually near the right one.
-        Each utterance's best line first, then each one's second, and so on, until MEETING_RECALL_MAX or RECALL_CHARS."""
-        lines = [(m, line, _words(line.text), _figures(line.text)) for m in self.memory.meetings for line in m.transcript]
-        ranked: list[list[str]] = []
-        for u in new:
-            query, figures = _content(u.text), _figures(u.text)
-            scored = []
-            for m, line, words, numbers in lines:
-                score = sum(2.0 if w.isdigit() else 1.0 for w in query & words) + 2 * _closeness(figures, numbers)
-                if score >= 2:
-                    scored.append((score, m.date, f"[{m.id} | {m.date}] {line.speaker}: {line.text}"))
-            scored.sort(key=lambda s: (-s[0], s[1]))
-            ranked.append([text for _, _, text in scored[:MEETING_RECALL]])
+        """`_recall` for each new utterance, not for the batch as one text, so a long batch still brings each
+        utterance's lines: each one's best line first, then each one's second, and so on, until MEETING_RECALL_MAX
+        lines or RECALL_CHARS characters."""
+        ranked = [self._recall(u.text) for u in new]
         out: list[str] = []
         size = 0
-        for rank in range(MEETING_RECALL):
+        for rank in range(RECALL):
             for texts in ranked:
                 text = texts[rank] if rank < len(texts) else ""
                 if text and text not in out and len(out) < MEETING_RECALL_MAX and size + len(text) <= RECALL_CHARS:
@@ -667,14 +659,13 @@ def _language(text: str) -> str:
     return "de" if re.search(r"[äöüß]", text.lower()) else "en"
 
 
-def _figures(text: str) -> list[tuple[float, str]]:
-    """'25 Euro im Monat, 3,5 %' -> [(25.0, 'Euro'), (3.5, 'Prozent')]."""
-    return [(float(n.replace(",", ".")), _unit(u)) for n, u in NUMBER_UNIT.findall(text)]
-
-
-def _closeness(a: list[tuple[float, str]], b: list[tuple[float, str]]) -> float:
-    """1 for the same figure in the same unit, less the further apart the numbers, 0 without a common unit."""
-    return max((min(x, y) / max(x, y) for x, u in a for y, v in b if u == v and x > 0 and y > 0), default=0.0)
+def _gap(value: Any) -> float:
+    """The meeting gap from the environment or the flag: MEETING_GAP for nothing or no number, else 0 to MEETING_GAP_MAX."""
+    try:
+        gap = float(value)
+    except (TypeError, ValueError):
+        return MEETING_GAP
+    return MEETING_GAP if math.isnan(gap) else min(max(gap, 0.0), MEETING_GAP_MAX)
 
 
 def _unit(unit: str) -> str:
@@ -750,7 +741,9 @@ def run(agent: Agent, stream: TextIO, watch: Path | None = None) -> None:
                 agent.handle(message)
         if heard:
             agent.hear(heard)
-    agent.flush()  # stdin closed: the rest of the meeting before the agent ends
+    # stdin closed: the app does that after a save (nothing waits then) or to throw the meeting away, so what still
+    # waits goes through the rules, not Claude
+    agent.flush(claude=False)
 
 
 def make_emit(out: TextIO) -> Callable[[dict[str, Any]], None]:
@@ -777,9 +770,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="folder of connector snapshots (*.json) for ask (default: connectors/ in Starnotch's folder); '' to ignore")
     parser.add_argument("--usage", default=str(ledger.LEDGER),
                         help="usage ledger, one line per brain call (default: usage.jsonl in Starnotch's folder); '' for none")
-    parser.add_argument("--meeting-gap", type=float, default=os.environ.get("STARNOTCH_MEETING_GAP", MEETING_GAP),
+    parser.add_argument("--meeting-gap", type=float, default=_gap(os.environ.get("STARNOTCH_MEETING_GAP")),
                         help="seconds at least between two live analysis calls to Claude (default: STARNOTCH_MEETING_GAP, "
-                             f"else {MEETING_GAP:g}); 0 asks for every batch")
+                             f"else {MEETING_GAP:g}); 0 asks for every batch, at most {MEETING_GAP_MAX:g}")
     args = parser.parse_args(argv)
 
     # The app ends a meeting with SIGTERM; as an exception it lets a running Claude call clean up its prompt file.
@@ -797,7 +790,7 @@ def main(argv: list[str] | None = None) -> int:
     captures = Path(args.captures).expanduser() if args.captures else None
     connectors = Path(args.connectors).expanduser() if args.connectors else None
     usage = Path(args.usage).expanduser() if args.usage else None
-    agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage, max(args.meeting_gap, 0.0))
+    agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage, _gap(args.meeting_gap))
     emit({"type": "ready", "meetings": len(memory.meetings), "memory": str(memory.folder),
           "brain": brain, "model": getattr(llm, "model", None), "errors": memory.errors})
     run(agent, sys.stdin, captures if args.watch_captures else None)

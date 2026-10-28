@@ -1,12 +1,14 @@
-"""What a meeting costs: Claude at most once per meeting gap, and a system prompt of facts that the cache keeps."""
+"""What a meeting costs: Claude at most once per meeting gap, and a system prompt that the cache keeps."""
 
 import datetime as dt
 import io
 import json
 import threading
+
+import pytest
 from types import SimpleNamespace
 
-from agent import MEETING_GAP, SYSTEM, Agent, make_emit, run
+from agent import MEETING_GAP, SYSTEM, Agent, run
 from memory import Line, Meeting, Memory
 
 TODAY = dt.date(2026, 10, 26)
@@ -105,7 +107,7 @@ def test_nothing_lost_or_sent_twice(memory_dir):
     assert [line.text for line in Memory(memory_dir).get("2026-10-26-gap").transcript] == texts
 
 
-def test_save_and_reset_analyse_what_waits_first(memory_dir):
+def test_save_analyses_what_waits_and_saves_its_commitments(memory_dir):
     commitment = {**QUIET, "commitments": [{"who": "Lisa", "what": "Folien schicken", "due": "2026-10-28",
                                             "quote": "Ich schicke euch bis Mittwoch die Folien."}]}
     llm = FakeLLM(QUIET, commitment)
@@ -114,25 +116,67 @@ def test_save_and_reset_analyse_what_waits_first(memory_dir):
     agent.handle(utter("Lisa", "Ich schicke euch bis Mittwoch die Folien."))
     assert len(llm.calls) == 1
     agent.handle({"cmd": "save", "title": "Ende"})
-    assert [o["type"] for o in out] == ["commitment", "status"]  # the commitment is found before the save
-    assert Memory(memory_dir).get("2026-10-26-ende").commitments[0].what == "Folien schicken"
+    assert sent(llm)[1] == ["Lisa: Ich schicke euch bis Mittwoch die Folien."]
+    assert [o["type"] for o in out] == ["commitment", "status"]  # the commitment is found before the save is confirmed
+    saved = Memory(memory_dir).get("2026-10-26-ende")
+    assert [c.what for c in saved.commitments] == ["Folien schicken"] and len(saved.transcript) == 2
 
+
+def test_save_writes_the_meeting_before_it_asks_claude(memory_dir):
+    """The app ends the agent with SIGTERM (SystemExit in main) when the save takes too long: the meeting is written."""
+    class Ended(FakeLLM):
+        def json(self, *args, **kwargs):
+            if self.calls:
+                raise SystemExit(143)
+            return super().json(*args, **kwargs)
+
+    agent, _, _ = make(memory_dir, Ended())
+    agent.handle(utter("Jonas", "Hallo."))
+    agent.handle(utter("Lisa", "Ich schicke euch bis Mittwoch die Folien."))  # waits for the gap
+    with pytest.raises(SystemExit):
+        agent.handle({"cmd": "save", "title": "Ende"})
+    saved = Memory(memory_dir).get("2026-10-26-ende")
+    assert [line.text for line in saved.transcript] == ["Hallo.", "Ich schicke euch bis Mittwoch die Folien."]
+    assert saved.participants == ["Jonas", "Lisa"]
+
+
+def test_reset_drops_what_waits(memory_dir):
     llm = FakeLLM()
-    agent, out, _ = make(memory_dir, llm)
+    agent, out, clock = make(memory_dir, llm)
     agent.handle(utter("Jonas", "Hallo."))
     agent.handle(utter("Jonas", "Noch was."))
     agent.handle({"cmd": "reset"})
-    assert sent(llm) == [["Jonas: Hallo."], ["Jonas: Noch was."]] and agent.live == []
+    assert len(llm.calls) == 1 and agent.live == [] and agent.waiting == [] and agent.due() is None
+    clock.now += 30
+    agent.handle(utter("Max", "Neues Meeting."))
+    assert sent(llm) == [["Jonas: Hallo."], ["Max: Neues Meeting."]]
+    assert "Noch was." not in llm.calls[1].user
 
 
-def test_stdin_closing_flushes_the_rest(memory_dir):
+def test_stdin_closing_runs_what_waits_through_the_rules(memory_dir):
+    """The app closes stdin after a save or to throw the meeting away: what still waits gets the rules, not Claude."""
     llm = FakeLLM()
-    out = io.StringIO()
-    agent = Agent(Memory(memory_dir), llm, make_emit(out), TODAY, clock=lambda: 0.0)  # the clock never moves
-    lines = [utter("Max", f"Satz {i}.") for i in range(5)]
-    run(agent, io.StringIO("".join(json.dumps(x) + "\n" for x in lines)))
-    assert [line for batch in sent(llm) for line in batch] == [f"Max: Satz {i}." for i in range(5)]
-    assert len(llm.calls) <= 2
+    out = []
+    agent = Agent(Memory(memory_dir), llm, out.append, TODAY, clock=lambda: 0.0)  # the clock never moves
+    first = threading.Event()
+    real = llm.json
+
+    def json_and_signal(*args, **kwargs):
+        answer = real(*args, **kwargs)
+        first.set()
+        return answer
+
+    llm.json = json_and_signal
+
+    def stream():
+        yield json.dumps(utter("Jonas", "Hallo.")) + "\n"
+        first.wait(5)  # the next line comes after the first call, so it waits for the gap when stdin closes
+        yield json.dumps(utter("Lisa", "Ich schicke euch bis Mittwoch die Folien.")) + "\n"
+
+    run(agent, stream())
+    assert first.is_set() and sent(llm) == [["Jonas: Hallo."]]
+    assert [o["type"] for o in out] == ["commitment"] and out[0]["who"] == "Lisa"  # the rules found it
+    assert agent.waiting == [] and [u.text for u in agent.live][-1] == "Ich schicke euch bis Mittwoch die Folien."
 
 
 def test_run_sends_what_waits_when_the_gap_is_over_without_new_words(memory_dir):
@@ -149,14 +193,16 @@ def test_run_sends_what_waits_when_the_gap_is_over_without_new_words(memory_dir)
 
     llm.json = json_and_signal
 
+    open_when_sent = []
+
     def stream():
         yield json.dumps(utter("Max", "Eins.")) + "\n"
         first.wait(5)  # "Zwei." comes after the first call, so it waits for the gap
         yield json.dumps(utter("Max", "Zwei.")) + "\n"
-        second.wait(5)  # stdin open, nobody speaks
+        open_when_sent.append(second.wait(5))  # stdin open, nobody speaks: the call comes before it closes
 
     run(agent, stream())
-    assert second.is_set() and sent(llm) == [["Max: Eins."], ["Max: Zwei."]]
+    assert open_when_sent == [True] and sent(llm) == [["Max: Eins."], ["Max: Zwei."]]
 
 
 def test_ask_and_captured_questions_are_not_throttled(memory_dir):
@@ -206,19 +252,23 @@ def test_the_gap_comes_from_the_environment_or_a_flag(monkeypatch, memory_dir):
     assert seen.pop("gap") == 40
     agent_module.main(args + ["--meeting-gap", "0"])
     assert seen.pop("gap") == 0
+    for value, gap in (("abc", 25), ("", 25), ("nan", 25), ("inf", 600), ("-3", 0)):  # never an exit or a crash later
+        monkeypatch.setenv("STARNOTCH_MEETING_GAP", value)
+        assert agent_module.main(args) == 0 and seen.pop("gap") == gap
+    assert agent_module.main(args + ["--meeting-gap", "inf"]) == 0 and seen.pop("gap") == 600
 
 
-# Facts-only memory
+# Memory
 
-def test_the_meeting_prompt_carries_facts_not_transcripts(memory_dir):
+def test_the_meeting_prompt_carries_the_whole_memory(memory_dir):
+    """Transcript lines are what contradictions turn on, and in the cached system prompt they cost a tenth of a cent
+    per thousand tokens: the live analysis keeps the same memory as before the gap."""
     llm = FakeLLM()
     agent, _, _ = make(memory_dir, llm)
     agent.handle(utter("Max", "Ich rechne gerade die Marge."))
     system = llm.calls[0].system
-    assert "Decision: Das Lumen-Abo kostet 30 Euro im Monat" in system
-    assert 'quote: "Ich schicke euch die Zahlen zur Marge bis Freitag."' in system  # commitments with their quotes
-    assert "Transcript:" not in system and "Ich hätte 25 Euro im Monat vorgeschlagen" not in system
-    assert len(system) - len(SYSTEM) < 1500  # the two demo meetings: about 1,200 characters of facts
+    assert system == SYSTEM.format(memory=Memory(memory_dir).as_context())
+    assert "Decision: Das Lumen-Abo kostet 30 Euro im Monat" in system and "Ich hätte 25 Euro im Monat vorgeschlagen" in system
 
 
 def test_the_meeting_prompt_stays_byte_identical_between_batches(memory_dir):
@@ -233,15 +283,8 @@ def test_the_meeting_prompt_stays_byte_identical_between_batches(memory_dir):
     assert llm.calls[0].user != llm.calls[1].user
 
 
-def test_ask_keeps_the_whole_memory(memory_dir):
-    llm = FakeLLM()
-    agent, _, _ = make(memory_dir, llm)
-    agent.handle({"cmd": "ask", "question": "Welcher Preis?"})
-    assert "Ich hätte 25 Euro im Monat vorgeschlagen" in llm.calls[0].system
-
-
 def _crowded(memory_dir):
-    """The demo meetings and 30 weeklies full of other Euro figures, as in a memory at the 60,000-character budget."""
+    """The demo meetings and 30 weeklies full of other Euro figures."""
     memory = Memory(memory_dir)
     day = dt.date(2026, 10, 5)
     for i in range(30):
@@ -251,16 +294,6 @@ def _crowded(memory_dir):
                                         Line("Jonas", "Wir haben 120 neue Testnutzer seit Montag.", 30)]))
         day -= dt.timedelta(days=7)
     return memory
-
-
-def test_recall_brings_the_old_30_euro_decision_when_someone_says_25(memory_dir):
-    for memory in (Memory(memory_dir), _crowded(memory_dir)):
-        llm = FakeLLM()
-        agent, _, _ = make(memory, llm)
-        agent.handle(utter("Max", "Wir waren doch bei 25 Euro im Monat, oder? Damit sieht die Marge ziemlich knapp aus."))
-        recall = llm.calls[0].user.split("# Earlier lines with the same words\n", 1)[1].split("\n\n", 1)[0]
-        assert "[2026-10-12-kickoff | 2026-10-12] Jonas: Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat." in recall
-        assert "Supportkosten pro Nutzer" not in recall.splitlines()[0]
 
 
 def test_recall_in_a_long_batch_keeps_each_utterances_best_line(memory_dir):
@@ -276,5 +309,5 @@ def test_recall_in_a_long_batch_keeps_each_utterances_best_line(memory_dir):
     recall = llm.calls[1].user.split("# Earlier lines with the same words\n", 1)[1].split("\n\n", 1)[0].splitlines()
     assert ["Supportkosten" in recall[0], "Anzeigen" in recall[1], "Testnutzer" in recall[2], "25 Euro" in recall[3]] \
         == [True] * 4  # each utterance's best line first, then each one's second
-    assert any("Lumen-Abo kostet 30 Euro" in line for line in recall)
     assert len(recall) <= 16 and sum(len(line) + 1 for line in recall) <= 4000 + 1
+    assert "Lumen-Abo kostet 30 Euro im Monat." in llm.calls[1].system  # and the decision's line in the memory

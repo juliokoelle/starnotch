@@ -128,8 +128,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         approvals.onEmpty = { [weak self] in
-            // The inbox stays open on what else waits (it closes itself when nothing does).
-            if self?.notchModel.interaction != .inbox { self?.notch.collapse() }
+            // The inbox stays open on what else waits (it closes itself when nothing does); the
+            // palette never showed the prompt, so it stays as it is.
+            guard let self, ![.inbox, .palette].contains(self.notchModel.interaction) else { return }
+            self.notch.collapse()
         }
         approvals.onChange = { [weak agents] requests in agents?.setPendingApprovals(requests) }
         agents.onLimitAlert = { [weak self] tool, window, used, pace in

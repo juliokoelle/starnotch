@@ -392,6 +392,17 @@ final class NotchController {
             if model.keyboardFocus { model.keyboardFocus = false }
             if panel.isKeyWindow { panel.resignKey() }
         }
+        // A prompt that arrived while the palette was open shows once it has closed.
+        if interaction != .palette, approvalWaiting {
+            approvalWaiting = false
+            if [.rest, .expanded].contains(interaction) {
+                Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard let self, [.rest, .expanded].contains(self.model.interaction), self.model.approvals?.current != nil else { return }
+                    self.showApproval()
+                }
+            }
+        }
         // The palette is gone once its island has closed or turned into something else.
         if interaction != .palette, model.palette != nil {
             Task { [weak self] in
@@ -507,8 +518,10 @@ final class NotchController {
 
     /// A permission prompt arrived: open on it, with keyboard focus for ↵ / ⌘↵ / esc.
     func showApproval() {
-        // The inbox shows it already, among the rest.
-        guard model.interaction != .inbox else { return }
+        // The inbox shows it already, among the rest; the palette keeps its query and focus, and
+        // the prompt waits until it closes.
+        if model.interaction == .palette { approvalWaiting = true }
+        guard ![.inbox, .palette].contains(model.interaction) else { return }
         expand(pinned: true)
         model.keyboardFocus = true
         panel.makeKey()
@@ -637,6 +650,9 @@ final class NotchController {
     }
 
     // MARK: Command palette and agents inbox
+
+    /// A permission prompt arrived while the palette was open.
+    private var approvalWaiting = false
 
     /// ⌃⌥K, or ⌘K while the island is open: the palette, or closed when it's showing.
     func togglePalette() {

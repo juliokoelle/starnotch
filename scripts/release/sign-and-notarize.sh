@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "$0")/../.." && pwd)"
 ENTITLEMENTS="${ENTITLEMENTS:-$HERE/Resources/Starnotch.entitlements}"
 sign() { codesign --force --timestamp --options runtime --sign "$DEVELOPER_ID" "$@"; }
 
-# Inside out: Sparkle's helpers and framework first, then the app.
+# Inside out: Sparkle's helpers and framework, the MediaRemote helper, then the app.
 if [[ -d "$APP/Contents/Frameworks/Sparkle.framework" ]]; then
     SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
     for helper in "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/XPCServices/Downloader.xpc" \
@@ -23,6 +23,10 @@ if [[ -d "$APP/Contents/Frameworks/Sparkle.framework" ]]; then
         [[ -e "$helper" ]] && sign "$helper"
     done
     sign "$SPARKLE"
+fi
+# The library /usr/bin/perl loads for Now Playing from any app (helpers/mediaremote).
+if [[ -e "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib" ]]; then
+    sign "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib"
 fi
 # The hook scripts are resources; the executable gets the entitlements.
 sign --entitlements "$ENTITLEMENTS" "$APP"

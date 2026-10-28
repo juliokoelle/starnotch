@@ -45,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let daily = DailyStore.shared
     /// Notes (vault strand): watches the notes folder, keeps Tara's snapshot and Today current.
     private var vaultLive: VaultLive?
+    // Command palette and agents inbox (strand cmdk).
+    private var paletteHotKey: HotKey?
+    private var agentsInboxHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -146,7 +149,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.notch.showApproval()
             }
         }
-        approvals.onEmpty = { [weak self] in self?.notch.collapse() }
+        approvals.onEmpty = { [weak self] in
+            // The inbox stays open on what else waits (it closes itself when nothing does); the
+            // palette never showed the prompt, so it stays as it is.
+            guard let self, ![.inbox, .palette].contains(self.notchModel.interaction) else { return }
+            self.notch.collapse()
+        }
         approvals.onChange = { [weak agents] requests in agents?.setPendingApprovals(requests) }
         agents.onLimitAlert = { [weak self] tool, window, used, pace in
             self?.notch.sneak(Sneak(visual: .symbol("gauge.with.dots.needle.67percent", tint: used >= 90 ? .critical : .waiting),
@@ -337,6 +345,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         startDaily(tools: tools, sample: sample)
+        // MARK: Command palette and agents inbox (strand cmdk)
+        // ⌃⌥K (and ⌘K while open) searches every module that is a `PaletteProvider`; ⌃⌥A works
+        // through prompts, questions, finished turns and failed loops, with its count in the ear.
+        let agentsInbox = AgentsInbox(approvals: approvals, agents: agents)
+        notchModel.inbox = agentsInbox
+        agents.inbox = agentsInbox
+        notch.paletteSources.persists = state.persists
+        notch.paletteSources.providers = [ClosurePaletteProvider { [weak self] _ in
+            guard let self else { return [] }
+            let setup: [(Onboarding.Step, String)] = [(.agents, "Set up your agents"), (.meetings, "Set up meetings and Tara's brain"),
+                                                      (.tools, "Choose tools"), (.tara, "Choose Tara's look")]
+            return [PaletteItem(id: "settings", title: Localization.string("Settings"), symbol: "gearshape", kind: .settings,
+                                keywords: ["preferences", "display", "quiet", "providers", "loops"],
+                                perform: { [weak self] in self?.settingsWindow.show() })]
+                + setup.map { step, title in
+                    PaletteItem(id: "setup:\(step.rawValue)", title: Localization.string(title), subtitle: Localization.string("Setup"),
+                                symbol: "sparkles", kind: .settings, keywords: ["onboarding", "setup"],
+                                perform: { [weak self] in self?.showSetup(at: step) })
+                }
+        }]
+        // `paletteSources.askTara` stays nil here: Ask Tara sets it in applyTools while its tool is on.
+        // The palette is core, like the island it opens from: ⌃⌥K always. ⌃⌥A follows the
+        // Agents tab (applyTools).
+        paletteHotKey = HotKey.controlOptionK { [weak self] in self?.notch.togglePalette() }
+        // MARK: end of strand cmdk
+
         applyTools()
         notch.inbox.loadPeople(from: people)
         music.onTrackChange = { [weak self, weak music] track in
@@ -557,6 +591,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchModel.requestCapture = capture ? { [weak self] in self?.notch.openCapture() } : nil
         captureHotKey = capture ? captureHotKey ?? HotKey.controlOptionN { [weak self] in self?.notch.openCapture() } : nil
         inboxHotKey = capture ? inboxHotKey ?? HotKey.controlOptionI { if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) } } : nil
+
+        // Agents inbox (strand cmdk): ⌃⌥A only while the Agents tab is shown.
+        let agentsShown = notchModel.modules.contains { $0.kind == .agents }
+        agentsInboxHotKey = agentsShown ? agentsInboxHotKey ?? HotKey.controlOptionA { [weak self] in self?.notch.toggleInbox() } : nil
+        // end of strand cmdk
 
         let awake = isOn(.keepAwake)
         system?.offersKeepAwake = awake

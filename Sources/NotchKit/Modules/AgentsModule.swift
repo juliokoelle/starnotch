@@ -54,6 +54,9 @@ final class AgentsModule: NotchModule {
     @ObservationIgnored var onLimitAlert: ((String, String, Double, String?) -> Void)?
     /// A loop finished (a new logged run or a push): for its sneak.
     @ObservationIgnored var onLoopFinished: ((AgentSnapshot.LoopStatus) -> Void)?
+    /// The agents inbox, for its count in the ear (set by the app).
+    @ObservationIgnored weak var inbox: AgentsInbox?
+    var inboxCount: Int { inbox?.count ?? 0 }
     @ObservationIgnored private var previewMode = false
 
     /// Idle sessions count as "waiting for you" this long after their last turn.
@@ -305,7 +308,7 @@ final class AgentsModule: NotchModule {
     /// Pending approvals: their sessions wait for the user (a hook beats the files).
     func setPendingApprovals(_ requests: [ApprovalRequest]) {
         let events = requests.compactMap { request in
-            request.agentID.map { AgentEvent(sessionID: $0, kind: .needsApproval("Approve: \(request.summary.isEmpty ? request.tool : request.summary)"), at: Date()) }
+            request.agentID.map { AgentEvent(sessionID: $0, kind: .needsApproval(AgentEvent.approvalPrefix + (request.summary.isEmpty ? request.tool : request.summary)), at: Date()) }
         }
         Task { [weak self] in
             guard let self else { return }
@@ -652,7 +655,7 @@ final class AgentsModule: NotchModule {
 
     var ambientPriority: Int {
         let now = Date()
-        if !finishedAt.isEmpty || snapshot.agents.contains(where: { mood(of: $0, now: now) != .idle }) { return 20 }
+        if !finishedAt.isEmpty || inboxCount > 0 || snapshot.agents.contains(where: { mood(of: $0, now: now) != .idle }) { return 20 }
         return failedLoops.isEmpty ? 0 : 10
     }
 
@@ -703,7 +706,7 @@ final class AgentsModule: NotchModule {
     /// A session waits for the user, or a loop failed today. Working alone doesn't count.
     var needsAttention: Bool {
         let now = Date()
-        return snapshot.agents.contains { mood(of: $0, now: now) == .waiting } || !failedLoops.isEmpty
+        return snapshot.agents.contains { mood(of: $0, now: now) == .waiting } || !failedLoops.isEmpty || inboxCount > 0
     }
 
     func openLoopsFolder() {
@@ -779,7 +782,13 @@ private struct AgentsTrailingEar: View {
                 Equalizer(color: track.color, playing: true, height: peek ? 11 : 9)
                     .transition(.blurSlide(scale: 0.6))
             }
-            content
+            // What waits in the inbox (⌃⌥A) takes the narrow ear; the peek shows it beside the figures.
+            let waiting = module.inboxCount
+            if waiting > 0 {
+                InboxCountBadge(count: waiting, large: peek)
+                    .transition(.blurSlide(scale: 0.6))
+            }
+            if waiting == 0 || peek { content }
         }
     }
 
@@ -826,6 +835,24 @@ private struct AgentsTrailingEar: View {
             .clipped()
             .help(others.map(\.project).joined(separator: ", "))
         }
+    }
+}
+
+/// How many things wait in the agents inbox: a small count in the waiting tint.
+private struct InboxCountBadge: View {
+    let count: Int
+    var large = false
+
+    var body: some View {
+        Text("\(count)")
+            .font(Theme.font(large ? 11.5 : 10.5, .bold).monospacedDigit())
+            .foregroundStyle(Color.black.opacity(0.85))
+            .padding(.horizontal, large ? 5 : 4)
+            .frame(minWidth: large ? 18 : 16, minHeight: large ? 18 : 16)
+            .background(Theme.waiting, in: Capsule())
+            .contentTransition(.numericText())
+            .help(Localization.string("Waiting in the inbox (⌃⌥A)"))
+            .accessibilityLabel(String(format: Localization.string("%d need you"), count))
     }
 }
 

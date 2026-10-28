@@ -71,7 +71,7 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 - Relay (Pro): end-to-end encrypted, opt-in. Carries approvals to the phone, and cloud sessions (claude.ai/code) into the notch.
 - Daily briefing in the notch: calendar, open commitments, overdue captures, agent results overnight.
 - Orchestrator: one agent that hands work to the others and reports in the notch.
-- Command palette across all modules.
+- Command palette across all modules (⌃⌥K, built). Core like the island it opens from, so it has no switch; the agents inbox (⌃⌥A) comes with the Agents tab.
 - Licensing: Free and Pro in the app, Stripe checkout, license key.
 
 ## Utilities: parity with Vorssaint and Notchy (Wave 2)

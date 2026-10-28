@@ -13,6 +13,12 @@ struct NotchRootView: View {
     var onCaptureSend: () -> Void = {}
     var onCaptureMic: () -> Void = {}
     var onCaptureEvent: () -> Void = {}
+    /// A palette row was clicked (or ↵): its index, and whether ⌘ was held.
+    var onPaletteActivate: (Int, Bool) -> Void = { _, _ in }
+    /// The inbox card's own button: ↵ (true) or ⌘↵, and the id of the item it shows.
+    var onInboxKey: (Bool, String) -> Void = { _, _ in }
+    /// The inbox ran out while open (the last prompt answered by click).
+    var onInboxEmpty: () -> Void = {}
 
     @Namespace private var namespace
     @FocusState private var focused: Bool
@@ -27,7 +33,7 @@ struct NotchRootView: View {
                 .background(
                     NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius)
                         .fill(Color.black)
-                        .shadow(color: .black.opacity(layout.presentation == .expanded ? 0.55 : 0),
+                        .shadow(color: .black.opacity([.expanded, .palette, .inbox].contains(layout.presentation) ? 0.55 : 0),
                                 radius: 22, y: 10)
                 )
                 .clipShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
@@ -38,7 +44,7 @@ struct NotchRootView: View {
                 .environment(\.handlePressed, model.handlePressed)
                 .environment(\.musicPlaying, model.music?.isPlaying == true)
                 .contentShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
-                .onTapGesture { if model.interaction != .expanded { onTapIsland() } }
+                .onTapGesture { if ![.expanded, .palette, .inbox].contains(model.interaction) { onTapIsland() } }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -69,6 +75,18 @@ struct NotchRootView: View {
                                 onSend: onCaptureSend, onMic: onCaptureMic, onEvent: onCaptureEvent)
                         .padding(.horizontal, layout.topRadius)
                         .transition(.blurSlide(y: -12, scale: 0.94))
+                }
+            case .palette:
+                if let palette = model.palette {
+                    PaletteView(palette: palette, notch: notch, onActivate: onPaletteActivate)
+                        .padding(.horizontal, layout.topRadius)
+                        .transition(.blurSlide(y: -12, scale: 0.94))
+                }
+            case .inbox:
+                if let inbox = model.inbox {
+                    InboxView(inbox: inbox, notch: notch, onKey: onInboxKey, onEmpty: onInboxEmpty)
+                        .padding(.horizontal, layout.topRadius)
+                        .transition(.blurSlide(y: -14, scale: 0.94))
                 }
             case .sneak:
                 VStack(spacing: 0) {

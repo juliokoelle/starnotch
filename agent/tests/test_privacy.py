@@ -91,3 +91,11 @@ def test_connectors_read_with_allow(tmp_path):
     write(tmp_path / "a.json", items=[{"title": "x"}])
     write(tmp_path / "b.json", items=[{"title": "y"}])
     assert [i.title for i in linked.read(tmp_path, allow=lambda stem: stem != "a")] == ["y"]
+
+
+def test_captures_kept_only_as_a_safety_net_are_not_tara_s(tmp_path):
+    import captures as quick
+    queue = tmp_path / "q.jsonl"
+    queue.write_text(json.dumps({"id": "a", "route": "note", "text": "kept"}) + "\n"
+                     + json.dumps({"id": "b", "route": "note", "text": "while paused", "memory": False}) + "\n", encoding="utf-8")
+    assert [c.id for c in quick.read(queue)] == ["a"]

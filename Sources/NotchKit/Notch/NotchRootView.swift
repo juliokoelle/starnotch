@@ -300,6 +300,7 @@ private struct TabStrip: View {
                 .accessibilityLabel(module.kind.title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
+            if showsPlus && model.memoryPaused { paused }
             if showsPlus { plus }
             if showsMoon { moon }
         }
@@ -319,6 +320,22 @@ private struct TabStrip: View {
             .buttonStyle(PressScale())
             .help("Quick capture (⌃⌥N)")
         }
+    }
+
+    /// Tara's memory is paused; a click resumes it.
+    @ViewBuilder var paused: some View {
+        Button { model.resumeMemory?() } label: {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 28, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .transition(.opacity)
+        .help("Tara's memory is paused. Click to resume")
+        .accessibilityLabel(Text("Tara's memory is paused"))
+        .accessibilityHint(Text("Resumes it"))
     }
 
     /// Watch mode on or off.

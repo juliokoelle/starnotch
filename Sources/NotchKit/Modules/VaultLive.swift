@@ -15,6 +15,8 @@ final class VaultLive {
     var onChange: (() -> Void)?
     /// The folder was set, changed or removed: whether Today is available may have changed.
     var onReconfigure: (() -> Void)?
+    /// Tara's privacy switches: no new snapshot while paused or with notes off.
+    var privacy: () -> MemoryPrivacy = { MemoryPrivacy() }
     private var watcher: NoteWatcher?
     private var watchedPath: String?
     private var pending: Task<Void, Never>?
@@ -57,7 +59,9 @@ final class VaultLive {
         pending = Task { [weak self] in
             if delay > .zero { try? await Task.sleep(for: delay) }
             guard !Task.isCancelled, let connector = self?.connector else { return }
-            await Task.detached(priority: .utility) { connector.writeSnapshot() }.value
+            if self?.privacy().records(.notes, at: Date()) == true {
+                _ = await Task.detached(priority: .utility) { connector.writeSnapshot() }.value
+            }
             self?.onChange?()
         }
     }

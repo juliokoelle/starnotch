@@ -44,8 +44,13 @@ uv run python jamie_sync.py --logout
 `DIR` defaults to `~/Library/Application Support/Starnotch/memory/`, one JSON file per meeting
 (schema in `memory.py`). `--offline` runs the agent without Claude, on simple built-in rules.
 
+The agent follows the privacy switches in `privacy.json` (README › Privacy switches): while Tara's memory is paused or
+meetings are off, utterances are dropped and `save` answers `{"type": "status", "state": "not_saved", "message": …}`;
+a source switched off is left out of `ask` and `prep`.
+
 The agent also reads what the user noted with quick capture (⌃⌥N): the app's `capture-queue.jsonl` in the same
-folder (`--captures` points elsewhere, `--captures ''` ignores it). Those tasks, questions and notes, with their
+folder (`--captures` points elsewhere, `--captures ''` ignores it). Lines with `"memory": false` (kept only as a
+safety net while Tara's memory was paused) are skipped. Those tasks, questions and notes, with their
 dates and due dates, count as memory for `ask`, the live analysis and the prep card. With `--watch-captures`,
 each new **question** typed into quick capture is answered like an `ask`, with `"reply_to": "capture:<id>"`.
 

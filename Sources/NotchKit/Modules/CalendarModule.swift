@@ -46,6 +46,8 @@ final class CalendarModule: NotchModule {
     private(set) var access: Access = .unknown
     /// Sneak peeks go through the shell.
     @ObservationIgnored var onReminder: ((Meeting) -> Void)?
+    /// Today's events were read from the calendar (for Tara's snapshot; never with sample data).
+    @ObservationIgnored var onToday: (([Meeting]) -> Void)?
 
     @ObservationIgnored private let mock: Bool
     /// Seconds until the first sample meeting.
@@ -117,6 +119,7 @@ final class CalendarModule: NotchModule {
                 upcoming = fetch()
                 let start = Calendar.current.startOfDay(for: Date())
                 today = events(from: start, to: start.addingTimeInterval(86_400))
+                onToday?(today)
                 let weekday = (Calendar.current.component(.weekday, from: start) + 5) % 7
                 let monday = start.addingTimeInterval(-Double(weekday) * 86_400)
                 let all = events(from: monday, to: monday.addingTimeInterval(7 * 86_400))

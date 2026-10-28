@@ -16,6 +16,8 @@ The Swift app starts these programs and reads their JSON lines; [PROTOCOL.md](PR
 | `captures.py` | Reads Starnotch's quick-capture queue, so the agent knows the user's own tasks, questions and notes |
 | `connectors.py` | Reads the snapshots other tools leave in `connectors/*.json` (a vault's tasks and today's note), for Ask Tara |
 | `feed.py` | The full text behind each notch card: a page on 127.0.0.1 (a click on the card opens it) and `Meeting-Agent.md` |
+| `privacy.py` | Reads the app's privacy switches (`privacy.json`): a pause, sources switched off, the ignore list |
+| `memory_mcp.py` | Tara's memory as a read-only MCP server for AI apps (Claude Desktop, Claude Code, Cursor, ChatGPT) |
 | `notch_bridge.py` | Shows the agent's events in the running Starnotch app, through its local status API (no Swift change) |
 | `demo/` | Two made-up meetings, a script that replays a third one, and a macOS script that turns it into audio |
 
@@ -195,3 +197,46 @@ claude mcp add --scope user starnotch -- uv run --directory "$HOME/Library/Appli
 Other clients (Cursor, VS Code, Gemini CLI, Claude Desktop) take the same command in their MCP
 config. Questions travel over the app's approvals socket and queue with permission requests; only
 a click answers yes.
+
+## Tara's memory in every AI app
+
+`memory_mcp.py` is a second, read-only MCP server, `starnotch-memory`: any AI app on the Mac can look things up in
+Tara's memory. Five tools, every result with its `source` (`meeting`, `capture`, `note`, `calendar`, `session`), `id`
+and a `link` when there is one:
+
+| Tool | Returns |
+|---|---|
+| `search_memory(query, sources?, limit?)` | Meeting summaries, decisions, commitments and transcript lines, captures, notes and recent Claude Code sessions that share words with the query, best first |
+| `get_meeting(meeting_id)` | One meeting in full: participants, summary, notes, decisions and commitments with quotes, transcript (cut at about 40,000 characters) |
+| `open_commitments(person?)` | Open promises from meetings and captured tasks, with due and overdue |
+| `recent_decisions(days?, person?)` | Decisions from the meetings of the last days, newest first |
+| `today()` | Today's calendar (`connectors/calendar.json`, written by the app), tasks due or overdue, commitments due |
+
+Settings › Setup › "Tara's memory in your AI apps" registers it, one switch per app, each with a backup and an exact
+Remove: Claude Desktop (`claude_desktop_config.json`), Claude Code (`claude mcp add --scope user`), Cursor
+(`~/.cursor/mcp.json`) and ChatGPT's Mac app. ChatGPT runs its local tools through Codex, so that one is a marked
+block in `~/.codex/config.toml` (Codex sees it too); ChatGPT on the web can't reach a server on the Mac. By hand:
+
+```sh
+claude mcp add --scope user starnotch-memory -- uv run --directory "$HOME/Library/Application Support/Starnotch/agent" python memory_mcp.py
+```
+
+### Privacy switches
+
+Settings › Tara's memory mirrors its switches to `privacy.json` in the app's folder; `privacy.py` reads it on every
+use, so a change counts at once (`STARNOTCH_PRIVACY` names another file; the tests use their own).
+
+- **Pause** (1 hour, until tomorrow, until resumed): nothing new is recorded. The agent drops what it hears and
+  answers `save` with `{"type": "status", "state": "not_saved"}`, `jamie_sync.py` prints `{"state": "paused"}` and
+  syncs nothing, the app writes no capture, vault or calendar snapshot and keeps no clipboard copy. What Tara has stays
+  searchable.
+- **A source switched off** (`meetings`, `captures`, `notes`, `clipboard`, `sessions`) is neither recorded nor used:
+  Ask Tara, the prep card and the memory server leave it out, and the server lists it in `left_out`.
+  `connectors/calendar.json` answers to `meetings`, every other snapshot to `notes`.
+- **Ignore list**: the password apps always, plus the user's apps. Nothing copied in them is kept, and Tara takes no
+  picture of their windows.
+- **Delete** per source removes Starnotch's own files only (the meetings and their feed, the capture queue, the
+  snapshots, the resume scripts); the Jamie sync state stays, so deleted meetings don't come back by themselves.
+
+A capture made while paused goes to the Markdown inbox only; if that fails, the queue keeps it with `"memory": false`
+so it isn't lost, and Tara never reads it.

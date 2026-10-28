@@ -57,6 +57,8 @@ final class ToolsModule: NotchModule {
     @ObservationIgnored var onCountdownDone: ((TimeInterval) -> Void)?
     /// Watch the clipboard only while the module is switched on.
     @ObservationIgnored var isEnabled: () -> Bool = { true }
+    /// Tara's privacy switches: nothing is kept while paused, with the clipboard off, or from an ignored app.
+    @ObservationIgnored var privacy: () -> MemoryPrivacy = { MemoryPrivacy() }
     @ObservationIgnored private var watcher: Task<Void, Never>?
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var lastChange = NSPasteboard.general.changeCount
@@ -81,7 +83,9 @@ final class ToolsModule: NotchModule {
         guard isEnabled() else { return }
         let types = board.types?.map(\.rawValue) ?? []
         let front = NSWorkspace.shared.frontmostApplication
-        guard !ClipboardHistory.shouldSkip(types: types, app: front?.bundleIdentifier),
+        let privacy = privacy()
+        guard privacy.records(.clipboard, at: Date(), app: front?.bundleIdentifier),
+              !ClipboardHistory.shouldSkip(types: types, app: front?.bundleIdentifier, ignored: privacy.ignoredBundleIDs),
               let text = board.string(forType: .string) else { return }
         withAnimation(Theme.snappy) { _ = history.add(text, source: front?.localizedName, at: Date()) }
     }
@@ -108,6 +112,12 @@ final class ToolsModule: NotchModule {
 
     func clearHistory() {
         withAnimation(Theme.snappy) { history.clear() }
+    }
+
+    /// Settings › Tara's memory › Delete: everything, the pinned items too.
+    func forgetHistory() {
+        history = ClipboardHistory()
+        selected = nil
     }
 
     // MARK: Timer

@@ -26,7 +26,9 @@ final class PreviewDirector {
                         // Media strand: synced lyrics in the panel and on hover, the mixer.
                         "np-lyrics", "np-peek-lyrics", "np-mixer",
                         // Strand agents.
-                        "agents-more", "approval-cursor", "setup-agents"]
+                        "agents-more", "approval-cursor", "setup-agents",
+                        // Tara's memory: paused, with the switch in the System tab and the badge beside the tabs.
+                        "memory-paused", "memory-settings", "memory-settings-paused"]
 
     let notch: NotchController
     let agents: AgentsModule
@@ -383,6 +385,19 @@ final class PreviewDirector {
             return
         }
         if name.hasPrefix("pack-sheet") { PackSheet.show(name); return }
+        if name == "memory-paused" {
+            // Tara's memory paused: the System tab's switch lit, the badge beside the tabs.
+            useSystemSample(tight: false)
+            agents.usePreview(Self.snapshot(agentsActive: false))
+            system?.battery = BatteryState(percent: 82, charging: true, pluggedIn: true, minutesLeft: 35)
+            system?.memoryPaused = true
+            notch.model.memoryPaused = true
+            Task {
+                await pause(0.8)
+                notch.expand(.system, pinned: true)
+            }
+            return
+        }
         if name == "extras" {
             // Battery, keep awake, the camera in use by a call, a long build in the terminal.
             useSystemSample(tight: false)

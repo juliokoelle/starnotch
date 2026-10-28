@@ -383,6 +383,10 @@ final class SetupCenter {
             .init(item: .launchAtLogin, at: now),
             .init(item: .calendar, at: now, note: "Allowed"),
             .init(item: .lidAwake, at: now, note: "\(LidAwakeCommands.ruleFile): pmset -a disablesleep 1 and 0 without a password"),
+            .init(item: .memoryClaudeDesktop, at: now, backup: "backups/claude-desktop-config.json-20261024-101500",
+                  note: "Quit and reopen Claude Desktop."),
+            .init(item: .memoryChatGPT, at: now, backup: "backups/codex-config.toml-20261024-101500",
+                  note: "Quit and reopen ChatGPT. Codex reads it too."),
         ])
     }
 }

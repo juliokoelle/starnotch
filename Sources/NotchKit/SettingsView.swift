@@ -65,6 +65,14 @@ struct SettingsView: View {
                 }
             }
 
+            Section {
+                MemorySettings(state: state, setup: setup, openSetup: openSetup)
+            } header: {
+                Text("Tara's memory")
+            } footer: {
+                Text(MemorySettings.footer).foregroundStyle(.secondary)
+            }
+
             if let setup {
                 Section {
                     SetupLedgerList(center: setup, openSetup: openSetup)

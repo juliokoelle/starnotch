@@ -15,6 +15,8 @@ final class CaptureInbox {
     nonisolated static var queueFile: URL { Brand.supportFolder.appending(path: "capture-queue.jsonl") }
 
     private(set) var people: [Person] = []
+    /// Tara's privacy switches (set by the app).
+    var privacy: () -> MemoryPrivacy = { MemoryPrivacy() }
 
     /// Known people for the parser, from the `PeopleProvider` connector if there is one.
     func loadPeople(from provider: (any PeopleProvider)? = Runtime.people) {
@@ -36,7 +38,11 @@ final class CaptureInbox {
         if let file = Runtime.captureMarkdownFile, Self.appendMarkdown(capture, to: file) {
             outcome = .delivered
         }
-        Self.append([
+        // Paused, or captures switched off: Tara doesn't keep it. Only when the Markdown inbox
+        // didn't take it does the queue keep it anyway, marked as not Tara's, so it isn't lost.
+        let remembers = privacy().records(.captures, at: now)
+        guard remembers || outcome != .delivered else { return outcome }
+        var record: [String: Any] = [
             "id": UUID().uuidString,
             "created": ISO8601DateFormatter().string(from: now),
             "route": capture.route.rawValue,
@@ -44,7 +50,9 @@ final class CaptureInbox {
             "due": capture.due as Any,
             "people": capture.people.map(\.slug),
             "delivered": outcome == .delivered,
-        ])
+        ]
+        if !remembers { record["memory"] = false }
+        Self.append(record)
         return outcome
     }
 

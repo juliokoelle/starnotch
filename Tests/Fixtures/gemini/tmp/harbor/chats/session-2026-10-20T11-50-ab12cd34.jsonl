@@ -1,4 +1,4 @@
-{"sessionId":"ab12cd34-0000-4000-8000-0000000000ge","projectHash":"0000000000000000000000000000000000000000000000000000000000000000","startTime":"2026-10-20T11:50:00.000Z","lastUpdated":"2026-10-20T11:50:00.000Z","kind":"main","directories":["/Users/me/projects/harbor"]}
+{"sessionId":"ab12cd34-0000-4000-8000-0000000000ge","projectHash":"0000000000000000000000000000000000000000000000000000000000000000","startTime":"2026-10-20T11:50:00.000Z","lastUpdated":"2026-10-20T11:50:00.000Z","kind":"main"}
 {"id":"m1","timestamp":"2026-10-20T11:50:10.000Z","type":"user","content":[{"text":"Why is the report page slow?"}]}
 {"$set":{"lastUpdated":"2026-10-20T11:50:10.000Z"}}
 {"id":"m2","timestamp":"2026-10-20T11:51:00.000Z","type":"gemini","content":"","toolCalls":[{"id":"c1","name":"read_file","args":{"absolute_path":"/Users/me/projects/harbor/ReportView.swift"},"status":"success"}],"thoughts":[],"tokens":{"input":21500,"output":120,"cached":0,"thoughts":0,"tool":0,"total":21620},"model":"gemini-3-pro"}

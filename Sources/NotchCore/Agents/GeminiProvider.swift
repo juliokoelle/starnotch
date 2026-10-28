@@ -45,7 +45,8 @@ public actor GeminiProvider: AgentProvider, HookSessionSource {
         for project in projects {
             let chats = project.appending(path: "chats")
             guard let mtime = ClaudeCodeProvider.mtime(chats), now.timeIntervalSince(mtime) < Self.candidateWindow else { continue }
-            // Older versions keep the folder in a file next to the chats.
+            // Gemini keeps the project's folder in a file next to the chats; only subagent chats
+            // name their folders in their own metadata (`directories`).
             let rootFile = (try? String(contentsOf: project.appending(path: ".project_root"), encoding: .utf8))?
                 .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             for file in (try? fm.contentsOfDirectory(at: chats, includingPropertiesForKeys: nil)) ?? []
@@ -75,8 +76,8 @@ public actor GeminiProvider: AgentProvider, HookSessionSource {
     }
 }
 
-/// One Gemini CLI chat recording (JSONL): a metadata record (`sessionId`, `startTime`,
-/// `directories`), message records (`type` user, gemini, info …; `toolCalls`, `tokens`, `model`)
+/// One Gemini CLI chat recording (JSONL): a metadata record (`sessionId`, `startTime`, and
+/// `directories` in subagent chats), message records (`type` user, gemini, info …; `toolCalls`, `tokens`, `model`)
 /// and `$set` updates (`summary`, `lastUpdated`).
 public struct GeminiChat: Equatable, Sendable {
     public var sessionID: String?

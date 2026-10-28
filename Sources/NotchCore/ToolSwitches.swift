@@ -161,6 +161,8 @@ public enum TaraBrain: String, Codable, CaseIterable, Sendable {
     case claudeCode = "claude-code"
     /// The user's own Anthropic API key.
     case api
+    /// Apple's on-device model (Apple Intelligence, macOS 26): free, simpler answers.
+    case apple
     /// Simple rules, no model.
     case rules
 }

@@ -654,15 +654,17 @@ enum BrainInfo {
         case .auto: "Automatic"
         case .claudeCode: "Claude subscription"
         case .api: "Own API key"
+        case .apple: "Apple Intelligence (on this Mac, free)"
         case .rules: "Simple rules"
         }
     }
 
     static func line(_ brain: TaraBrain) -> String {
         switch brain {
-        case .auto: "Claude Code when it's there, else an API key, else simple rules."
+        case .auto: "Claude Code when it's there, else an API key, else Apple Intelligence, else simple rules."
         case .claudeCode: "Runs through Claude Code on your plan; no API credits."
         case .api: "Your Anthropic key, billed per use."
+        case .apple: "Apple's model on this Mac, free; simpler answers than Claude."
         case .rules: "No model. Works offline and catches the obvious."
         }
     }

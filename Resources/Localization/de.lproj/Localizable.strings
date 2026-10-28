@@ -187,7 +187,6 @@
 "Claude subscription" = "Claude-Abo";
 "Own API key" = "Eigener API-Schlüssel";
 "Simple rules" = "Einfache Regeln";
-"Claude Code when it's there, else an API key, else simple rules." = "Claude Code, wenn vorhanden, sonst ein API-Schlüssel, sonst einfache Regeln.";
 "Runs through Claude Code on your plan; no API credits." = "Läuft über Claude Code mit deinem Plan; keine API-Credits.";
 "Your Anthropic key, billed per use." = "Dein Anthropic-Schlüssel, nach Nutzung abgerechnet.";
 "No model. Works offline and catches the obvious." = "Kein Modell. Läuft offline und erkennt das Offensichtliche.";
@@ -222,7 +221,6 @@
 "Main character" = "Hauptfigur";
 "Change" = "Ändern";
 "A tool is off until you switch it on; the notch shows only the ones that are on. Tabs hide themselves when what they need isn't on this Mac." = "Ein Tool ist aus, bis du es einschaltest; die Notch zeigt nur, was an ist. Tabs blenden sich aus, wenn auf diesem Mac fehlt, was sie brauchen.";
-"The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Automatic uses Claude Code when it's there, else an Anthropic key, else simple rules." = "Die Schlüssel bleiben auf diesem Mac, in agent.env im Ordner der App, nur für dich lesbar. In ~/.zshrc exportierte Schlüssel gehen auch. Automatisch nimmt Claude Code, wenn vorhanden, sonst einen Anthropic-Schlüssel, sonst einfache Regeln.";
 "Drop files here. Drag them out again or AirDrop them." = "Dateien hier ablegen. Wieder herausziehen oder per AirDrop senden.";
 
 /* Strand daily: weather, day progress, notes, sleep and recovery */
@@ -530,3 +528,15 @@
 "%lld calls" = "%lld Aufrufe";
 "%@ · %@ tokens · ≈ %@ at API prices" = "%1$@ · %2$@ Tokens · ≈ %3$@ zu API-Preisen";
 "Meeting analysis" = "Meeting-Analyse";
+/* Wave 3: Apple Intelligence as Tara's free brain */
+"Apple Intelligence (on this Mac, free)" = "Apple Intelligence (auf diesem Mac, kostenlos)";
+"Apple's model on this Mac, free; simpler answers than Claude." = "Apples Modell auf diesem Mac, kostenlos; einfachere Antworten als mit Claude.";
+"Claude Code when it's there, else an API key, else Apple Intelligence, else simple rules." = "Claude Code, wenn vorhanden, sonst ein API-Schlüssel, sonst Apple Intelligence, sonst einfache Regeln.";
+"The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Automatic uses Claude Code when it's there, else an Anthropic key, else Apple Intelligence, else simple rules." = "Die Schlüssel bleiben auf diesem Mac, in agent.env im Ordner der App, nur für dich lesbar. In ~/.zshrc exportierte Schlüssel gehen auch. Automatisch nimmt Claude Code, wenn vorhanden, sonst einen Anthropic-Schlüssel, sonst Apple Intelligence, sonst einfache Regeln.";
+"Checking…" = "Wird geprüft …";
+"Ready" = "Bereit";
+"Not enabled: System Settings › Apple Intelligence & Siri" = "Nicht eingeschaltet: Systemeinstellungen › Apple Intelligence & Siri";
+"Downloading the model" = "Das Modell wird geladen";
+"Not supported on this Mac" = "Auf diesem Mac nicht unterstützt";
+"Not in this build" = "In diesem Build nicht enthalten";
+"Answers are simpler than with Claude, and live meetings run on simple rules." = "Die Antworten sind einfacher als mit Claude, und laufende Meetings nutzen einfache Regeln.";

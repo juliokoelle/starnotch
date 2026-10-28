@@ -333,3 +333,55 @@ def test_a_short_quote_with_its_speaker_matches_nothing(memory_dir):
     memory = Memory(memory_dir)
     assert memory.find_quote("Lisa: Ja") is None  # "ja" would be inside "Jahr"
     assert memory.find_quote("Lisa: Im nächsten Jahr")[1].text.startswith("Im nächsten Jahr")
+
+
+# A clean reply: the small model pastes transcript lines and labels into its answer now and then
+
+
+def test_quoted_transcript_lines_labels_and_speaker_tags_leave_the_answer(memory_dir):
+    llm = FakeLLM({"answer": "Der Preis ist 30 Euro im Monat, im Meeting wurde erwähnt: 'Speaker 0: Also, ich habe "
+                             "25 Euro vorgeschlagen, das war zu wenig.' (meeting), sowie die Marge bis Freitag.",
+                   "sources": [{"kind": "meeting", "id": "2026-10-12-kickoff",
+                                "quote": "Jonas: Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat."}]})
+    agent, _ = on_device(memory_dir, llm)
+    answer = agent.ask("Was haben wir beim Preis entschieden?")
+    assert answer["text"] == "Der Preis ist 30 Euro im Monat, sowie die Marge bis Freitag."
+    assert answer["sources"][0]["quote"] == "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat."
+
+
+@pytest.mark.parametrize("raw, clean", [
+    # a whole line from the memory in German quotes, with its speaker: gone, and the words that led into it
+    ("30 Euro. Jonas sagte dazu: „Jonas: Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.“",
+     "30 Euro."),
+    # a line from the memory without a speaker, in straight quotes
+    ('Lisa bucht den Raum. "Ich buche den Raum für den Launch-Workshop." (Meeting)', "Lisa bucht den Raum."),
+    # loose speaker tags and labels
+    ("Speaker 1: Max schickt die Zahlen bis Freitag (capture).", "Max schickt die Zahlen bis Freitag."),
+    ("Sprecher 2: Lisa ist für 30 Euro (note) (meeting).", "Lisa ist für 30 Euro."),
+    # a short quote of a few words keeps its words, without the marks
+    ("Das Abo kostet „30 Euro im Monat“.", "Das Abo kostet 30 Euro im Monat."),
+    # quotes that aren't from the meetings and apostrophes stay
+    ("Der Raum heißt „Ahorn“. It's booked, don't worry.", "Der Raum heißt „Ahorn“. It's booked, don't worry."),
+    # an answer that is nothing but a quoted line keeps its words rather than vanish
+    ("'Jonas: Super. Nächste Woche gleiche Zeit, dann schauen wir auf den Stand.'",
+     "Super. Nächste Woche gleiche Zeit, dann schauen wir auf den Stand."),
+])
+def test_the_on_device_answer_reads_as_a_reply(memory_dir, raw, clean):
+    llm = FakeLLM({"answer": raw, "sources": []})
+    agent, _ = on_device(memory_dir, llm)
+    assert agent.ask("Was ist mit dem Lumen-Abo?")["text"] == clean
+
+
+def test_the_instructions_keep_quotes_in_the_sources(memory_dir):
+    llm = FakeLLM({"answer": "30 Euro.", "sources": []})
+    agent, _ = on_device(memory_dir, llm)
+    agent.ask("Was haben wir beim Preis entschieden?")
+    assert "in your own words" in llm.calls[0].system and "quotes go only in the sources" in llm.calls[0].system
+
+
+def test_claude_answers_are_left_as_they_are(memory_dir):
+    raw = "Im Meeting wurde erwähnt: 'Speaker 0: Also, ich habe 25 Euro vorgeschlagen.' (meeting)"
+    llm = FakeLLM({"answer": raw, "sources": []})
+    agent = Agent(Memory(memory_dir), llm, [].append, TODAY, brain="claude-code")
+    assert agent.ask("Was haben wir beim Preis entschieden?")["text"] == raw
+    assert "in your own words" not in llm.calls[0].system

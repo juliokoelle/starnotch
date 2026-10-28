@@ -527,6 +527,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         system?.offersKeepAwake = awake
         if !awake { keepAwake.set(false) }
 
+        // Media strand: synced lyrics, the lyric line on hover and volume per app, inside Music.
+        if let music = allModules.lazy.compactMap({ $0 as? NowPlayingModule }).first {
+            music.lyricsOn = isOn(.lyrics)
+            music.lyricsOnHover = isOn(.lyricsOnHover)
+            music.mixerOn = isOn(.appVolume) && AppVolumeMixer.isSupported
+        }
+
         guard let tools else { return }
         let tabs: [(ToolsModule.Tab, ToolFeature)] = [(.clipboard, .clipboard), (.timer, .timers), (.shelf, .shelf)]
         tools.tabs = tabs.filter { isOn($0.1) }.map(\.0)

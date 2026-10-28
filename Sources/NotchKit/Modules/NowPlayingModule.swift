@@ -5,8 +5,11 @@ import SwiftUI
 
 /// Now Playing in three stages: ears (cover, equalizer, no text), hover (cover, title, one play
 /// button, hairline progress), panel (cover with source badge and glow, scrubber, controls).
-/// The cover's dominant color is the only extra color. Live data comes from Spotify and Music
-/// via AppleScript (`PlayerBridge`); browsers come later.
+/// The cover's dominant color is the only extra color. Live data comes from any app through
+/// MediaRemote (`MediaRemoteBridge`: Spotify, Music, Podcasts, VLC, IINA, YouTube or SoundCloud in
+/// a browser), with AppleScript for Spotify and Music as the fallback (`PlayerBridge`).
+/// Two tools sit inside: synced lyrics (one line in the panel, optionally on hover) and a mixer
+/// with each app's volume, in a popover.
 @MainActor
 @Observable
 final class NowPlayingModule: NotchModule {
@@ -19,6 +22,10 @@ final class NowPlayingModule: NotchModule {
         var cover: NSImage
         var source: PlayerStatus.Source?
         var album = ""
+        /// The app that plays (its icon is the cover's badge).
+        var appID: String?
+        /// From MediaRemote: controls go there instead of AppleScript.
+        var remote = false
     }
 
     let kind = ModuleKind.nowPlaying
@@ -27,69 +34,165 @@ final class NowPlayingModule: NotchModule {
     private(set) var track: Track?
     private(set) var isPlaying = false
     private(set) var position: TimeInterval = 0
+    /// When `position` was true; with `isPlaying`, the position at any moment (lyrics).
+    @ObservationIgnored private var positionDate = Date()
     /// +1 next, -1 previous: content slides that way.
     private(set) var direction: CGFloat = 1
     let cast: AvatarCast
     /// Output device and volume (CoreAudio).
     let output = AudioOutput()
+    /// Volume per app (the App volume tool).
+    let mixer = AppVolumeMixer()
     /// The output list, floating over the card. While it shows, the island holds its lock so
     /// it doesn't collapse when the pointer wanders; a click outside closes the list.
     var showsOutputs = false {
         didSet {
             guard showsOutputs != oldValue else { return }
-            if showsOutputs {
-                outputLock = IslandLock.shared.acquire("output list") { [weak self] in
-                    withAnimation(Theme.snappy) { self?.showsOutputs = false }
-                }
-            } else if let outputLock {
-                self.outputLock = nil
-                IslandLock.shared.release(outputLock)
-            }
+            if showsOutputs { showsMixer = false }
+            lock(showsOutputs, "output list", token: &outputLock) { [weak self] in self?.showsOutputs = false }
+        }
+    }
+    /// The mixer, floating over the card like the output list.
+    var showsMixer = false {
+        didSet {
+            guard showsMixer != oldValue else { return }
+            if showsMixer { showsOutputs = false; mixer.reload() }
+            lock(showsMixer, "mixer", token: &mixerLock) { [weak self] in self?.showsMixer = false }
         }
     }
     @ObservationIgnored private var outputLock: Int?
+    @ObservationIgnored private var mixerLock: Int?
     @ObservationIgnored var onTrackChange: ((Track) -> Void)?
+
+    /// Tools, set from the Tools gallery.
+    var lyricsOn = false {
+        didSet { if lyricsOn != oldValue { loadLyrics() } }
+    }
+    var lyricsOnHover = false
+    var mixerOn = false {
+        didSet {
+            guard mixerOn != oldValue else { return }
+            if mixerOn { if !mock { mixer.start() } } else { showsMixer = false; mixer.stop() }
+        }
+    }
+    /// The current track's synced lyrics, when the tool is on and LRCLIB has them.
+    private(set) var lyrics: SyncedLyrics?
+    @ObservationIgnored private let lyricsStore = LyricsStore()
+    @ObservationIgnored private var lyricsTask: Task<Void, Never>?
 
     @ObservationIgnored private var mockTracks: [Track] = []
     @ObservationIgnored private var mockIndex = 0
+    @ObservationIgnored private var mock = false
     @ObservationIgnored private var clock: Task<Void, Never>?
     @ObservationIgnored private var live = false
     @ObservationIgnored private var lastStatus: PlayerStatus?
+    @ObservationIgnored private let remote = MediaRemoteBridge()
+    @ObservationIgnored private var remoteCover: String?
+    /// After a click, the player's old state still comes in for a moment: it doesn't undo the click.
+    @ObservationIgnored private var holdPlayUntil = Date.distantPast
+    @ObservationIgnored private var pendingSeek: (target: TimeInterval, at: Date)?
+    @ObservationIgnored private var ticks = 0
 
     init(cast: AvatarCast) {
         self.cast = cast
     }
 
+    private func lock(_ on: Bool, _ reason: String, token: inout Int?, dismiss: @escaping () -> Void) {
+        if on {
+            token = IslandLock.shared.acquire(reason) { withAnimation(Theme.snappy) { dismiss() } }
+        } else if let held = token {
+            token = nil
+            IslandLock.shared.release(held)
+        }
+    }
+
     // MARK: Sources
 
-    /// Recordings: two invented tracks with covers drawn in code.
+    /// Recordings: two invented tracks with covers drawn in code, invented lyrics, sample apps.
     func start() {
+        mock = true
         mockTracks = MockCovers.tracks()
         track = mockTracks[0]
         isPlaying = true
-        position = 47
+        setPosition(47)
+        lyrics = MockCovers.lyrics(for: mockTracks[0].id)
+        mixer.stop()
+        mixer.usePreview()
         clock?.cancel()
         clock = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, self.isPlaying, let track = self.track else { continue }
-                self.position += 0.5
+                self.setPosition(self.position + 0.5)
                 if self.position >= track.duration { self.next() }
             }
         }
     }
 
-    /// Spotify and Music, polled every 1.5 s while one of them runs. Nothing is sent to an app
-    /// that isn't running, so the Automation prompt appears only once the user plays music.
+    /// Any app through MediaRemote, updated as it changes; Spotify and Music through AppleScript
+    /// when MediaRemote has nothing (or isn't there), polled every 1.5 s while one of them runs.
+    /// Nothing is sent to an app that isn't running, so the Automation prompt appears only once
+    /// the user plays music there and MediaRemote can't see it.
     func startLive() {
         live = true
+        remote.onUpdate = { [weak self] in self?.refresh(fromRemote: true) }
+        remote.start()
         clock?.cancel()
         clock = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.poll()
-                try? await Task.sleep(for: .milliseconds(1500))
+                guard let self else { return }
+                self.ticks += 1
+                if self.remoteSnapshot != nil {
+                    self.refresh(fromRemote: false)
+                } else if self.ticks % 3 == 0 || self.track?.remote == true {
+                    await self.poll()
+                }
+                try? await Task.sleep(for: .milliseconds(500))
             }
         }
+    }
+
+    private var remoteSnapshot: MediaSnapshot? {
+        if case .playing(let snapshot)? = remote.current { return snapshot }
+        return nil
+    }
+
+    /// MediaRemote's view: a new line (`fromRemote`) or the clock moving the position on.
+    private func refresh(fromRemote: Bool) {
+        guard let snapshot = remoteSnapshot else {
+            // MediaRemote lost the player: the AppleScript poll decides on the next tick.
+            if fromRemote, track?.remote == true { withAnimation(Theme.close) { track = nil; isPlaying = false } }
+            return
+        }
+        let now = Date()
+        if let seek = pendingSeek, now.timeIntervalSince(seek.at) < 2, (snapshot.timestamp ?? .distantPast) < seek.at {
+            setPosition(seek.target + (isPlaying ? now.timeIntervalSince(seek.at) : 0), at: now)
+        } else {
+            pendingSeek = nil
+            setPosition(snapshot.position(at: now), at: now)
+        }
+        if now >= holdPlayUntil || fromRemote, isPlaying != snapshot.isPlaying {
+            if fromRemote { holdPlayUntil = .distantPast }
+            withAnimation(Theme.snappy) { isPlaying = snapshot.isPlaying }
+        }
+        let key = snapshot.trackKey
+        let artwork = remote.artwork.flatMap { $0.key == key ? NSImage(data: $0.data) : nil }
+        if track?.id == key {
+            // The cover often comes a moment after the title.
+            if let artwork, remoteCover != key, var current = track {
+                remoteCover = key
+                current.cover = artwork
+                current.color = DominantColor.of(artwork)
+                track = current
+            }
+            return
+        }
+        remoteCover = artwork == nil ? nil : key
+        let cover = artwork ?? MockCovers.placeholder()
+        let new = Track(id: key, title: snapshot.title, artist: snapshot.artist, duration: snapshot.duration,
+                        color: DominantColor.of(cover), cover: cover, source: PlayerBridge.source(for: snapshot.appID),
+                        album: snapshot.album, appID: snapshot.appID.isEmpty ? nil : snapshot.appID, remote: true)
+        show(new)
     }
 
     private func poll() async {
@@ -98,54 +201,112 @@ final class NowPlayingModule: NotchModule {
             lastStatus = nil
             return
         }
-        let changed = status.trackID != lastStatus?.trackID
+        let changed = status.trackID != lastStatus?.trackID || track?.remote == true
         lastStatus = status
-        position = status.position
+        setPosition(status.position)
         if isPlaying != status.isPlaying { withAnimation(Theme.snappy) { isPlaying = status.isPlaying } }
         guard changed else { return }
         let cover = await PlayerBridge.artwork(for: status) ?? MockCovers.placeholder()
-        let new = Track(id: status.trackID, title: status.title, artist: status.artist, duration: status.duration,
-                        color: DominantColor.of(cover), cover: cover, source: status.source, album: status.album)
+        // MediaRemote may have come back while the cover loaded.
+        guard remoteSnapshot == nil else { return }
+        show(Track(id: status.trackID, title: status.title, artist: status.artist, duration: status.duration,
+                   color: DominantColor.of(cover), cover: cover, source: status.source, album: status.album,
+                   appID: PlayerBridge.bundleIDs[status.source]))
+    }
+
+    private func show(_ new: Track) {
         let hadTrack = track != nil
         withAnimation(Theme.open) { track = new }
+        loadLyrics()
         if hadTrack { onTrackChange?(new) }
+    }
+
+    private func setPosition(_ seconds: TimeInterval, at date: Date = Date()) {
+        position = seconds
+        positionDate = date
+    }
+
+    /// The position right now, between two updates (the lyrics read it several times a second).
+    func position(at date: Date) -> TimeInterval {
+        guard isPlaying else { return position }
+        let moved = position + max(0, date.timeIntervalSince(positionDate))
+        return track.map { $0.duration > 0 ? min(moved, $0.duration) : moved } ?? moved
+    }
+
+    // MARK: Lyrics
+
+    private func loadLyrics() {
+        lyricsTask?.cancel()
+        guard lyricsOn, let track else { lyrics = nil; return }
+        if mock { lyrics = MockCovers.lyrics(for: track.id); return }
+        let query = LRCLIB.Query(title: track.title, artist: track.artist, album: track.album, duration: track.duration)
+        lyrics = lyricsStore.cached(query)
+        guard lyrics == nil else { return }
+        lyricsTask = Task { [weak self] in
+            guard let self else { return }
+            let found = await self.lyricsStore.lyrics(for: query)
+            guard !Task.isCancelled, self.track?.id == track.id else { return }
+            withAnimation(Theme.snappy) { self.lyrics = found }
+        }
+    }
+
+    /// The line sung at `date`, slightly ahead so it reads as it is sung.
+    func lyricLine(at date: Date) -> (index: Int, text: String)? {
+        guard lyricsOn, let lyrics else { return nil }
+        let at = position(at: date) + 0.25
+        guard let index = lyrics.index(at: at), let text = lyrics.line(at: at) else { return nil }
+        return (index, text)
     }
 
     // MARK: Controls
 
     func togglePlay() {
         Haptics.tick()
-        if live, let source = track?.source { PlayerBridge.send("playpause", to: source) }
+        if live, let track {
+            if track.remote { remote.send(.togglePlayPause) } else if let source = track.source { PlayerBridge.send("playpause", to: source) }
+            holdPlayUntil = Date().addingTimeInterval(1.5)
+        }
+        setPosition(position(at: Date()))
         withAnimation(Theme.snappy) { isPlaying.toggle() }
     }
 
     func next() { step(1) }
     func previous() { step(-1) }
 
-    /// Jumps within the track (the scrubber); the next poll confirms the player's position.
+    /// Jumps within the track (the scrubber); the next update confirms the player's position.
     func seek(to seconds: TimeInterval) {
         guard let track else { return }
         let target = min(max(0, seconds), track.duration)
-        if live, let source = track.source {
-            PlayerBridge.send("set player position to \(Int(target.rounded()))", to: source, cached: false)
+        if live {
+            if track.remote {
+                remote.seek(to: target)
+                pendingSeek = (target, Date())
+            } else if let source = track.source {
+                PlayerBridge.send("set player position to \(Int(target.rounded()))", to: source, cached: false)
+            }
         }
-        position = target
+        setPosition(target)
     }
 
     private func step(_ delta: Int) {
         Haptics.tick()
         direction = CGFloat(delta)
         if live {
-            if let source = track?.source { PlayerBridge.send(delta > 0 ? "next track" : "previous track", to: source) }
-            return  // the next poll picks up the new track
+            if track?.remote == true {
+                remote.send(delta > 0 ? .next : .previous)
+            } else if let source = track?.source {
+                PlayerBridge.send(delta > 0 ? "next track" : "previous track", to: source)
+            }
+            return  // the next update picks up the new track
         }
         guard !mockTracks.isEmpty else { return }
         mockIndex = (mockIndex + delta + mockTracks.count) % mockTracks.count
         withAnimation(Theme.open) {
             track = mockTracks[mockIndex]
-            position = 0
+            setPosition(0)
             isPlaying = true
         }
+        loadLyrics()
         if let track { onTrackChange?(track) }
     }
 
@@ -156,12 +317,18 @@ final class NowPlayingModule: NotchModule {
     var ambientPriority: Int { isPlaying && track != nil ? 15 : 0 }
 
     func setExpanded(_ expanded: Bool) {
-        if !expanded { showsOutputs = false }
+        if !expanded {
+            showsOutputs = false
+            showsMixer = false
+        }
     }
 
     func handleBack() -> Bool {
-        guard showsOutputs else { return false }
-        withAnimation(Theme.snappy) { showsOutputs = false }
+        guard showsOutputs || showsMixer else { return false }
+        withAnimation(Theme.snappy) {
+            showsOutputs = false
+            showsMixer = false
+        }
         return true
     }
 
@@ -177,14 +344,20 @@ final class NowPlayingModule: NotchModule {
         return AnyView(Equalizer(color: track.color, playing: isPlaying, height: peek ? 14 : 12))
     }
 
-    /// Hover: title, one play button, hairline progress. No artist, no other controls.
+    /// Hover: title (or, with Lyrics on hover, the line being sung), one play button, hairline
+    /// progress. No artist, no other controls.
     func peekLine() -> AnyView {
         AnyView(VStack(spacing: 7) {
             HStack(spacing: 8) {
-                Text(track?.title ?? "Nothing playing")
-                    .font(Theme.font(13, .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
+                if lyricsOnHover, lyrics != nil {
+                    LyricLine(module: self, size: 13, weight: .semibold, color: Theme.textPrimary,
+                              fallback: track?.title ?? "")
+                } else {
+                    Text(track?.title ?? "Nothing playing")
+                        .font(Theme.font(13, .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 6)
                 if track != nil {
                     Button { self.togglePlay() } label: {
@@ -219,6 +392,44 @@ final class NowPlayingModule: NotchModule {
     func primaryAction() { togglePlay() }
 }
 
+/// The line being sung, one line, the next sliding up in its place (fades only with reduce
+/// motion). Reads the position several times a second without touching the rest of the card.
+struct LyricLine: View {
+    let module: NowPlayingModule
+    var size: CGFloat = 13
+    var weight: Font.Weight = .medium
+    var color: Color = Theme.textBody
+    /// Shown before the first line and in instrumental gaps; empty shows a quiet note.
+    var fallback = ""
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.2)) { context in
+            let line = module.lyricLine(at: context.date)
+            ZStack(alignment: .leading) {
+                Group {
+                    if let line {
+                        Text(line.text).foregroundStyle(color)
+                    } else if !fallback.isEmpty {
+                        Text(fallback).foregroundStyle(color)
+                    } else {
+                        Image(systemName: "music.note").foregroundStyle(Theme.textTertiary)
+                    }
+                }
+                .font(Theme.font(size, weight))
+                .lineLimit(1)
+                .id(line?.index ?? -1)
+                .transition(Theme.reduceMotion ? .opacity
+                            : .asymmetric(insertion: .offset(y: 8).combined(with: .opacity),
+                                          removal: .offset(y: -8).combined(with: .opacity)))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+            .animation(.easeOut(duration: 0.2), value: line?.index ?? -1)
+        }
+        .accessibilityLabel("Lyrics")
+    }
+}
+
 private struct NowPlayingBody: View {
     let module: NowPlayingModule
 
@@ -239,6 +450,15 @@ private struct NowPlayingBody: View {
                 }
             }
         }
+        .overlayPreferenceValue(MixerButtonAnchor.self) { anchor in
+            GeometryReader { proxy in
+                if module.showsMixer, let anchor {
+                    MixerPopover(mixer: module.mixer, button: proxy[anchor], in: proxy.size) {
+                        withAnimation(Theme.snappy) { module.showsMixer = false }
+                    }
+                }
+            }
+        }
     }
 
     /// Nothing playing: the same layout with an empty cover; the output and its volume still work.
@@ -255,7 +475,8 @@ private struct NowPlayingBody: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Nothing playing").font(Theme.font(18, .semibold)).foregroundStyle(Theme.textPrimary)
-                    Text("Play something in Spotify or Music and it shows up here.")
+                    Text(MediaRemoteBridge.library != nil ? "Play something in any app and it shows up here."
+                                                          : "Play something in Spotify or Music and it shows up here.")
                         .font(Theme.font(13)).foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -269,13 +490,19 @@ private struct NowPlayingBody: View {
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    /// Volume across, the output device at the end; a click on it opens the list.
+    /// Volume across, the output device at the end; a click on it opens the list. With the App
+    /// volume tool, the mixer's button sits between them.
     private var outputRow: some View {
         HStack(spacing: 12) {
             VolumeSlider(output: module.output, width: nil)
-            OutputButton(output: module.output, open: Binding(get: { module.showsOutputs },
-                                                              set: { module.showsOutputs = $0 }))
-                .layoutPriority(1)
+            HStack(spacing: 6) {
+                if module.mixerOn {
+                    MixerButton(open: Binding(get: { module.showsMixer }, set: { module.showsMixer = $0 }))
+                }
+                OutputButton(output: module.output, open: Binding(get: { module.showsOutputs },
+                                                                  set: { module.showsOutputs = $0 }))
+            }
+            .layoutPriority(1)
         }
     }
 
@@ -310,7 +537,14 @@ private struct NowPlayingBody: View {
                     .id(track.id)
                     .transition(.blurSlide(x: 24 * module.direction))
 
-                    Spacer(minLength: 12)
+                    Spacer(minLength: 8)
+                    // Synced lyrics: the line being sung, one line between the title and the scrubber.
+                    if module.lyricsOn, module.lyrics != nil {
+                        LyricLine(module: module, size: 13.5, weight: .medium, color: Theme.textBody)
+                            .padding(.trailing, 8)
+                            .transition(.opacity)
+                        Spacer(minLength: 8)
+                    }
 
                     Scrubber(position: module.position, duration: track.duration) { module.seek(to: $0) }
 
@@ -427,7 +661,7 @@ struct CoverView: View {
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
             .overlay(alignment: .bottomTrailing) {
-                if badge, let source = track.source, let icon = PlayerBridge.icon(for: source) {
+                if badge, let icon = track.appID.flatMap(PlayerBridge.icon(forApp:)) {
                     // Small at every cover size: a hint of the source, not a second cover.
                     let side = min(28, max(12, size * 0.24))
                     Image(nsImage: icon)
@@ -493,8 +727,32 @@ enum PlayerBridge {
     }
 
     static func icon(for source: PlayerStatus.Source) -> NSImage? {
-        guard let id = bundleIDs[source], let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return nil }
-        return NSWorkspace.shared.icon(forFile: url.path)
+        bundleIDs[source].flatMap(icon(forApp:))
+    }
+
+    private static var icons: [String: NSImage] = [:]
+
+    /// Any app's icon by bundle id (the badge for a browser, VLC, Podcasts), remembered.
+    static func icon(forApp id: String) -> NSImage? {
+        if let icon = icons[id] { return icon }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icons[id] = icon
+        return icon
+    }
+
+    /// The AppleScript source behind a MediaRemote app, when there is one.
+    static func source(for appID: String) -> PlayerStatus.Source? {
+        bundleIDs.first { $0.value == appID }?.key
+    }
+
+    /// The app's name as the user knows it.
+    static func name(forApp id: String) -> String {
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: id).first, let name = app.localizedName { return name }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+            return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        }
+        return id.split(separator: ".").last.map(String.init) ?? id
     }
 
     private static func run(_ source: String, cached: Bool = true) -> String? {
@@ -547,6 +805,17 @@ enum MockCovers {
                                    cover: draw(base: (0x2EC4B6, 0x1B3A8C), accent: 0xB8F2E6, seed: 2), source: .music,
                                    album: "Coastlines"),
         ]
+    }
+
+    /// Invented lines (no real song's lyrics), timed for the two invented tracks.
+    static func lyrics(for id: String) -> SyncedLyrics? {
+        let lines = id == "t1"
+            ? ["Harbour lights are blinking slow", "Every ferry knows the way", "Hold the rope and let it go",
+               "Low tide lights, we stay", "Count the waves until the dawn", "Salt and neon on the bay"]
+            : ["Glass on the water, glass in the sky", "Nothing to carry, nowhere to hide", "Turn with the current, turn with the tide",
+               "Glass harbour, open wide"]
+        let start: Double = id == "t1" ? 40 : 2
+        return SyncedLyrics(lines: (0..<48).map { .init(time: start + Double($0) * 4, text: lines[$0 % lines.count]) })
     }
 
     static func placeholder() -> NSImage { draw(base: (0x3A3A44, 0x1C1C22), accent: 0x8A8A96, seed: 2) }

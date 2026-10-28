@@ -14,7 +14,7 @@ Meet Tara, a little star that lives in your MacBook's notch. Starnotch turns the
 |---|---|---|
 | **Agents** | Your Claude Code sessions as small characters: working, waiting for you, idle. Last steps, subagents, context window per session, plan limits in the header, recurring loops. | Claude Code |
 | **Calendar** | Your day on a time band, the next meeting with a countdown and Join (Meet, Zoom, Teams), a reminder five minutes before. | Calendar access (asked when you first open it) |
-| **Now playing** | Cover, controls, volume and output device for Spotify or Music. | Spotify or Music |
+| **Now playing** | Cover, controls, volume and output device for whatever plays: Spotify, Music, Podcasts, VLC, IINA, YouTube or SoundCloud in a browser. Optional: synced lyrics and a volume per app. | Nothing (Spotify or Music without the bundled helper) |
 | **Dictate** | Starts Wispr Flow hands-free from the notch. | Wispr Flow |
 | **Today** | Tasks, follow-ups and a short brief from a connector. | A connector |
 | **Meeting** | Listens along and remembers your past meetings: flags when something said contradicts an earlier decision, nudges about open promises, writes down new ones, answers questions with the quote they come from. | An Anthropic API key; Reson8 for live audio, Jamie for past meetings |
@@ -59,14 +59,21 @@ The second step of the first launch lists what it found (Claude Code, Codex, cal
 |---|---|---|
 | none | The island, hover, click, swipes, ⌃⌥Space, quick capture | — |
 | Calendars | The calendar module | The module hides |
-| Automation (Spotify, Music) | Now playing, asked the first time music plays | The module stays quiet |
+| Automation (Spotify, Music) | Now playing, only when the system-wide source can't see the player | The module stays quiet |
+| System Audio Recording (optional) | Volume per app, asked the first time you move an app's slider | The mixer points to System Settings; apps keep their own volume |
 | Accessibility (optional) | Escape cancels the wheel while you hold the notch over other apps; the open island ends between two menu bar icons instead of cutting one | Release in the center to cancel; the island keeps its fixed width |
 | Automation (System Events, optional) | The dark mode switch in the System tab, asked the first time you use it | The switch flips back and the notch points to System Settings › Privacy & Security › Automation |
 | Administrator password (once, optional) | Keep awake with the lid closed: installs `/etc/sudoers.d/starnotch-pmset`, which lets you run only `pmset -a disablesleep 1` and `0` without a password (checked by visudo first). Settings › What's set up removes it | Keep awake works only with the lid open |
 
 ## Privacy
 
-Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API, and the Jamie import reads from your Jamie account.
+Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. Synced lyrics, when you switch them on, ask LRCLIB (lrclib.net) with the track's title, artist, album and length. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API, and the Jamie import reads from your Jamie account.
+
+## Now playing from any app
+
+macOS 15.4 closed the MediaRemote framework to apps not signed by Apple. Starnotch therefore runs `/usr/bin/perl`, which macOS still lets through, and perl loads a small helper library inside the app (`helpers/mediaremote`, the technique of [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), BSD 3-Clause, rewritten). The helper only prints what plays to the app and passes play, pause, skip and seek on; nothing leaves the Mac. If a later macOS closes this door too, Starnotch falls back to Spotify and Music through AppleScript.
+
+Volume per app uses CoreAudio process taps (macOS 14.2+), no audio driver: an app you turn down or up is muted at the source and played again at your level through a private aggregate device. Limits: it needs the System Audio Recording permission; a tapped app sounds a few milliseconds later; switching the output rebuilds the taps with a short gap; apps that bring their own audio driver or take the device exclusively can't be tapped. Apps at 100 % run untouched.
 
 ## Plan limits and context
 

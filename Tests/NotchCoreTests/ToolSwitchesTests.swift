@@ -112,4 +112,21 @@ import TestSupport
         #expect(settings.wheelItem(at: .left) == .module(.today))
         #expect(settings.wheelSlots == [.top, .bottom, .left])
     }
+
+    @Test func musicExtrasLeaveTheMusicTabAlone() {
+        var settings = SwitcherSettings()
+        ToolSwitches.set(.lyricsOnHover, on: true, in: &settings)
+        // Lyrics on hover needs the lyrics.
+        #expect(ToolSwitches.isOn(.lyrics, in: settings))
+        ToolSwitches.set(.appVolume, on: true, in: &settings)
+        ToolSwitches.set(.lyrics, on: false, in: &settings)
+        ToolSwitches.set(.appVolume, on: false, in: &settings)
+        #expect(!ToolSwitches.isOn(.lyricsOnHover, in: settings))
+        // Unlike the Tools tab, Music has its own content and stays on.
+        #expect(ToolSwitches.isOn(.module(.nowPlaying), in: settings))
+        // Music off: its extras are off with it.
+        ToolSwitches.set(.lyrics, on: true, in: &settings)
+        ToolSwitches.set(.module(.nowPlaying), on: false, in: &settings)
+        #expect(!ToolSwitches.isOn(.lyrics, in: settings))
+    }
 }

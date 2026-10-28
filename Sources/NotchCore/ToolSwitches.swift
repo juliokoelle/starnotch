@@ -1,17 +1,27 @@
 /// The small tools inside or beside the tabs, each with its own switch in the Tools gallery.
 public enum ToolFeature: String, Codable, CaseIterable, Sendable {
     case clipboard, timers, shelf, imageConverter, keepAwake, quickCapture
+    // Media strand: synced lyrics (LRCLIB), the lyric line on hover, volume per app.
+    case lyrics, lyricsOnHover, appVolume
 
     /// The tab it lives in; nil for tools outside the tabs (the menu, a shortcut, the plus button).
     public var module: ModuleKind? {
         switch self {
         case .clipboard, .timers, .shelf, .imageConverter: .tools
         case .keepAwake, .quickCapture: nil
+        case .lyrics, .lyricsOnHover, .appVolume: .nowPlaying
         }
     }
 
-    /// Works only with this other tool on (the converter acts on the shelf's files).
-    public var requires: ToolFeature? { self == .imageConverter ? .shelf : nil }
+    /// Works only with this other tool on (the converter acts on the shelf's files, the hover
+    /// line shows the lyrics' current line).
+    public var requires: ToolFeature? {
+        switch self {
+        case .imageConverter: .shelf
+        case .lyricsOnHover: .lyrics
+        default: nil
+        }
+    }
 
     public var title: String {
         switch self {
@@ -21,6 +31,9 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .imageConverter: "Image converter"
         case .keepAwake: "Keep awake"
         case .quickCapture: "Quick capture"
+        case .lyrics: "Synced lyrics"
+        case .lyricsOnHover: "Lyrics on hover"
+        case .appVolume: "Volume per app"
         }
     }
 }
@@ -52,6 +65,11 @@ public enum ToolSwitches {
     public static var known: [String] {
         ModuleKind.allCases.map { "module.\($0.rawValue)" } + ToolFeature.allCases.map { "feature.\($0.rawValue)" }
     }
+
+    /// Settings from before the stamp (`knownTools`) keep every tool the gallery started with;
+    /// tools added after it start off for them too (lyrics ask a web service).
+    public static var knownBeforeStamp: [String] { known.filter { !addedAfterStamp.contains($0) } }
+    static let addedAfterStamp: Set<String> = ["feature.lyrics", "feature.lyricsOnHover", "feature.appVolume"]
 
     /// Settings saved by a version that knew only `known`: what came since starts off.
     public static func switchOffNew(since known: [String], in settings: inout SwitcherSettings) {
@@ -94,8 +112,9 @@ public enum ToolSwitches {
             if let required = feature.requires, !isOn(required, in: settings) { set(required, on: true, in: &settings) }
         } else {
             disable(feature, in: &settings)
-            // The tab shows while one of its tools is on.
-            if let module {
+            // The Tools tab shows while one of its tools is on; a tab with its own content
+            // (Music) stays when an extra inside it goes off.
+            if let module, module == .tools {
                 let anyOn = ToolFeature.allCases.contains { $0.module == module && ownSwitch($0, in: settings) }
                 setModule(module, on: anyOn, in: &settings)
             }

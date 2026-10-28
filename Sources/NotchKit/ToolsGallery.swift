@@ -35,6 +35,7 @@ enum ModuleAvailability {
             default: return Status(available: false, detail: "Calendar access is off in System Settings")
             }
         case .nowPlaying:
+            if MediaRemoteBridge.library != nil { return Status(available: true, detail: "Any app that plays, browsers included") }
             let found = PlayerBridge.bundleIDs.values.contains {
                 NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
             }
@@ -73,6 +74,9 @@ enum ToolInfo {
         case .feature(.imageConverter): "photo.on.rectangle.angled"
         case .feature(.keepAwake): "cup.and.saucer"
         case .feature(.quickCapture): "square.and.pencil"
+        case .feature(.lyrics): "quote.bubble"
+        case .feature(.lyricsOnHover): "text.line.first.and.arrowtriangle.forward"
+        case .feature(.appVolume): "slider.horizontal.3"
         }
     }
 
@@ -92,7 +96,8 @@ enum ToolInfo {
         switch item {
         case .module(.agents): "Your coding agents, their approvals and plan limits"
         case .module(.calendar): "Your next meeting, its countdown and Join"
-        case .module(.nowPlaying): "What plays in Spotify or Music, with controls"
+        case .module(.nowPlaying): MediaRemoteBridge.library != nil ? "What plays on this Mac, from any app, with controls"
+                                                                     : "What plays in Spotify or Music, with controls"
         case .module(.meeting): "Tara listens in meetings and remembers what was said"
         case .module(.today): "Tasks and reminders due today"
         case .module(.system): "CPU, GPU, memory and the apps behind them"
@@ -104,6 +109,9 @@ enum ToolInfo {
         case .feature(.imageConverter): "Turns images on the shelf into PNG, JPEG, HEIC or TIFF"
         case .feature(.keepAwake): "Keeps the Mac and the display awake, from the menu"
         case .feature(.quickCapture): "A note or a task in a second, on ⌃⌥N"
+        case .feature(.lyrics): "The line being sung, looked up on LRCLIB by the track's name"
+        case .feature(.lyricsOnHover): "The current lyric line when you hover the notch"
+        case .feature(.appVolume): "A mixer for each app's volume; asks to capture system audio"
         }
     }
 }

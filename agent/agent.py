@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
+import os
 import queue
 import re
 import signal
@@ -29,7 +31,11 @@ from memory import Commitment, Line, Meeting, Memory, _words
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
 RECALL = 6  # earlier transcript lines that share words with the new ones, for transcripts the memory had to shorten
+MEETING_RECALL_MAX = 16  # the live analysis recalls RECALL per new utterance, at most this many per batch,
+RECALL_CHARS = 4000  # in at most this many characters: the batch's prompt isn't cached from call to call
 REST = 60  # seconds on the rules after a failed Claude call: better a rule now than Claude late, batch after batch
+MEETING_GAP = 25.0  # seconds at least between two live analysis calls; what's said in between goes with the next
+MEETING_GAP_MAX = 600.0  # a larger STARNOTCH_MEETING_GAP or --meeting-gap counts as this
 
 SYSTEM = """You listen along to a live meeting and compare it with the team's meeting memory below.
 Report, as JSON, only what helps the people in the meeting right now:
@@ -208,7 +214,8 @@ def _norm(text: str) -> str:
 class Agent:
     def __init__(self, memory: Memory, llm: Any | None, emit: Callable[[dict[str, Any]], None],
                  today: dt.date | None = None, captures: Path | None = None, connectors: Path | None = None,
-                 brain: str | None = None, usage: Path | None = None):
+                 brain: str | None = None, usage: Path | None = None, gap: float = MEETING_GAP,
+                 clock: Callable[[], float] | None = None):
         self.memory = memory
         self.ledger = ledger.Ledger(usage) if usage else None
         self.captures_path = captures
@@ -218,6 +225,10 @@ class Agent:
         self.emit = emit
         self.fixed_today = today
         self.live: list[Utterance] = []
+        self.waiting: list[Utterance] = []  # heard, not yet analysed: they go with the next call
+        self.gap = gap
+        self.clock = clock or time.monotonic
+        self.last_call = float("-inf")  # self.clock() when the live analysis last asked Claude
         self.commitments: list[Commitment] = []
         self.reported: set[str] = set()
         self.reported_text: list[str] = []
@@ -250,7 +261,8 @@ class Agent:
             elif cmd == "save":
                 out = self.save(message)
             elif cmd == "reset":
-                self.live, self.commitments, self.reported, self.reported_text = [], [], set(), []
+                # what still waits belongs to the meeting thrown away: no call for it, and no late cards
+                self.live, self.waiting, self.commitments, self.reported, self.reported_text = [], [], [], set(), []
                 out = {"type": "status", "state": "reset"}
             elif message.get("type") in ("status", "partial"):
                 return  # transcriber chatter piped through
@@ -330,8 +342,8 @@ class Agent:
         """A question to Tara: answered from the meetings, captures and connector snapshots, with sources.
         `history` is the conversation so far ([{"question", "answer"}], oldest first), `image` a screenshot's path,
         `answering` the id of the quick capture that asked it (the rules never offer it as its own answer).
-        Someone waits for the answer, so Claude is asked even while meeting batches rest it, and a failure here
-        doesn't rest it."""
+        Someone waits for the answer, so Claude is asked even while meeting batches rest it or wait for the meeting
+        gap, and a failure here doesn't rest it."""
         if not question.strip():
             return {"type": "error", "message": "ask: empty question"}
         notes = self.notes()
@@ -414,31 +426,56 @@ class Agent:
         return {"answer": (NO_BRAIN if self.llm is None else NO_ANSWER)[_language(question)], "sources": []}
 
     def save(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Writes the meeting, the utterances still waiting for the meeting gap included, before it analyses those:
+        the transcript doesn't depend on the analysis, and the app ends the agent if the save takes too long.
+        Commitments that analysis finds are written in a second go."""
         date = str(message.get("date") or self.today.isoformat())
         title = str(message.get("title") or "Meeting")
+        said = self.live + self.waiting
         meeting = Meeting(
             id=str(message.get("meeting_id") or f"{date}-{_norm(title).replace(' ', '-') or 'meeting'}"),
             title=title,
             date=date,
-            participants=sorted({u.speaker for u in self.live if u.speaker}),
-            transcript=[Line(u.speaker, u.text, u.t) for u in self.live],
+            participants=sorted({u.speaker for u in said if u.speaker}),
+            transcript=[Line(u.speaker, u.text, u.t) for u in said],
             commitments=list(self.commitments),
         )
         path = self.memory.save(meeting)
+        if self.waiting:
+            self.flush()
+            if len(self.commitments) > len(meeting.commitments):
+                meeting.commitments = list(self.commitments)
+                path = self.memory.save(meeting)
         return {"type": "status", "state": "saved", "meeting_id": meeting.id, "path": str(path)}
 
     # Listening
 
     def hear(self, raw: list[dict[str, Any]]) -> None:
+        """Utterances wait for the next analysis: Claude is asked at most once every `gap` seconds, the rules at once."""
         new = [Utterance(str(r.get("speaker") or ""), str(r.get("text") or "").strip(), float(r.get("t") or 0))
                for r in raw]
-        new = [u for u in new if u.text]
+        self.waiting += [u for u in new if u.text]
+        if self.due() == 0:
+            self.flush()
+
+    def due(self) -> float | None:
+        """Seconds until the waiting utterances are analysed (0: now), None when none wait."""
+        if not self.waiting:
+            return None
+        if not self._thinking():
+            return 0.0
+        return max(0.0, self.last_call + self.gap - self.clock())
+
+    def flush(self, claude: bool = True) -> None:
+        """Analyses every waiting utterance in one call (rules when Claude rests or is gone, or without `claude`)."""
+        new, self.waiting = self.waiting, []
         if not new:
             return
         before = self.live[-WINDOW:]
         self.live += new
         result = None
-        if self._thinking():
+        if claude and self._thinking():
+            self.last_call = self.clock()
             try:
                 result = self._think("meeting", SYSTEM.format(memory=self.context()),
                                      self._analysis_prompt(before, new), ANALYSIS_SCHEMA)
@@ -453,7 +490,7 @@ class Agent:
         lines = [f"Today is {today.strftime('%A')}, {today.isoformat()}.", "", "# Live meeting so far"]
         lines += [f"{u.speaker}: {u.text}" for u in before] or ["(nothing yet)"]
         lines += ["", "# New utterances"] + [f"{u.speaker}: {u.text}" for u in new]
-        recall = self._recall(" ".join(u.text for u in new))
+        recall = self._evidence(new)
         if recall:
             lines += ["", "# Earlier lines with the same words"] + recall
         lines += ["", "# Already reported"] + (self.reported_text[-20:] or ["(nothing)"])
@@ -526,6 +563,21 @@ class Agent:
         carry an excerpt of a long transcript, so the lines that matter now come along in the prompt."""
         return [f"[{h.meeting.id} | {h.meeting.date}] {h.line.speaker}: {h.line.text}"
                 for h in self.memory.search(text, RECALL) if h.score >= 2]
+
+    def _evidence(self, new: list[Utterance]) -> list[str]:
+        """`_recall` for each new utterance, not for the batch as one text, so a long batch still brings each
+        utterance's lines: each one's best line first, then each one's second, and so on, until MEETING_RECALL_MAX
+        lines or RECALL_CHARS characters."""
+        ranked = [self._recall(u.text) for u in new]
+        out: list[str] = []
+        size = 0
+        for rank in range(RECALL):
+            for texts in ranked:
+                text = texts[rank] if rank < len(texts) else ""
+                if text and text not in out and len(out) < MEETING_RECALL_MAX and size + len(text) <= RECALL_CHARS:
+                    out.append(text)
+                    size += len(text) + 1
+        return out
 
     def _think(self, feature: str, system: str, prompt: str, schema: dict[str, Any], max_tokens: int = 4000,
                **extra: Any) -> dict[str, Any] | None:
@@ -607,6 +659,15 @@ def _language(text: str) -> str:
     return "de" if re.search(r"[äöüß]", text.lower()) else "en"
 
 
+def _gap(value: Any) -> float:
+    """The meeting gap from the environment or the flag: MEETING_GAP for nothing or no number, else 0 to MEETING_GAP_MAX."""
+    try:
+        gap = float(value)
+    except (TypeError, ValueError):
+        return MEETING_GAP
+    return MEETING_GAP if math.isnan(gap) else min(max(gap, 0.0), MEETING_GAP_MAX)
+
+
 def _unit(unit: str) -> str:
     unit = unit.lower()
     return {"eur": "Euro", "€": "Euro", "euro": "Euro", "%": "Prozent", "prozent": "Prozent", "$": "Dollar"}.get(unit, unit)
@@ -639,15 +700,20 @@ def watch_captures(path: Path, inbox: "queue.Queue[str | None]", interval: float
 
 
 def run(agent: Agent, stream: TextIO, watch: Path | None = None) -> None:
-    """Reads stdin on a thread; utterances that pile up while Claude thinks go out together in one call.
-    With `watch`, questions typed into quick capture are answered too."""
+    """Reads stdin on a thread; utterances wait for the next analysis (Agent.hear) and go out together in one call,
+    once the meeting gap is over even when nothing new comes. With `watch`, questions typed into quick capture are
+    answered too."""
     inbox: "queue.Queue[str | None]" = queue.Queue()
     threading.Thread(target=_reader, args=(stream, inbox), daemon=True).start()
     if watch:
         threading.Thread(target=watch_captures, args=(watch, inbox), daemon=True).start()
     done = False
     while not done:
-        batch = [inbox.get()]
+        try:
+            batch = [inbox.get(timeout=agent.due())]
+        except queue.Empty:  # the meeting gap is over and nothing new came: what's waiting goes now
+            agent.flush()
+            continue
         while not inbox.empty():
             batch.append(inbox.get_nowait())
         heard: list[dict[str, Any]] = []
@@ -675,6 +741,9 @@ def run(agent: Agent, stream: TextIO, watch: Path | None = None) -> None:
                 agent.handle(message)
         if heard:
             agent.hear(heard)
+    # stdin closed: the app does that after a save (nothing waits then) or to throw the meeting away, so what still
+    # waits goes through the rules, not Claude
+    agent.flush(claude=False)
 
 
 def make_emit(out: TextIO) -> Callable[[dict[str, Any]], None]:
@@ -701,6 +770,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="folder of connector snapshots (*.json) for ask (default: connectors/ in Starnotch's folder); '' to ignore")
     parser.add_argument("--usage", default=str(ledger.LEDGER),
                         help="usage ledger, one line per brain call (default: usage.jsonl in Starnotch's folder); '' for none")
+    parser.add_argument("--meeting-gap", type=float, default=_gap(os.environ.get("STARNOTCH_MEETING_GAP")),
+                        help="seconds at least between two live analysis calls to Claude (default: STARNOTCH_MEETING_GAP, "
+                             f"else {MEETING_GAP:g}); 0 asks for every batch, at most {MEETING_GAP_MAX:g}")
     args = parser.parse_args(argv)
 
     # The app ends a meeting with SIGTERM; as an exception it lets a running Claude call clean up its prompt file.
@@ -718,7 +790,7 @@ def main(argv: list[str] | None = None) -> int:
     captures = Path(args.captures).expanduser() if args.captures else None
     connectors = Path(args.connectors).expanduser() if args.connectors else None
     usage = Path(args.usage).expanduser() if args.usage else None
-    agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage)
+    agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage, _gap(args.meeting_gap))
     emit({"type": "ready", "meetings": len(memory.meetings), "memory": str(memory.folder),
           "brain": brain, "model": getattr(llm, "model", None), "errors": memory.errors})
     run(agent, sys.stdin, captures if args.watch_captures else None)

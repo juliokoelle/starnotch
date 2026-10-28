@@ -194,7 +194,7 @@ def test_brain_choice(fake, tmp_path, monkeypatch):
 
 def test_agent_falls_back_to_rules(fake, tmp_path, memory_dir, monkeypatch):
     out = []
-    agent = Agent(Memory(memory_dir), code(tmp_path, timeout=0.5), out.append)
+    agent = Agent(Memory(memory_dir), code(tmp_path, timeout=0.5), out.append, gap=0)
     monkeypatch.setenv("FAKE_CLAUDE", "slow")
     agent.handle({"type": "utterance", "speaker": "Max", "text": "Wir waren doch bei 25 Euro im Monat, oder?"})
     assert out[0]["state"] == "offline" and out[1]["type"] == "contradiction"

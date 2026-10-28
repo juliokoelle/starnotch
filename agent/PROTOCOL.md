@@ -22,6 +22,9 @@ Shared rules:
   (see [README.md](README.md#taras-brain)). `auto` is Claude Code when a `claude` binary is found (`PATH`,
   `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), else the API when `ANTHROPIC_API_KEY` is set, else rules.
   Claude Code that isn't signed in to a Claude plan falls back to rules, never to the API.
+- `STARNOTCH_MEETING_GAP` (or `agent.py --meeting-gap`, which wins) is the least number of seconds between two
+  live analysis calls to Claude, default `25` (also for a value that isn't a number), at most `600`; `0` asks for
+  every batch (see "Order" under `agent.py`).
 
 ## Starting
 
@@ -29,7 +32,7 @@ Run everything from the `agent/` folder with uv (it creates the environment on f
 
 ```sh
 cd agent
-uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captures FILE] [--watch-captures] [--connectors DIR] [--usage FILE]
+uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captures FILE] [--watch-captures] [--connectors DIR] [--usage FILE] [--meeting-gap SECONDS]
 uv run python transcribe.py (--file AUDIO [--speed N] | --mic) [--names Max,Lisa]
 uv run python jamie_sync.py [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--query TEXT] [--force] [--no-login]
 uv run python jamie_sync.py --logout
@@ -120,13 +123,27 @@ today that isn't in the memory (Jamie hadn't finished it by then) gets an honest
 guess. The memory itself is read at start and on `reload`: the app sends `reload` to every running agent after a sync
 with `updated` > 0.
 
-`save` writes the utterances since the last `reset` (and the commitments found in them) as a meeting file;
+`save` writes the utterances since the last `reset` (and the commitments found in them) as a meeting file, the ones
+still waiting for the meeting gap included; then it analyses those and, if that finds commitments, writes the file
+again before it replies. `reset` drops the utterances still waiting, unanalysed;
 `title`, `date` (default today) and `meeting_id` (default `<date>-<title>`) are optional.
 Lines with `"type": "status"` or `"type": "partial"` are ignored, so the transcriber's output can be piped in whole.
 
-Order: replies come in the order of the input lines. Utterances that arrive while Claude is busy are analysed
-together in the next call, so proactive events arrive one to a few seconds after the words, sometimes
-several at once.
+Order: replies come in the order of the input lines. Utterances are collected and analysed together, so
+proactive events arrive after the words, sometimes several at once. With Claude, the live analysis asks at most once
+every meeting gap (default 25 s): the first utterance after a quiet stretch goes at once, the ones after it wait until
+the gap since the last call is over and then go together in one call, also when nobody speaks in the meantime; none
+is dropped or sent twice. So a contradiction shows up to the gap plus a few seconds after the words. `save` analyses
+what is still waiting (see above), stdin closing runs it through the rules, `reset` drops it. Not held back by the
+gap: the rules (no brain, or Claude resting for a minute after a failed call), `ask` and captured questions; a
+proactive event from a waiting utterance may therefore come after the reply to a later command.
+
+What the live analysis sends: the system prompt holds the instructions, the meeting memory (as for `ask`: the facts
+of every meeting, notes and transcript excerpts, up to 60,000 characters) and the quick captures. It only changes
+when the memory or the captures do, so the prompt cache keeps it from batch to batch. Each batch's prompt carries
+today's date, the last 12 utterances of the live meeting, the new ones, and for each new utterance up to 6 earlier
+transcript lines that share words with it (two or more; a number counts twice), the best line of each utterance first, at most 16 lines and
+4,000 characters, plus up to 20 items already reported.
 
 ### stdout: proactive events
 

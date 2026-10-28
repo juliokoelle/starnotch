@@ -15,10 +15,13 @@ public protocol NotchConnector: AnyObject, Sendable {
     /// Display name for Settings.
     static var displayName: String { get }
     init(config: ConfigSection)
+    /// False while the user hasn't set it up yet: the app then treats its capabilities as missing.
+    var isConfigured: Bool { get }
 }
 
 extension NotchConnector {
     public static var displayName: String { id }
+    public var isConfigured: Bool { true }
 }
 
 // MARK: Today
@@ -207,4 +210,15 @@ public enum CaptureOutcome: Equatable, Sendable {
 /// destination can't be reached.
 public protocol InboxSink: NotchConnector {
     func file(_ capture: Capture) async -> CaptureOutcome
+}
+
+// MARK: Ticking off
+
+/// A Today source whose tasks can be ticked off in the notch.
+public protocol TodayCompleting: TodayProvider {
+    /// Whether the item with this id gets a checkbox.
+    func canComplete(_ id: String) -> Bool
+    /// Marks it done where it lives. Called off the main thread. False when that wasn't safe
+    /// (the source changed meanwhile); then nothing was written.
+    func complete(_ id: String) -> Bool
 }

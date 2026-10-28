@@ -44,8 +44,24 @@ A connector is a Swift class in its own package. It adopts `NotchConnector` and 
 | `JobsProvider` | the loops strip, list, timeline and finished sneaks | `loops(now:) -> [LoopStatus]`, optional `logURL`, `specLinkTitle` |
 | `PeopleProvider` | names in quick capture, meeting prep in the calendar | `people()`, `prep(attendees:now:)`, optional `noteURL(for:)`, `prepTitle` |
 | `InboxSink` | quick capture | `file(_ capture:) async -> CaptureOutcome` |
+| `TodayCompleting` | ticking tasks off in Today | `canComplete(_ id:)`, `complete(_ id:) -> Bool` (off the main thread; return false rather than guess) |
 
-The first connector that offers a capability provides it. Items carry their own links (`url`), so a click opens the connector's own app or page.
+The first connector that offers a capability provides it, skipping connectors whose `isConfigured` is false (default true), so a connector the user hasn't set up yet doesn't hide another. Items carry their own links (`url`), so a click opens the connector's own app or page.
+
+### Built in: your notes
+
+The public build links `VaultConnector` (an Obsidian vault or any Markdown folder), set up in Settings › Notes or in config.toml:
+
+```toml
+[connectors.vault]
+folder = "~/notes"
+tasks = "Tasks.md"              # a file, or a folder of Markdown files with "- [ ]" tasks
+daily = "Daily/YYYY-MM-DD.md"   # the daily note's path pattern
+inbox = "Inbox.md"              # quick capture appends here
+loops = "loops/RUNLOG.md"       # the loops' run log (unless [connectors.runlog] names one)
+```
+
+Today shows the tasks due today or overdue (`📅 2026-10-28`, `[due:: 2026-10-28]` or `(due 2026-10-28)`), what comes up within a week and the headings of today's note. Ticking a task off writes `- [x]` into its line, only if that line is still there exactly as read and the file didn't change meanwhile; repeating tasks (🔁) are left to the notes app. The folder is watched with FSEvents, and on every change `~/Library/Application Support/Starnotch/connectors/vault.json` (0600) is rewritten for Tara: open tasks, today's note (trimmed), the notes changed last.
 
 ```swift
 import Foundation

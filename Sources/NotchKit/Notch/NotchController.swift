@@ -329,7 +329,9 @@ final class NotchController {
         let location = NSEvent.mouseLocation
         let island = islandRect
         guard island.insetBy(dx: -4, dy: -4).contains(location) else { return false }
-        if model.interaction == .expanded, location.y < island.maxY - model.notchSize.height - 10 { return false }
+        // The open panel, the palette's list and the inbox scroll below the notch band.
+        if [.expanded, .palette, .inbox].contains(model.interaction),
+           location.y < island.maxY - model.notchSize.height - 10 { return false }
         let phase: SwipeClassifier.Phase = switch event.phase {
         case .began: .began
         case .changed: .changed

@@ -64,6 +64,9 @@ public struct AgentEvent: Equatable, Sendable {
         case idle
     }
 
+    /// Starts the reason of every `needsApproval`: a block the notch's own prompts answer.
+    public static let approvalPrefix = "Approve: "
+
     /// The session's id as `AgentSession.id`.
     public var sessionID: String
     public var kind: Kind

@@ -308,7 +308,7 @@ final class AgentsModule: NotchModule {
     /// Pending approvals: their sessions wait for the user (a hook beats the files).
     func setPendingApprovals(_ requests: [ApprovalRequest]) {
         let events = requests.compactMap { request in
-            request.agentID.map { AgentEvent(sessionID: $0, kind: .needsApproval("Approve: \(request.summary.isEmpty ? request.tool : request.summary)"), at: Date()) }
+            request.agentID.map { AgentEvent(sessionID: $0, kind: .needsApproval(AgentEvent.approvalPrefix + (request.summary.isEmpty ? request.tool : request.summary)), at: Date()) }
         }
         Task { [weak self] in
             guard let self else { return }

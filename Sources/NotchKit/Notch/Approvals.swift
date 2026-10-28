@@ -101,6 +101,8 @@ final class ApprovalCenter {
 private struct QuestionAnswers: View {
     let center: ApprovalCenter
     let request: ApprovalRequest
+    /// In the agents inbox esc moves on and leaves the question open, so its button says what it does.
+    var inInbox = false
     @State private var text = ""
     @FocusState private var focused: Bool
 
@@ -149,11 +151,11 @@ private struct QuestionAnswers: View {
             }
             HStack {
                 Spacer()
-                Button("Skip") { center.answer(.deny, to: request.id) }
+                Button(LocalizedStringKey(inInbox ? "Don't answer" : "Skip")) { center.answer(.deny, to: request.id) }
                     .buttonStyle(PressScale())
                     .font(Theme.font(11.5))
                     .foregroundStyle(Theme.textTertiary)
-                    .help("The agent hears that you didn't answer (esc)")
+                    .help(Localization.string(inInbox ? "The agent hears that you didn't answer" : "The agent hears that you didn't answer (esc)"))
             }
         }
     }
@@ -230,7 +232,7 @@ struct ApprovalCard: View {
                         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .help(request.detail)
                     if isQuestion && request.asksForAnswer {
-                        QuestionAnswers(center: center, request: request)
+                        QuestionAnswers(center: center, request: request, inInbox: inInbox)
                     } else {
                     HStack(spacing: 8) {
                         button(isQuestion ? "Yes" : "Allow once", key: "↵", style: .primary) { center.answer(.allowOnce, to: pending.id) }

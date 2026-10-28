@@ -15,8 +15,8 @@ struct NotchRootView: View {
     var onCaptureEvent: () -> Void = {}
     /// A palette row was clicked (or ↵): its index, and whether ⌘ was held.
     var onPaletteActivate: (Int, Bool) -> Void = { _, _ in }
-    /// The inbox card's own button: ↵ (true) or ⌘↵.
-    var onInboxKey: (Bool) -> Void = { _ in }
+    /// The inbox card's own button: ↵ (true) or ⌘↵, and the id of the item it shows.
+    var onInboxKey: (Bool, String) -> Void = { _, _ in }
     /// The inbox ran out while open (the last prompt answered by click).
     var onInboxEmpty: () -> Void = {}
 
@@ -80,7 +80,6 @@ struct NotchRootView: View {
                 if let inbox = model.inbox {
                     InboxView(inbox: inbox, notch: notch, onKey: onInboxKey, onEmpty: onInboxEmpty)
                         .padding(.horizontal, layout.topRadius)
-                        .animation(Theme.snappy, value: inbox.current?.id)
                         .transition(.blurSlide(y: -14, scale: 0.94))
                 }
             case .sneak:

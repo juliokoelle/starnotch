@@ -266,12 +266,8 @@
 "Choose Tara's look" = "Taras Aussehen wählen";
 "Setup" = "Einrichtung";
 "Inbox" = "Eingang";
-"1–4 answer" = "1–4 antworten";
-"↵ yes" = "↵ ja";
-"↵ allow" = "↵ erlauben";
 "⌘↵ open" = "⌘↵ öffnen";
 "⌘↵ show" = "⌘↵ zeigen";
-"↵ open" = "↵ öffnen";
 "esc next" = "esc weiter";
 "%@ is done" = "%@ ist fertig";
 "%@ failed" = "%@ fehlgeschlagen";
@@ -284,3 +280,8 @@
 "Nothing needs you" = "Nichts braucht dich";
 "Prompts, questions and finished turns land here" = "Freigaben, Fragen und fertige Antworten landen hier";
 "Waiting in the inbox (⌃⌥A)" = "Wartet im Eingang (⌃⌥A)";
+"Dismiss" = "Verwerfen";
+"Don't answer" = "Nicht antworten";
+"The agent hears that you didn't answer" = "Der Agent erfährt, dass du nicht geantwortet hast";
+"%d skipped" = "%d übersprungen";
+"Still waiting, back when the inbox opens next" = "Wartet weiter, beim nächsten Öffnen wieder da";

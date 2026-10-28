@@ -105,7 +105,7 @@ final class NotchController {
             onCaptureMic: { [weak self] in self?.toggleCaptureMic() },
             onCaptureEvent: { [weak self] in self?.createCaptureEvent() },
             onPaletteActivate: { [weak self] index, secondary in self?.activatePalette(index, secondary: secondary) },
-            onInboxKey: { [weak self] primary in self?.inboxKey(primary: primary) },
+            onInboxKey: { [weak self] primary, id in self?.inboxKey(primary: primary, id: id) },
             onInboxEmpty: { [weak self] in self?.inboxEmptied() }
         )
         let hosting = NSHostingView(rootView: root)
@@ -760,21 +760,24 @@ final class NotchController {
         if inbox.current == nil { inboxEmptied() }
     }
 
-    /// ↵ (`primary`) or ⌘↵ on the inbox's front item, by key or by its button.
-    func inboxKey(primary: Bool) {
+    /// ↵ (`primary`) or ⌘↵ on the inbox's front item: by key (`id` nil), or by the button of
+    /// the card showing `id`.
+    func inboxKey(primary: Bool, id: String? = nil) {
         guard let inbox = model.inbox else { return }
-        switch primary ? inbox.primary() : inbox.openSession() {
+        switch primary ? inbox.primary(id) : inbox.openSession(id) {
         case .stay: if inbox.current == nil { inboxEmptied() }
         case .leave: collapse()
         case .show(let kind): expand(kind, pinned: true)
         }
     }
 
-    /// Nothing left: the "nothing needs you" card for a moment, then closed.
+    /// Nothing left: the "nothing needs you" card for a moment, then closed. Skipped prompts
+    /// still wait, so with those the inbox stays until esc.
     func inboxEmptied() {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.4))
-            guard let self, self.model.interaction == .inbox, self.model.inbox?.current == nil, !self.isLocked else { return }
+            guard let self, self.model.interaction == .inbox, let inbox = self.model.inbox,
+                  inbox.current == nil, inbox.count == 0, !self.isLocked else { return }
             self.collapse()
         }
     }
@@ -811,6 +814,8 @@ final class NotchController {
             guard let inbox = model.inbox else { return false }
             switch event.keyCode {
             case 53:
+                // Nothing in front (all clear, or all skipped): esc closes.
+                guard inbox.current != nil else { collapse(); return true }
                 inbox.skip()
                 if inbox.current == nil { inboxEmptied() }
                 return true

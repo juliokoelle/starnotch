@@ -13,6 +13,8 @@ final class AgentsInbox {
         case approval(ApprovalCenter.Pending)
         case done(AgentSnapshot.Agent, line: String)
         case loop(AgentSnapshot.LoopStatus)
+        /// Blocked where no prompt of ours can answer (the Claude app): only its window can.
+        case blocked(AgentSnapshot.Agent, reason: String)
     }
 
     struct Item: Identifiable {
@@ -43,7 +45,17 @@ final class AgentsInbox {
             return Item(entry: InboxEntry(id: "approval:\(pending.id)", kind: kind, at: pending.arrived), source: .approval(pending))
         }
         let now = Date()
+        let prompted = Set(approvals.queue.compactMap(\.request.agentID))
         for agent in agents.snapshot.agents {
+            // Blocked with no prompt of ours to answer: the Claude app asks in its own window.
+            // A block that came from a prompt starts with the approval prefix, also in the moment
+            // after the prompt was answered and before the agents caught up.
+            if let reason = agent.needsYou, !prompted.contains(agent.id), !reason.hasPrefix(AgentEvent.approvalPrefix) {
+                let at = agent.since ?? .distantPast
+                items.append(Item(entry: InboxEntry(id: "blocked:\(agent.id)@\(Int(at.timeIntervalSince1970))", kind: .blocked, at: at),
+                                  source: .blocked(agent, reason: reason)))
+                continue
+            }
             // Done with a turn and the user's move: not busy, not blocked on a prompt (that one is
             // in the list already), within the "your turn" window, with something said.
             guard !agent.isBusy, agent.needsYou == nil, let since = agent.since,
@@ -72,10 +84,16 @@ final class AgentsInbox {
         return state.queue(items.map(\.entry)).compactMap { byID[$0.id] }
     }
 
+    /// The card on screen. It stays in front until the user moves on or it goes away.
     var current: Item? { queue.first }
 
     /// The number in the ear: everything pending, skipped this round or not.
     var count: Int { state.count(all.map(\.entry)) }
+
+    /// Pins the front, so an arrival queues behind the card on screen.
+    func settle() {
+        state.settle(all.map(\.entry), now: Date())
+    }
 
     // MARK: Keys
 
@@ -83,24 +101,40 @@ final class AgentsInbox {
     func startRound() {
         state.forget(keeping: all.map(\.entry))
         state.startRound()
+        settle()
+    }
+
+    /// What a key or a button acts on: the card on screen (`id`, when a card's own button asks),
+    /// and nothing in the moment after the front changed by itself.
+    private func target(_ id: String?) -> Item? {
+        settle()
+        guard let item = current, id == nil || id == item.id, state.accepts(now: Date()) else { return nil }
+        return item
     }
 
     /// Esc: on to the next. A prompt stays pending (its agent still waits); a notice is done.
-    func skip() {
-        guard let item = current else { return }
+    func skip(_ id: String? = nil) {
+        guard let item = target(id) else { return }
         Haptics.tick()
         state.skip(item.entry)
+        settle()
     }
 
     /// ↵: allow a prompt, say yes to a question, open a finished session or a failed loop's log.
-    func primary() -> Outcome {
-        guard let item = current else { return .stay }
+    func primary(_ id: String? = nil) -> Outcome {
+        guard let item = target(id) else { return .stay }
+        defer { settle() }
         switch item.source {
         case .approval(let pending):
             // A question with answers wants one picked (1–4) or typed; ↵ alone does nothing.
             if pending.request.asksForAnswer { return .stay }
+            state.dismiss(item.id)
             approvals.answer(.allowOnce, to: pending.id)
             return .stay
+        case .blocked(let agent, _):
+            // Still blocked when the inbox opens next: it's back then.
+            agents.jump(to: agent)
+            return .leave
         case .done(let agent, _):
             state.dismiss(item.id)
             agents.jump(to: agent)
@@ -117,8 +151,9 @@ final class AgentsInbox {
     }
 
     /// ⌘↵: the session behind the item (its terminal or app); a loop opens in the Agents panel.
-    func openSession() -> Outcome {
-        guard let item = current else { return .stay }
+    func openSession(_ id: String? = nil) -> Outcome {
+        guard let item = target(id) else { return .stay }
+        defer { settle() }
         switch item.source {
         case .approval(let pending):
             guard let agent = agent(of: pending.request) else {
@@ -126,6 +161,9 @@ final class AgentsInbox {
                     return .leave }
                 return .stay
             }
+            agents.jump(to: agent)
+            return .leave
+        case .blocked(let agent, _):
             agents.jump(to: agent)
             return .leave
         case .done(let agent, _):
@@ -148,8 +186,8 @@ final class AgentsInbox {
     var bodyHeight: CGFloat {
         let more: CGFloat = queue.count > 1 ? InboxView.nextLineHeight : 0
         switch current?.source {
-        case .approval(let pending)?: return (pending.request.asksForAnswer ? 196 : 150) + more
-        case .done?, .loop?: return InboxView.noticeHeight + more
+        case .approval(let pending)?: return InboxView.height(of: pending.request) + more
+        case .done?, .loop?, .blocked?: return InboxView.noticeHeight + more
         case nil: return InboxView.emptyHeight
         }
     }
@@ -160,12 +198,18 @@ final class AgentsInbox {
 struct InboxView: View {
     let inbox: AgentsInbox
     let notch: CGSize
-    let onKey: (_ primary: Bool) -> Void
+    /// A card's own button: ↵ (`primary`) or ⌘↵, for the item it shows.
+    let onKey: (_ primary: Bool, _ id: String) -> Void
     var onEmpty: () -> Void = {}
 
     static let noticeHeight: CGFloat = 118
     static let nextLineHeight: CGFloat = 26
     static let emptyHeight: CGFloat = 60
+
+    /// A prompt's card: buttons, the options of a question, or options and a field to type.
+    static func height(of request: ApprovalRequest) -> CGFloat {
+        request.freeText ? 196 : request.asksForAnswer ? 172 : 150
+    }
 
     var body: some View {
         let queue = inbox.queue
@@ -186,41 +230,38 @@ struct InboxView: View {
             }
             .frame(height: notch.height)
 
+            // Worked through by keyboard many times a day: the next card is simply there.
             VStack(spacing: 0) {
                 if let item = queue.first {
                     card(item)
                         .id(item.id)
-                        .transition(.blurSlide(y: -8))
                     if queue.count > 1 { next(Array(queue.dropFirst())) }
+                } else if inbox.count > 0 {
+                    allSkipped(inbox.count)
                 } else {
-                    empty.transition(.blurSlide(y: -6))
+                    empty
                 }
             }
             .padding(.horizontal, NotchLayout.sideInset)
             .padding(.top, NotchLayout.bodyTop)
             .frame(maxHeight: .infinity, alignment: .top)
         }
+        .onChange(of: queue.map(\.id), initial: true) { inbox.settle() }
         .onChange(of: queue.isEmpty) { _, empty in if empty { onEmpty() } }
     }
 
-    /// The keys for the item in front.
+    /// The keys for the item in front that no button on its card shows (a button shows its own).
     private func hints(_ item: AgentsInbox.Item?) -> some View {
         var parts: [String] = []
         switch item?.source {
         case .approval(let pending)?:
             let request = pending.request
-            if request.provider == ApprovalRequest.mcpProvider {
-                if !request.options.isEmpty { parts.append(Localization.string("1–4 answer")) }
-                else if !request.freeText { parts.append(Localization.string("↵ yes")) }
-            } else {
-                parts.append(Localization.string("↵ allow"))
-            }
             if inbox.agent(of: request) != nil || request.cwd != nil { parts.append(Localization.string("⌘↵ open")) }
             parts.append(Localization.string("esc next"))
-        case .done?:
-            parts += [Localization.string("↵ open"), Localization.string("esc next")]
         case .loop?:
-            parts += [Localization.string("↵ open"), Localization.string("⌘↵ show"), Localization.string("esc next")]
+            parts.append(Localization.string("⌘↵ show"))
+        case .done?, .blocked?:
+            break
         case nil:
             parts.append("esc")
         }
@@ -235,24 +276,35 @@ struct InboxView: View {
         case .approval(let pending):
             // The same card as a prompt that opens the island, with the inbox's keys.
             ApprovalCard(center: inbox.approvals, pending: pending, agents: inbox.agents, inInbox: true)
-                .frame(height: pending.request.asksForAnswer ? 196 : 150)
+                .frame(height: Self.height(of: pending.request))
+        case .blocked(let agent, let reason):
+            notice(item, title: Localization.string("%@ waits").replacingOccurrences(of: "%@", with: agent.displayTitle),
+                   detail: reason, since: agent.since, provider: agent.provider,
+                   primary: "Open session", secondary: "Skip", figure: AnyView(
+                    AvatarView(character: inbox.agents.character(of: agent), mood: .yourTurn, height: 60,
+                               colorway: inbox.agents.colorway(of: agent), emergeOnAppear: false,
+                               level: inbox.agents.variantLevel(of: agent))
+                        .frame(width: 64, height: 64, alignment: .bottom)))
         case .done(let agent, let line):
-            notice(title: Localization.string("%@ is done").replacingOccurrences(of: "%@", with: agent.displayTitle),
+            notice(item, title: Localization.string("%@ is done").replacingOccurrences(of: "%@", with: agent.displayTitle),
                    detail: line, since: agent.since, provider: agent.provider,
-                   primary: "Open session", figure: AnyView(
+                   primary: "Open session", secondary: "Dismiss", figure: AnyView(
                     AvatarView(character: inbox.agents.character(of: agent), mood: .yourTurn, height: 60,
                                colorway: inbox.agents.colorway(of: agent), emergeOnAppear: false,
                                level: inbox.agents.variantLevel(of: agent))
                         .frame(width: 64, height: 64, alignment: .bottom)))
         case .loop(let loop):
-            notice(title: Localization.string("%@ failed").replacingOccurrences(of: "%@", with: loop.displayName),
+            notice(item, title: Localization.string("%@ failed").replacingOccurrences(of: "%@", with: loop.displayName),
                    detail: loop.last?.note.nilIfBlank ?? Localization.string("No note"), since: loop.outboxDate, provider: nil,
                    primary: loop.outboxLink != nil ? "Open result" : Runtime.jobs?.logURL != nil ? "Open the log" : "Show loop",
-                   figure: AnyView(AgentFace(color: AgentsModule.loopColor, mood: .failed, size: 34).frame(width: 64, height: 64)))
+                   secondary: "Dismiss", figure: AnyView(AgentFace(color: AgentsModule.loopColor, mood: .failed, size: 34).frame(width: 64, height: 64)))
         }
     }
 
-    private func notice(title: String, detail: String, since: Date?, provider: String?, primary: String, figure: AnyView) -> some View {
+    /// A finished turn, a failed loop or a blocked session: `secondary` is esc (Dismiss for a
+    /// notice, which is gone then; Skip for a blocked session, which comes back).
+    private func notice(_ item: AgentsInbox.Item, title: String, detail: String, since: Date?, provider: String?,
+                        primary: String, secondary: String, figure: AnyView) -> some View {
         NotchCard(padding: 14) {
             HStack(alignment: .top, spacing: 14) {
                 figure
@@ -277,9 +329,9 @@ struct InboxView: View {
                         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .help(detail)
                     HStack(spacing: 8) {
-                        button(primary, key: "↵", primary: true) { onKey(true) }
+                        button(primary, key: "↵", primary: true) { onKey(true, item.id) }
                         Spacer(minLength: 4)
-                        button("Skip", key: "esc", primary: false) { inbox.skip() }
+                        button(secondary, key: "esc", primary: false) { inbox.skip(item.id) }
                     }
                 }
             }
@@ -325,9 +377,30 @@ struct InboxView: View {
             }
             let title = inbox.agent(of: request)?.displayTitle ?? request.cwd.map { ($0 as NSString).lastPathComponent } ?? request.tool
             return Localization.string("%@ waits").replacingOccurrences(of: "%@", with: title)
+        case .blocked(let agent, _): return Localization.string("%@ waits").replacingOccurrences(of: "%@", with: agent.displayTitle)
         case .done(let agent, _): return Localization.string("%@ is done").replacingOccurrences(of: "%@", with: agent.displayTitle)
         case .loop(let loop): return Localization.string("%@ failed").replacingOccurrences(of: "%@", with: loop.displayName)
         }
+    }
+
+    /// Every prompt left was skipped this round: they still wait, so no all-clear.
+    private func allSkipped(_ count: Int) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.waiting)
+                .frame(width: 30, height: 30)
+                .background(Theme.waiting.opacity(0.16), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(format: Localization.string("%d skipped"), count))
+                    .font(Theme.font(14, .semibold)).foregroundStyle(Theme.textPrimary)
+                Text("Still waiting, back when the inbox opens next").font(Theme.font(12)).foregroundStyle(Theme.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: Self.emptyHeight)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var empty: some View {

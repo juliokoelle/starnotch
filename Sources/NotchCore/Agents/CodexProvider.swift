@@ -275,7 +275,7 @@ public actor CodexProvider: AgentProvider, UsageProvider, AgentEventSource, Appr
     /// A PermissionRequest forwarded by the hook script: the session waits for an approval.
     public nonisolated func parse(hook payload: Data) -> AgentEvent? {
         guard let request = ApprovalRequest.parse(payload), request.provider == Self.id, let session = request.sessionID else { return nil }
-        return AgentEvent(sessionID: "codex:" + session, kind: .needsApproval("Approve: " + request.summary), at: Date())
+        return AgentEvent(sessionID: "codex:" + session, kind: .needsApproval(AgentEvent.approvalPrefix + request.summary), at: Date())
     }
 
     /// Where the approvals integration lives (the app bundle's copy, or the repository's).

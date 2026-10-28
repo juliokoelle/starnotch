@@ -144,6 +144,18 @@ import TestSupport
         #expect((json?["recent_notes"] as? [Any])?.count == 3)
     }
 
+    @Test func nothingDueShowsTheWeekInstead() throws {
+        let now = Date()
+        let soon = RunLog.day(now.addingTimeInterval(2 * 86_400))
+        let root = try Self.folder(["Tasks.md": "- [ ] Soon 📅 \(soon)\n- [ ] Someday\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = VaultConnector(config: ConfigSection(values: ["folder": .string(root.path), "tasks": .string("Tasks.md")]),
+                                   defaults: UserDefaults(suiteName: "app.starnotch.tests")!, snapshotURL: nil)
+        let feed = vault.today(now: now)
+        #expect(feed.now.map(\.title) == ["Soon"] && feed.followUps.isEmpty && feed.nowTitle == "Coming up")
+        #expect(feed.brief == nil)
+    }
+
     @Test func unconfiguredIsNotSetUp() {
         let vault = VaultConnector(config: ConfigSection(values: ["folder": .string("/no/such/folder")]),
                                    defaults: UserDefaults(suiteName: "app.starnotch.tests")!, snapshotURL: nil)

@@ -1,7 +1,8 @@
 import Foundation
 
 /// Your notes as a connector: an Obsidian vault or any folder of Markdown files. Today shows the
-/// tasks due today or overdue, what comes up this week and the headings of today's note; a task
+/// tasks due today or overdue, what comes up this week (in the main list when nothing is due)
+/// and the headings of today's note; a task
 /// ticked off in the notch becomes `- [x]` in its file; quick capture appends to the inbox; Tara
 /// reads a snapshot (`connectors/vault.json`).
 ///
@@ -193,9 +194,12 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
                                          url: link(to: inbox)))
         }
         let home = folder.map { TodayLink(title: isObsidian ? "Obsidian" : L("Notes"), url: link(to: $0)) }
-        return TodayFeed(now: due.map { item($0, now: now) }, followUps: coming.map { item($0, now: now) },
+        // Nothing due: what comes up this week takes the main list instead of an empty card.
+        let main = due.isEmpty ? coming : due
+        return TodayFeed(now: main.map { item($0, now: now) }, followUps: due.isEmpty ? [] : coming.map { item($0, now: now) },
                          brief: brief, counters: counters, home: home,
-                         nowTitle: L("Due today"), followUpTitle: L("Coming up"), emptyText: L("Nothing due today."))
+                         nowTitle: L(due.isEmpty && !coming.isEmpty ? "Coming up" : "Due today"), followUpTitle: L("Coming up"),
+                         emptyText: L("Nothing due this week."))
     }
 
     private func item(_ task: VaultTask, now: Date) -> TodayItem {

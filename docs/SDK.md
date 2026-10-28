@@ -61,7 +61,7 @@ inbox = "Inbox.md"              # quick capture appends here
 loops = "loops/RUNLOG.md"       # the loops' run log (unless [connectors.runlog] names one)
 ```
 
-Today shows the tasks due today or overdue (`📅 2026-10-28`, `[due:: 2026-10-28]` or `(due 2026-10-28)`), what comes up within a week and the headings of today's note. Ticking a task off writes `- [x]` into its line, only if that line is still there exactly as read and the file didn't change meanwhile; repeating tasks (🔁) are left to the notes app. The folder is watched with FSEvents, and on every change `~/Library/Application Support/Starnotch/connectors/vault.json` (0600) is rewritten for Tara: open tasks, today's note (trimmed), the notes changed last.
+Today shows the tasks due today or overdue (`📅 2026-10-28`, `[due:: 2026-10-28]` or `(due 2026-10-28)`), what comes up within a week (in the main list when nothing is due) and the headings of today's note. Ticking a task off writes `- [x]` into its line, only if that line is still there exactly as read and the file didn't change meanwhile; repeating tasks (🔁) are left to the notes app. The folder is watched with FSEvents, and on every change `~/Library/Application Support/Starnotch/connectors/vault.json` (0600) is rewritten for Tara: open tasks, today's note (trimmed), the notes changed last.
 
 ```swift
 import Foundation

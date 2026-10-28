@@ -55,6 +55,7 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 | ⬜ | `ask` in the local API | Blocking question with options, returns the answer; the MCP server and the SDKs build on it |
 | ⬜ | Cloud sessions | Not on disk: the Claude app keeps no local list of cloud sessions (checked 26.10.: only `local_*.json`, ids and presets). Comes with the relay in Wave 2: a hook in the cloud environment reports to the relay, the notch shows the session with the star on a cloud |
 | ✅ | Codex provider | Sessions, limits, approvals through its `PermissionRequest` hook |
+| ✅ | Ask Tara | ⌃⌥T or a click on the floating Tara: a question bubble beside her, typed or spoken (on-device speech, hold the keys); answers from meetings, quick captures and connector snapshots with clickable sources, follow-ups, esc closes; drop her on a window to ask about it. Streaming the answer next |
 
 ### Distribution
 

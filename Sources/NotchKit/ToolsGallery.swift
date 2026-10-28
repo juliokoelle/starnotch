@@ -73,6 +73,7 @@ enum ToolInfo {
         case .feature(.imageConverter): "photo.on.rectangle.angled"
         case .feature(.keepAwake): "cup.and.saucer"
         case .feature(.quickCapture): "square.and.pencil"
+        case .feature(.askTara): "bubble.left.and.text.bubble.right"
         }
     }
 
@@ -104,6 +105,7 @@ enum ToolInfo {
         case .feature(.imageConverter): "Turns images on the shelf into PNG, JPEG, HEIC or TIFF"
         case .feature(.keepAwake): "Keeps the Mac and the display awake, from the menu"
         case .feature(.quickCapture): "A note or a task in a second, on ⌃⌥N"
+        case .feature(.askTara): "Ask about your meetings and notes, on ⌃⌥T or a click on Tara"
         }
     }
 }

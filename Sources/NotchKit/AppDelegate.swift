@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shell: ShellMonitor?
     private let updater = Updater()
     private var approvals: ApprovalCenter?
+    // Ask Tara (strand ask)
+    private var ask: AskTara?
+    private var askHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -186,6 +189,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         agents.onFigurePull = pull
         meeting.onListening = { companion.listening = $0 }
+        // MARK: Ask Tara (strand ask): ⌃⌥T (see applyAskTara) or a click on the floating Tara opens
+        // a question bubble beside her; the answer comes from an agent.py of its own.
+        let ask = AskTara()
+        self.ask = ask
+        companion.ask = ask
+        ask.onOpen = { companion.showAsk() }
+        ask.onClose = { companion.hideAsk() }
+        if let name = options.preview, name.hasPrefix("ask-") { ask.preview(name) }
         meeting.onCard = { [weak self] entry in
             // Popped out, the bubble beside the character takes the sneak's place.
             if companion.isOpen {
@@ -357,6 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lidAwake?.quit()
         approvals?.stop()
         meeting?.shutdown()
+        ask?.shutdown()
     }
 
     /// Reopening the app from Finder or Spotlight shows the settings.
@@ -523,6 +535,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureHotKey = capture ? captureHotKey ?? HotKey.controlOptionN { [weak self] in self?.notch.openCapture() } : nil
         inboxHotKey = capture ? inboxHotKey ?? HotKey.controlOptionI { if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) } } : nil
 
+        applyAskTara(isOn(.askTara))
+
         let awake = isOn(.keepAwake)
         system?.offersKeepAwake = awake
         if !awake { keepAwake.set(false) }
@@ -656,6 +670,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let agent = agents.main else { return }
         agents.markFinished(agent.id)
         agents.onFinished?(agent)
+    }
+
+    /// Ask Tara (strand ask): ⌃⌥T and the click on the floating Tara while the tool is on; off, an
+    /// open question bubble closes.
+    private func applyAskTara(_ on: Bool) {
+        guard let ask else { return }
+        askHotKey = on ? askHotKey ?? HotKey.controlOptionT(action: { [weak ask] in ask?.hotKeyPressed() },
+                                                            release: { [weak ask] in ask?.hotKeyReleased() }) : nil
+        companion?.onTapFigure = on ? { [weak ask] in ask?.toggle() } : nil
+        companion?.onDrop = on ? { [weak ask] point in ask?.droppedOnWindow(at: point) } : nil
+        if !on { ask.close() }
     }
 
     private func applyDemoSlots() {

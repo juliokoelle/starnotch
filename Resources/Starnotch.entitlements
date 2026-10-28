@@ -7,5 +7,7 @@
     <key>com.apple.security.automation.apple-events</key><true/>
     <!-- Next meeting, quick capture events, Reminders in Today. -->
     <key>com.apple.security.personal-information.calendars</key><true/>
+    <!-- Speaking to Tara (Ask Tara: hold ⌃⌥T or her mic button). -->
+    <key>com.apple.security.device.audio-input</key><true/>
 </dict>
 </plist>

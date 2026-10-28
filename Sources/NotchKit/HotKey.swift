@@ -8,6 +8,8 @@ final class HotKey {
     private var hotKeyRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
     private let action: () -> Void
+    /// The keys came up again (hold-to-talk); nil for shortcuts that only press.
+    private let release: (() -> Void)?
 
     /// Control + Option + Space.
     static func controlOptionSpace(action: @escaping () -> Void) -> HotKey {
@@ -39,13 +41,22 @@ final class HotKey {
         HotKey(keyCode: UInt32(kVK_ANSI_I), modifiers: UInt32(controlKey | optionKey), id: 5, action: action)
     }
 
+    /// Control + Option + T: ask Tara; held, she listens until the keys come up.
+    static func controlOptionT(action: @escaping () -> Void, release: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(controlKey | optionKey), id: 7, action: action, release: release)
+    }
+
     private let id: UInt32
 
-    init(keyCode: UInt32, modifiers: UInt32, id: UInt32, action: @escaping () -> Void) {
+    init(keyCode: UInt32, modifiers: UInt32, id: UInt32, action: @escaping () -> Void, release: (() -> Void)? = nil) {
         self.action = action
+        self.release = release
         self.id = id
 
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        var eventTypes = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))]
+        if release != nil {
+            eventTypes.append(EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)))
+        }
         let context = Unmanaged.passUnretained(self).toOpaque()
         let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
             guard let context else { return noErr }
@@ -55,10 +66,13 @@ final class HotKey {
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &pressed)
             guard pressed.id == hotKey.id else { return OSStatus(eventNotHandledErr) }
+            let released = GetEventKind(event) == UInt32(kEventHotKeyReleased)
             // Carbon delivers hot key events on the main thread.
-            MainActor.assumeIsolated { hotKey.action() }
+            MainActor.assumeIsolated {
+                if released { hotKey.release?() } else { hotKey.action() }
+            }
             return noErr
-        }, 1, &eventType, context, &handlerRef)
+        }, eventTypes.count, &eventTypes, context, &handlerRef)
 
         let hotKeyID = EventHotKeyID(signature: OSType(0x4E_53_57_54), id: id)  // "NSWT"
         let registered = RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)

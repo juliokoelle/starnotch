@@ -23,9 +23,20 @@ final class MeetingCompanion: NSObject {
     @ObservationIgnored let cast: AvatarCast
     /// A click on a bubble opens the full card in the notch.
     @ObservationIgnored var onOpenCard: (Int) -> Void = { _ in }
-    @ObservationIgnored private var panel: NSPanel?
+    /// Ask Tara: her question bubble shows beside her while it's open; a click on her opens it.
+    @ObservationIgnored var ask: AskTara?
+    @ObservationIgnored var onTapFigure: (() -> Void)?
+    /// Let go somewhere other than the notch (Ask Tara: on a window, to ask about it); AppKit coordinates.
+    @ObservationIgnored var onDrop: ((CGPoint) -> Void)?
+    /// She came out only to be asked: she goes back when the question bubble closes.
+    @ObservationIgnored private var outForAsk = false
+    /// Where she stood before the bubble pushed her into the screen; she goes back there when it closes.
+    @ObservationIgnored private var originBeforeAsk: CGPoint?
+    @ObservationIgnored private var panel: FreePanel?
     private static let originKey = "meetingCompanionOrigin"
     private static let size = CGSize(width: 300, height: 260)
+    /// With the question bubble: room for her answer and its sources beside her.
+    private static let askSize = CGSize(width: 420, height: 460)
     /// The figure's center, from the window's bottom right corner (padding 8, figure 84 × 80).
     private static let figure = CGPoint(x: 50, y: 48)
 
@@ -34,7 +45,10 @@ final class MeetingCompanion: NSObject {
     }
 
     func open() {
-        guard panel == nil else { return }
+        guard panel == nil else {
+            outForAsk = false  // asked to stay out (a meeting): she stays when the question bubble closes
+            return
+        }
         let panel = FreePanel(contentRect: CGRect(origin: savedOrigin(), size: Self.size),
                               styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         // Above the menu bar, so she can be carried all the way up into the notch.
@@ -85,7 +99,8 @@ final class MeetingCompanion: NSObject {
     private func moveToPointer() {
         let mouse = NSEvent.mouseLocation
         // The figure sits at the bottom right of the window: keep it under the pointer.
-        panel?.setFrameOrigin(CGPoint(x: mouse.x - Self.size.width + Self.figure.x, y: mouse.y - Self.figure.y))
+        let width = panel?.frame.width ?? Self.size.width
+        panel?.setFrameOrigin(CGPoint(x: mouse.x - width + Self.figure.x, y: mouse.y - Self.figure.y))
     }
 
     func close() {
@@ -93,6 +108,55 @@ final class MeetingCompanion: NSObject {
         panel = nil
         bubbles = []
         isOpen = false
+        outForAsk = false
+        ask?.close()
+    }
+
+    // MARK: Ask Tara
+
+    /// The question bubble opens: she comes out if she isn't, the window grows to the left and up
+    /// around her (she stays where she is) and takes the keyboard without activating the app.
+    func showAsk() {
+        if panel == nil {
+            open()
+            outForAsk = true
+        }
+        guard let panel else { return }
+        if panel.frame.size != Self.askSize { originBeforeAsk = panel.frame.origin }
+        resize(panel, to: Self.askSize)
+        panel.acceptsKey = true
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func hideAsk() {
+        guard let panel else { return }
+        panel.acceptsKey = false
+        panel.resignKey()
+        if outForAsk {
+            outForAsk = false
+            close()
+            return
+        }
+        if let origin = originBeforeAsk {
+            panel.setFrame(CGRect(origin: origin, size: Self.size), display: true)
+        } else {
+            resize(panel, to: Self.size)
+        }
+        originBeforeAsk = nil
+    }
+
+    private func resize(_ panel: NSPanel, to size: CGSize) {
+        let frame = panel.frame
+        guard frame.size != size else { return }
+        // The figure sits at the bottom right: keep that corner where it is, unless the bigger window
+        // would leave the screen at the top or the left; then she moves in just as far.
+        var target = CGRect(x: frame.maxX - size.width, y: frame.minY, width: size.width, height: size.height)
+        if size.width > frame.width || size.height > frame.height,
+           let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            target.origin.y -= max(0, target.maxY - visible.maxY)
+            target.origin.x += max(0, visible.minX - target.minX)
+        }
+        panel.setFrame(target, display: true)
     }
 
     /// A new meeting card: a bubble for a few seconds, at most three at a time.
@@ -138,8 +202,12 @@ final class MeetingCompanion: NSObject {
 
     func endDrag() {
         dragStart = nil
+        originBeforeAsk = nil  // moved by hand: she stays where she was put
         guard let panel else { return }
-        let frame = panel.frame
+        // Saved as if the bubble were closed: the next time she comes out at the same place.
+        let frame = panel.frame.size == Self.askSize
+            ? CGRect(x: panel.frame.maxX - Self.size.width, y: panel.frame.minY, width: Self.size.width, height: Self.size.height)
+            : panel.frame
         // Let go up at the notch (the pointer in the menu bar, near the middle): back into it.
         let mouse = NSEvent.mouseLocation
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? panel.screen,
@@ -159,11 +227,15 @@ final class MeetingCompanion: NSObject {
             return
         }
         UserDefaults.standard.set([Double(frame.origin.x), Double(frame.origin.y)], forKey: Self.originKey)
+        onDrop?(mouse)
     }
 }
 
-/// A panel macOS doesn't push back below the menu bar.
+/// A panel macOS doesn't push back below the menu bar. It takes the keyboard only while Tara is
+/// asked something, so a click on her or a card never steals typing from the app in front.
 private final class FreePanel: NSPanel {
+    var acceptsKey = false
+    override var canBecomeKey: Bool { acceptsKey }
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
@@ -172,13 +244,22 @@ private struct CompanionView: View {
     @State private var hovering = false
 
     var body: some View {
+        let asking = companion.ask?.isOpen == true
         VStack(alignment: .trailing, spacing: 6) {
             Spacer(minLength: 0)
-            ForEach(companion.bubbles) { bubble in
-                BubbleView(bubble: bubble) { companion.onOpenCard(bubble.id) }
-                    .transition(Theme.reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
+            // While she's asked something, her answer takes the cards' place.
+            if !asking {
+                ForEach(companion.bubbles) { bubble in
+                    BubbleView(bubble: bubble) { companion.onOpenCard(bubble.id) }
+                        .transition(Theme.reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
+                }
             }
             HStack(alignment: .bottom, spacing: 4) {
+                if let ask = companion.ask, asking {
+                    AskTaraView(ask: ask)
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
+                }
                 if hovering {
                     Button { companion.close() } label: {
                         Image(systemName: "xmark")
@@ -191,20 +272,24 @@ private struct CompanionView: View {
                     .help("Back to the notch")
                     .transition(.opacity)
                 }
-                AvatarView(character: companion.cast.main, mood: companion.listening ? .listening : .idle,
+                AvatarView(character: companion.cast.main,
+                           mood: companion.ask?.mood ?? (companion.listening ? .listening : .idle),
                            height: 72, colorway: companion.cast.colorway, emergeOnAppear: false)
                     .frame(width: 84, height: 80, alignment: .bottom)
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
                         .onChanged { _ in companion.drag() }
                         .onEnded { _ in companion.endDrag() })
-                    .help("Drag to move; let go at the notch to put it back")
+                    .simultaneousGesture(TapGesture().onEnded { companion.onTapFigure?() })
+                    .help(Localization.string(companion.onTapFigure == nil ? "Drag to move; let go at the notch to put it back"
+                                                                           : "Click to ask Tara; drag to move, let go at the notch to put it back"))
             }
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: hovering)
+        .animation(Theme.snappy, value: asking)
     }
 }
 

@@ -19,6 +19,7 @@ Meet Tara, a little star that lives in your MacBook's notch. Starnotch turns the
 | **Today** | Tasks, follow-ups and a short brief from a connector. | A connector |
 | **Meeting** | Listens along and remembers your past meetings: flags when something said contradicts an earlier decision, nudges about open promises, writes down new ones, answers questions with the quote they come from. | An Anthropic API key; Reson8 for live audio, Jamie for past meetings |
 | **Quick capture** | ⌃⌥N: one line out of the notch, dates and people recognised as you type (English and German). Everything lands in `Inbox.md`, ⌃⌥I opens it. | Nothing |
+| **Ask Tara** | ⌃⌥T or a click on the floating Tara: ask about your meetings, quick captures and notes; hold the keys to speak. The answer comes with its sources (meeting and date, the note), follow-ups keep the thread, esc closes. Drop her on a window to ask about it. | Claude Code on your plan or an API key (without one she only finds words); uv |
 
 Modules whose source isn't on your Mac hide themselves. You can switch any module off in Settings.
 
@@ -62,11 +63,13 @@ The second step of the first launch lists what it found (Claude Code, Codex, cal
 | Automation (Spotify, Music) | Now playing, asked the first time music plays | The module stays quiet |
 | Accessibility (optional) | Escape cancels the wheel while you hold the notch over other apps; the open island ends between two menu bar icons instead of cutting one | Release in the center to cancel; the island keeps its fixed width |
 | Automation (System Events, optional) | The dark mode switch in the System tab, asked the first time you use it | The switch flips back and the notch points to System Settings › Privacy & Security › Automation |
+| Speech recognition and microphone (optional) | Speaking to Tara: hold ⌃⌥T or her mic button, asked the first time. Recognised on the Mac when the language allows it | Type the question |
+| Screen Recording (optional) | Dropping Tara on a window to ask about it, asked the first time | She answers without the picture |
 | Administrator password (once, optional) | Keep awake with the lid closed: installs `/etc/sudoers.d/starnotch-pmset`, which lets you run only `pmset -a disablesleep 1` and `0` without a password (checked by visudo first). Settings › What's set up removes it | Keep awake works only with the lid open |
 
 ## Privacy
 
-Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API, and the Jamie import reads from your Jamie account.
+Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API, and the Jamie import reads from your Jamie account. Ask Tara sends your question, the meeting memory, your quick captures, any connector snapshots and, when you drop her on a window, its picture to the brain you chose (Claude Code on your plan, or Anthropic's API); with rules nothing leaves the Mac.
 
 ## Plan limits and context
 

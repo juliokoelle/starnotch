@@ -1,12 +1,14 @@
 /// The small tools inside or beside the tabs, each with its own switch in the Tools gallery.
 public enum ToolFeature: String, Codable, CaseIterable, Sendable {
     case clipboard, timers, shelf, imageConverter, keepAwake, quickCapture
+    case askTara
 
     /// The tab it lives in; nil for tools outside the tabs (the menu, a shortcut, the plus button).
     public var module: ModuleKind? {
         switch self {
         case .clipboard, .timers, .shelf, .imageConverter: .tools
         case .keepAwake, .quickCapture: nil
+        case .askTara: nil
         }
     }
 
@@ -21,6 +23,7 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .imageConverter: "Image converter"
         case .keepAwake: "Keep awake"
         case .quickCapture: "Quick capture"
+        case .askTara: "Ask Tara"
         }
     }
 }

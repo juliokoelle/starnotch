@@ -335,18 +335,6 @@ private struct CompanionView: View {
                         .padding(.bottom, 30)
                         .transition(Theme.reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
                 }
-                if hovering {
-                    Button { companion.close() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Theme.textPrimary)
-                            .frame(width: 20, height: 20)
-                            .background(Color.black.opacity(0.75), in: Circle())
-                    }
-                    .buttonStyle(PressScale())
-                    .help("Back to the notch")
-                    .transition(.opacity)
-                }
                 AvatarView(character: companion.cast.main,
                            mood: companion.ask?.mood ?? (companion.listening ? .listening : .idle),
                            height: 72, colorway: companion.cast.colorway, emergeOnAppear: false)
@@ -364,6 +352,21 @@ private struct CompanionView: View {
                     .simultaneousGesture(TapGesture().onEnded { companion.onTapFigure?() })
                     .help(Localization.string(companion.onTapFigure == nil ? "Drag to move; let go at the notch to put it back"
                                                                            : "Click to ask Tara; drag to move, let go at the notch to put it back"))
+                    // On her corner, not in the row: a bubble beside her doesn't shift when it shows.
+                    .overlay(alignment: .topLeading) {
+                        if hovering {
+                            Button { companion.close() } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .frame(width: 20, height: 20)
+                                    .background(Color.black.opacity(0.75), in: Circle())
+                            }
+                            .buttonStyle(PressScale())
+                            .help("Back to the notch")
+                            .transition(.opacity)
+                        }
+                    }
             }
         }
         .padding(8)
@@ -461,7 +464,7 @@ struct TipBubble: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
-                            .fixedSize()
+                            .truncationMode(.tail)
                             .padding(.horizontal, 9)
                             .frame(height: 26)
                             .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))

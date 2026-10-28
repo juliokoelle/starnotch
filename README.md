@@ -48,9 +48,9 @@ open build/Starnotch.app
 
 Requires macOS 14 Sonoma or later and the Swift 6 toolchain (Xcode or just the Command Line Tools).
 
-The first launch is one calm window with one card per step: meet Tara and pick her look, set up your agents, allow the calendar, allow the music players, connect Jamie, choose how Tara thinks (your Claude subscription through Claude Code, your own API key, Apple Intelligence on this Mac, or simple rules), pick your notes folder, and switch on the tools you want. Each permission and connection says in one sentence why it asks and where the data stays; optional ones say so and can be skipped for now, and a granted permission turns its icon into a check. Everything is in Settings later, and nothing is set up until you click. At the end Tara drops out of the notch with "Welcome to Starnotch" (left out with Reduce Motion), greets you in a speech bubble beside her and shows what she already found on this Mac: your agents, meetings in her memory, your notes and your next meeting.
+The first launch is one calm window with one card per step: meet Tara and pick her look, set up your agents, allow the calendar, allow the music players (only when the system-wide source can't be read), connect Jamie, choose how Tara thinks (your Claude subscription through Claude Code, your own API key, Apple Intelligence on this Mac, or simple rules), pick your notes folder, and switch on the tools you want. Each permission and connection says in one sentence why it asks and where the data stays; optional ones say so and can be skipped for now, and a granted permission turns its icon into a check. Everything is in Settings later, and nothing is set up until you click; open at login starts off. At the end Tara drops out of the notch with "Welcome to Starnotch" (left out with Reduce Motion), greets you in a speech bubble beside her and shows what she already found on this Mac: your agents, meetings in her memory, your notes and your next meeting.
 
-<p align="center"><img src="docs/screenshots/onboarding.png" width="420" alt="Starnotch first launch: Tara comes out of the notch, pick her character and colour"></p>
+<p align="center"><img src="docs/screenshots/onboarding.png" width="420" alt="Starnotch first launch, step one of eight: meet Tara, pick her character and colour"></p>
 
 ## Set up in one click
 

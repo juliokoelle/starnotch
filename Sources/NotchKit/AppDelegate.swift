@@ -218,13 +218,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Her first bubble: what she can see on this Mac already.
         welcome.findings = { [weak self, weak calendar, weak meeting] in
             var found = WelcomeTour.Findings()
-            found.agents = self?.setup?.foundAgents.map(\.name) ?? []
+            // Only the agents the notch follows now (the other tools need their hooks set up).
+            found.agents = self?.setup?.trackedAgents.map(\.name) ?? []
             if case .done(let count, _) = meeting?.jamie.phase { found.meetings = count }
             found.notes = (VaultSetup.preview ?? Runtime.vault)?.folder?.lastPathComponent
             if let next = calendar?.nextAttention { found.nextMeeting = (next.title, next.start) }
             return found
         }
-        welcome.openNotch = { [weak self] in self?.notch.expand(.agents) }
+        // Pinned with the keyboard: the pointer is still over at her bubble.
+        welcome.openNotch = { [weak self] in self?.notch.expandWithFocus(.agents) }
+        welcome.islandScreen = { [weak self] in self?.notch.islandScreen }
         companion.onOpenCard = { [weak self] id in
             if let url = URL(string: "\(Brand.urlScheme)://meeting?card=\(id)") { self?.showMeetingCard(url) }
         }
@@ -699,8 +702,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// `--preview onboarding[:step[:state]]`: a step with nothing behind it; the Jamie row in
-    /// one of its states (`connecting`, `login`, `syncing`, `done`, `empty`, `failed`), or with
-    /// `granted` the step as it looks right after its button (its check popped).
+    /// one of its states (`connecting`, `login`, `syncing`, `done`, `empty`, `failed`), with
+    /// `granted` the step as it looks right after its button (its check popped), or the players'
+    /// step after macOS said no (`denied`) or asked nothing yet (`later`).
     private func showOnboardingPreview(_ name: String) {
         let parts = name.split(separator: ":").map(String.init)
         let step = name == "setup-consent" || name == "setup-agents" ? .agents : parts.count > 1 ? Int(parts[1]).flatMap(Onboarding.Step.init(rawValue:)) : nil
@@ -708,6 +712,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard parts.count > 2, let jamie = onboarding?.model.jamie else { return }
         switch parts[2] {
         case "granted": onboarding?.model.previewDone()
+        case "later": onboarding?.model.setup.previewMusic(.later)
+        case "denied": onboarding?.model.setup.previewMusic(.denied)
         case "connecting": jamie.preview(.connecting)
         case "login": jamie.preview(.login(nil))
         case "syncing": jamie.preview(.syncing(count: 7, title: "Weekly with Lena"))

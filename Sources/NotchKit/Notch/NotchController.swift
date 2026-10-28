@@ -663,6 +663,15 @@ final class NotchController {
         panel.makeKey()
     }
 
+    /// Opens on `module`, pinned and with keyboard focus (esc closes), for an open from outside
+    /// the island, such as Tara's "Open the notch".
+    func expandWithFocus(_ module: ModuleKind) {
+        expand(module, pinned: true)
+        guard model.interaction == .expanded else { return }
+        model.keyboardFocus = true
+        panel.makeKey()
+    }
+
     /// ⌃⌥Space: open with keyboard focus, or close.
     func toggleFromKeyboard() {
         if model.interaction == .expanded {

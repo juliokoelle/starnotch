@@ -25,13 +25,20 @@ final class Onboarding {
     let jamie: JamieConnect
     @ObservationIgnored var onFinish: () -> Void = {}
     @ObservationIgnored private var notesSetup: VaultSetup?
+    /// Goes up each time the window comes back to the front: the calendar's state is read again
+    /// (macOS doesn't announce a change made in System Settings).
+    private(set) var rechecks = 0
 
     init(state: AppState, cast: AvatarCast, setup: SetupCenter, jamie: JamieConnect) {
         self.state = state
         self.cast = cast
         self.setup = setup
         self.jamie = jamie
+        // Open at login starts off: only its own switch in the tools step turns it on.
+        setup.selected.remove(.launchAtLogin)
     }
+
+    func recheck() { rechecks += 1 }
 
     static var motion: Animation { Theme.reduceMotion ? .easeOut(duration: 0.12) : .spring(duration: 0.28, bounce: 0.1) }
     /// A step's icon turning into a check: a short pop, a plain fade with Reduce Motion.
@@ -41,11 +48,12 @@ final class Onboarding {
     /// (open at login); the agents step sets up everything else that was found.
     static let ownSteps: Set<SetupItem> = [.calendar, .musicAutomation, .launchAtLogin, .lidAwake]
 
-    /// The steps this Mac shows: the players' step only with a player installed, the notes step
-    /// only with the notes connector in this build.
+    /// The steps this Mac shows: the players' step only with a player installed and the
+    /// system-wide source not working (it needs no permission), the notes step only with the
+    /// notes connector in this build. Previews show the players' step.
     var flow: OnboardingFlow {
         var hidden: Set<Step> = []
-        if !setup.offered.contains(.musicAutomation) { hidden.insert(.music) }
+        if !setup.offered.contains(.musicAutomation) || (MediaRemoteBridge.isUsable && !setup.preview) { hidden.insert(.music) }
         if (VaultSetup.preview ?? Runtime.vault) == nil { hidden.insert(.notes) }
         return OnboardingFlow(hidden: hidden)
     }
@@ -89,22 +97,36 @@ final class Onboarding {
 
     // MARK: Permissions
 
-    enum Grant: Equatable { case notAsked, asking, granted, denied }
+    /// `later`: nothing to allow yet (no player was running). `writeOnly`: the calendar may only
+    /// add events.
+    enum Grant: Equatable { case notAsked, asking, granted, denied, later, writeOnly }
 
-    /// Where a permission stands. Previews only know what was clicked in them.
+    /// Where a permission stands: the calendar as macOS has it now, the players as macOS
+    /// answered this launch. Previews only know what was clicked in them.
     func grant(_ item: SetupItem) -> Grant {
-        switch setup.status[item] {
-        case .running: return .asking
-        case .failed: return .denied
-        case .done: return .granted
-        default: break
+        if setup.status[item] == .running { return .asking }
+        if item == .musicAutomation {
+            switch setup.musicPermission {
+            case .allowed: return .granted
+            case .denied: return .denied
+            case .later: return .later
+            case nil: return .notAsked
+            }
         }
-        if setup.preview { return .notAsked }
+        if setup.preview {
+            switch setup.status[item] {
+            case .failed: return .denied
+            case .done: return .granted
+            default: return .notAsked
+            }
+        }
         switch item {
         case .calendar:
+            _ = rechecks
             switch EKEventStore.authorizationStatus(for: .event) {
             case .notDetermined: return .notAsked
             case .fullAccess: return .granted
+            case .writeOnly: return .writeOnly
             default: return .denied
             }
         default:
@@ -148,7 +170,7 @@ final class Onboarding {
         }
     }
 
-    /// Open at login, if switched on with the tools, goes in with the last click.
+    /// Open at login, only when its switch in the tools step was turned on, goes in with the last click.
     func finish() {
         if setup.selected.contains(.launchAtLogin) && setup.offered.contains(.launchAtLogin)
             && !setup.isSetUp(.launchAtLogin) && setup.status[.launchAtLogin] == nil {
@@ -206,11 +228,20 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()
+            // A small screen: the window fits under the menu bar, the step scrolls, the buttons stay.
+            if let visible = (window.screen ?? NSScreen.main)?.visibleFrame, visible.height - 20 < window.frame.height {
+                window.setFrame(NSRect(x: window.frame.minX, y: visible.minY + 10, width: window.frame.width, height: visible.height - 20),
+                                display: false)
+            }
             self.window = window
         }
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        model.recheck()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -241,7 +272,9 @@ struct OnboardingView: View {
             .clipped()
             footer
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        // The window's height: 700, less on a small screen.
+        .frame(width: Self.size.width)
+        .frame(maxHeight: .infinity)
         .background(Color.black)
         .ignoresSafeArea()
         .environment(\.colorScheme, .dark)
@@ -258,48 +291,48 @@ struct OnboardingView: View {
     @ViewBuilder private func page(_ step: Onboarding.Step) -> some View {
         switch step {
         case .tara:
-            Page(model: model, title: "Meet Tara",
+            Page(model: model, step: step, title: "Meet Tara",
                  why: "\(Brand.displayName) turns the notch into a calm place for your agents, meetings and music. Tara lives there and comes out when something needs you.") {
                 TaraStep(model: model)
             }
         case .agents:
-            Page(model: model, symbol: "terminal", title: "Your agents",
+            Page(model: model, step: step, symbol: "terminal", title: "Your agents",
                  why: "See what your coding agents do and answer their requests from the notch. One click connects what \(Brand.displayName) found.",
                  stays: "Hooks and backups stay on this Mac. Settings › What's set up undoes each change.") {
                 AgentsStep(model: model)
             }
         case .calendar:
-            Page(model: model, symbol: "calendar", title: "Your calendar",
+            Page(model: model, step: step, symbol: "calendar", title: "Your calendar",
                  why: "Tara shows your next meeting, counts down to it and joins the call with one click.",
                  stays: "Your calendar is read on this Mac; an event is only added when you capture one.") {
                 PermissionStep(model: model, item: .calendar)
             }
         case .music:
-            Page(model: model, symbol: "music.note", title: "Music",
+            Page(model: model, step: step, symbol: "music.note", title: "Music",
                  why: "Play, pause and skip from the notch, with the cover beside the island. macOS asks once for each player.",
-                 stays: "\(Brand.displayName) only sends play, pause and skip.") {
+                 stays: "Only needed when the system-wide source can't be read. The commands go to the player on this Mac.") {
                 PermissionStep(model: model, item: .musicAutomation)
             }
         case .meetings:
-            Page(model: model, symbol: "waveform", title: "Meetings",
+            Page(model: model, step: step, symbol: "waveform", title: "Meetings",
                  why: "Tara remembers what was said in your meetings and points out contradictions, open questions and promises.",
-                 stays: "Your meetings are copied into Tara's memory on this Mac.") {
+                 stays: "Copied into Tara's memory on this Mac. With Claude as her brain, that memory goes to Anthropic when she answers or writes meeting cards.") {
                 MeetingsStep(model: model)
             }
         case .brain:
-            Page(model: model, symbol: "brain", title: "How Tara thinks",
+            Page(model: model, step: step, symbol: "brain", title: "How Tara thinks",
                  why: "The model behind Tara's answers and meeting cards. You can change it any time.",
                  stays: "Apple Intelligence and simple rules stay on this Mac; with Claude, the text goes to Anthropic.") {
                 BrainStep(model: model)
             }
         case .notes:
-            Page(model: model, symbol: "books.vertical", title: "Your notes",
+            Page(model: model, step: step, symbol: "books.vertical", title: "Your notes",
                  why: "An Obsidian vault or any Markdown folder: your tasks and today's note in the notch, and Tara reads along.",
-                 stays: "Your notes stay in their folder on this Mac.") {
+                 stays: "Your notes stay in their folder. With Claude as Tara's brain, your tasks and today's note go to Anthropic when you ask her something.") {
                 NotesStep(model: model)
             }
         case .tools:
-            Page(model: model, symbol: "square.grid.2x2", title: "Tools",
+            Page(model: model, step: step, symbol: "square.grid.2x2", title: "Tools",
                  why: "Switch on what you want in the notch; the rest stays out of the way. Settings › Tools has the same switches.") {
                 ToolsStep(model: model)
             }
@@ -324,8 +357,8 @@ struct OnboardingView: View {
             .font(.system(size: 14))
             // A quiet promise under every step.
             Label("Nothing changes without your click", systemImage: "lock")
-                .font(.system(size: 12.5))
-                .foregroundStyle(Theme.textTertiary)
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textSecondary)
                 .labelStyle(.titleAndIcon)
         }
         .padding(.horizontal, 40)
@@ -384,13 +417,21 @@ private struct StepIndicator: View {
                 let current = step == model.step
                 let done = position < index
                 Button { model.go(to: step) } label: {
-                    // The current dot stretches into a dash; scaled, so only the transform moves.
-                    Capsule()
-                        .fill(current ? Theme.accent : Color.white.opacity(done ? 0.5 : 0.16))
-                        .frame(width: 18, height: 6)
-                        .scaleEffect(x: current ? 1 : 6 / 18, y: 1)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
+                    // A round dot; the current one is a dash that grows out of it. Scale and
+                    // opacity only, and both ends stay round at rest.
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(done ? 0.5 : 0.16))
+                            .frame(width: 6, height: 6)
+                            .opacity(current ? 0 : 1)
+                        Capsule()
+                            .fill(Theme.accent)
+                            .frame(width: 18, height: 6)
+                            .scaleEffect(x: current ? 1 : 6 / 18, y: 1)
+                            .opacity(current ? 1 : 0)
+                    }
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(Text(LocalizedStringKey(Self.name(step))))
@@ -418,6 +459,8 @@ private struct StepIndicator: View {
 /// A step: its icon, title, why it's asked and where the data stays, then what it asks.
 private struct Page<Content: View>: View {
     let model: Onboarding
+    /// The step this page shows (the model moves on while the old page slides out).
+    let step: Onboarding.Step
     var symbol: String?
     let title: LocalizedStringKey
     let why: LocalizedStringKey
@@ -429,14 +472,14 @@ private struct Page<Content: View>: View {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 14) {
                     if let symbol {
-                        StepIcon(symbol: symbol, done: model.isDone(model.step))
+                        StepIcon(symbol: symbol, done: model.isDone(step))
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(title)
                                 .font(.system(size: 26, weight: .semibold))
                                 .tracking(-0.3)
-                            if model.step.isOptional {
+                            if step.isOptional {
                                 Text("Optional")
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(Theme.textSecondary)
@@ -681,17 +724,34 @@ private struct PermissionStep: View {
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                case .denied:
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("macOS didn't allow it.", systemImage: "exclamationmark.circle")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Theme.waiting)
-                        Text("Turn it on in System Settings › Privacy & Security › Calendars; the notch picks it up.")
+                case .later:
+                    // Nothing was asked: no player was running. No check.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No player is running")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("macOS asks the first time a player plays.")
                             .font(.system(size: 14))
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button("Open System Settings") { PrivacyPane.open("Privacy_Calendars") }
-                            .controlSize(.large)
+                    }
+                case .denied, .writeOnly:
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(grant == .writeOnly ? "\(Brand.displayName) may only add events." as LocalizedStringKey : "macOS didn't allow it.",
+                              systemImage: "exclamationmark.circle")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.waiting)
+                        Text(item == .musicAutomation
+                             ? "Turn it on in System Settings › Privacy & Security › Automation, under \(Brand.displayName)." as LocalizedStringKey
+                             : grant == .writeOnly
+                             ? "Choose Full Access in System Settings › Privacy & Security › Calendars; this card follows."
+                             : "Turn it on in System Settings › Privacy & Security › Calendars; this card follows.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Open System Settings") {
+                            PrivacyPane.open(item == .musicAutomation ? "Privacy_Automation" : "Privacy_Calendars")
+                        }
+                        .controlSize(.large)
                     }
                 }
             }
@@ -956,7 +1016,7 @@ private struct BrainRow: View {
                             Text(LocalizedStringKey(BrainInfo.title(brain))).font(.system(size: 15, weight: .medium))
                             if brain == .claudeCode && model.claudeFound {
                                 Text("Recommended")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(Theme.accent)
                                     .padding(.horizontal, 6)
                                     .frame(height: 19)
@@ -1038,7 +1098,8 @@ private struct ToolsStep: View {
     }
 }
 
-/// Lays chips out left to right and wraps them onto the next line when the row is full.
+/// Lays chips out left to right and wraps them onto the next line when the row is full. A chip
+/// wider than the row gets the row's width (a chip that truncates then ends in "…").
 struct ChipFlow: Layout {
     var spacing: CGFloat
 
@@ -1054,7 +1115,7 @@ struct ChipFlow: Layout {
         for row in rows(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
             for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
+                let size = Self.size(of: subviews[index], within: bounds.width)
                 subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
                 x += size.width + spacing
             }
@@ -1065,7 +1126,7 @@ struct ChipFlow: Layout {
     private func rows(width: CGFloat, subviews: Subviews) -> [(indices: [Int], width: CGFloat, height: CGFloat)] {
         var rows: [(indices: [Int], width: CGFloat, height: CGFloat)] = []
         for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
+            let size = Self.size(of: subviews[index], within: width)
             if var last = rows.last, last.width + spacing + size.width <= width {
                 last.indices.append(index)
                 last.width += spacing + size.width
@@ -1076,5 +1137,11 @@ struct ChipFlow: Layout {
             }
         }
         return rows
+    }
+
+    private static func size(of subview: LayoutSubview, within width: CGFloat) -> CGSize {
+        let natural = subview.sizeThatFits(.unspecified)
+        guard natural.width > width else { return natural }
+        return subview.sizeThatFits(ProposedViewSize(width: width, height: natural.height))
     }
 }

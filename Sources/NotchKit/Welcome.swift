@@ -20,6 +20,8 @@ final class WelcomeTour {
     var findings: () -> Findings = { Findings() }
     /// Opens the notch on the agents.
     var openNotch: () -> Void = {}
+    /// The display the island is on (Settings › island display).
+    var islandScreen: () -> NSScreen? = { nil }
     private var overlay: NSPanel?
 
     init(companion: MeetingCompanion, cast: AvatarCast) {
@@ -27,16 +29,16 @@ final class WelcomeTour {
         self.cast = cast
     }
 
-    /// The display with the notch (else the main one), and where her figure lands: under the
-    /// notch, low enough that her tips open above her without moving her.
-    private static var screen: NSScreen? { NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main }
+    /// The island's display (else the one with the notch, else the main one), and where her
+    /// figure lands: under the island, low enough that her tips open above her without moving her.
+    private var screen: NSScreen? { islandScreen() ?? NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main }
 
     private static func spot(on screen: NSScreen) -> CGPoint {
         CGPoint(x: screen.frame.midX, y: screen.visibleFrame.maxY - MeetingCompanion.tipRoom)
     }
 
     func play() {
-        guard let screen = Self.screen, !companion.isOpen else { return }
+        guard let screen, !companion.isOpen else { return }
         let spot = Self.spot(on: screen)
         if Theme.reduceMotion {
             companion.comeOutForTips(figureAt: spot)
@@ -54,7 +56,7 @@ final class WelcomeTour {
     func preview(_ name: String) {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(900))
-            guard let screen = Self.screen else { return }
+            guard let screen = self.screen else { return }
             switch name {
             case "welcome:hello":
                 companion.comeOutForTips(figureAt: Self.spot(on: screen))
@@ -87,12 +89,13 @@ final class WelcomeTour {
         }
         if let notes = found.notes { items.append(String(format: Localization.string("Notes: %@"), notes)) }
         if let next = found.nextMeeting {
-            items.append(String(format: Localization.string("Next: %@ at %@"), next.title, TimeText.clock(next.start)))
+            // The time first: a long title is cut at the end of its chip.
+            items.append(String(format: Localization.string("Next at %@: %@"), TimeText.clock(next.start), next.title))
         }
         let title = found.agents.isEmpty ? Localization.string("No agents yet") : Localization.string("Here's what I found")
         let text = found.agents.isEmpty
             ? Localization.string("When Claude Code or Codex runs, I show it in the notch and come out when it waits for you.")
-            : Localization.string("I keep an eye on these. When one finishes or waits for you, I'll tell you right here.")
+            : Localization.string("I keep an eye on these. When one finishes or waits for you, I'll tell you in the notch.")
         companion.showTip(TaraTip(
             title: title, text: text, items: items,
             primary: .init(title: Localization.string("Open the notch")) { [weak self] in

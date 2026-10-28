@@ -374,12 +374,12 @@ struct SetupItemRow: View {
         let reason = center.unavailableReason(item)
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(LocalizedStringKey(item.title)).font(.system(size: 13, weight: .medium))
+                Text(LocalizedStringKey(item.title)).font(.system(size: 15, weight: .medium))
                 Text(LocalizedStringKey(reason ?? Self.summary(item)))
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .font(.system(size: 14)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if detailed {
-                    Text(item.detail(center.paths)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                    Text(item.detail(center.paths)).font(.system(size: 12.5)).foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
@@ -387,9 +387,9 @@ struct SetupItemRow: View {
                     switch status {
                     case .done(let note):
                         Label(note ?? Localization.string("Done"), systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 11.5)).foregroundStyle(Theme.ok)
+                            .font(.system(size: 13.5)).foregroundStyle(Theme.ok)
                     case .failed(let why):
-                        Label(why, systemImage: "exclamationmark.triangle.fill").font(.system(size: 11.5)).foregroundStyle(Theme.waiting)
+                        Label(why, systemImage: "exclamationmark.triangle.fill").font(.system(size: 13.5)).foregroundStyle(Theme.waiting)
                     case .running: ProgressView().controlSize(.mini)
                     case .idle: EmptyView()
                     }
@@ -397,7 +397,7 @@ struct SetupItemRow: View {
             }
             Spacer(minLength: 12)
             if setUp && center.status[item] == nil {
-                Label("Set up", systemImage: "checkmark").font(.system(size: 12)).foregroundStyle(.secondary)
+                Label("Set up", systemImage: "checkmark").font(.system(size: 13.5)).foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
             } else {
                 Toggle("", isOn: Binding(

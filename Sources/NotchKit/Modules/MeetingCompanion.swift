@@ -16,6 +16,8 @@ final class MeetingCompanion: NSObject {
     }
 
     private(set) var bubbles: [Bubble] = []
+    /// A speech bubble beside her (the welcome, later tips); one at a time.
+    private(set) var tip: TaraTip?
     private(set) var isOpen = false
     /// The meeting is running: the character listens.
     var listening = false
@@ -32,6 +34,8 @@ final class MeetingCompanion: NSObject {
     @ObservationIgnored var onDrop: ((CGPoint) -> Void)?
     /// She came out only to be asked: she goes back when the question bubble closes.
     @ObservationIgnored private var outForAsk = false
+    /// She came out only for a tip: she goes back into the notch when it closes.
+    @ObservationIgnored private var outForTip = false
     /// Where she stood before the bubble pushed her into the screen; she goes back there when it closes.
     @ObservationIgnored private var originBeforeAsk: CGPoint?
     @ObservationIgnored private var panel: FreePanel?
@@ -39,6 +43,11 @@ final class MeetingCompanion: NSObject {
     private static let size = CGSize(width: 300, height: 260)
     /// With the question bubble: room for her answer and its sources beside her.
     private static let askSize = CGSize(width: 420, height: 460)
+    /// With a tip: its bubble to her left, and room for its shadow.
+    private static let tipSize = CGSize(width: 420, height: 340)
+    /// How far below the top of the visible screen her center must be for a tip to open
+    /// without pushing her down.
+    static var tipRoom: CGFloat { tipSize.height - figure.y + 6 }
     /// The figure's center, from the window's bottom right corner (padding 8, figure 84 × 80).
     private static let figure = CGPoint(x: 50, y: 48)
 
@@ -46,12 +55,16 @@ final class MeetingCompanion: NSObject {
         self.cast = cast
     }
 
-    func open() {
+    /// Opens where she was put last; with `figure`, her center lands on that point (AppKit
+    /// coordinates) and the spot isn't remembered.
+    func open(figureAt figure: CGPoint? = nil) {
         guard panel == nil else {
             outForAsk = false  // asked to stay out (a meeting): she stays when the question bubble closes
+            outForTip = false
             return
         }
-        let panel = FreePanel(contentRect: CGRect(origin: savedOrigin(), size: Self.size),
+        let origin = figure.map { CGPoint(x: $0.x - Self.size.width + Self.figure.x, y: $0.y - Self.figure.y) } ?? savedOrigin()
+        let panel = FreePanel(contentRect: CGRect(origin: origin, size: Self.size),
                               styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         // Above the menu bar, so she can be carried all the way up into the notch.
         panel.level = .statusBar
@@ -109,10 +122,52 @@ final class MeetingCompanion: NSObject {
         panel?.orderOut(nil)
         panel = nil
         bubbles = []
+        tip = nil
         isOpen = false
         outForAsk = false
+        outForTip = false
         ask?.close()
     }
+
+    // MARK: Tips
+
+    /// A speech bubble beside her: she comes out if she isn't, and the window grows to the left
+    /// and up around her (she stays where she is). A new tip takes the old one's place.
+    func showTip(_ tip: TaraTip) {
+        if panel == nil {
+            open()
+            outForTip = true
+        }
+        guard let panel else { return }
+        if ask?.isOpen != true { resize(panel, to: Self.tipSize) }
+        withAnimation(Self.tipMotion) { self.tip = tip }
+    }
+
+    /// Out of the notch at `figure` for tips only (the welcome): she goes back when the last one closes.
+    func comeOutForTips(figureAt figure: CGPoint) {
+        guard panel == nil else { return }
+        open(figureAt: figure)
+        outForTip = true
+    }
+
+    /// The tip goes; she goes back into the notch when she came out only for it.
+    func closeTip() {
+        guard tip != nil else { return }
+        withAnimation(Self.tipMotion) { tip = nil }
+        if outForTip {
+            outForTip = false
+            returnToNotch()
+            return
+        }
+        // After the bubble has faded: the window shrinks back around her.
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard let self, self.tip == nil, self.ask?.isOpen != true, let panel = self.panel else { return }
+            self.resize(panel, to: Self.size)
+        }
+    }
+
+    private static var tipMotion: Animation { Theme.reduceMotion ? .easeOut(duration: 0.15) : .spring(duration: 0.28, bounce: 0.12) }
 
     // MARK: Ask Tara
 
@@ -219,22 +274,29 @@ final class MeetingCompanion: NSObject {
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? panel.screen,
            mouse.y >= screen.visibleFrame.maxY - 24, abs(mouse.x - screen.frame.midX) < 260 {
             Haptics.confirm()
-            // She slips up into the notch and fades, so the way back is seen to the end.
-            let target = CGPoint(x: screen.frame.midX - Self.size.width + Self.figure.x,
-                                 y: screen.frame.maxY - Self.figure.y + 30)
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = Theme.reduceMotion ? 0 : 0.28
-                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                panel.animator().setFrameOrigin(target)
-                panel.animator().alphaValue = 0
-            }, completionHandler: { [weak self] in
-                MainActor.assumeIsolated { self?.close() }
-            })
+            returnToNotch(on: screen)
             return
         }
         UserDefaults.standard.set([Double(frame.origin.x), Double(frame.origin.y)], forKey: Self.originKey)
         landings += 1
         onDrop?(mouse)
+    }
+}
+
+extension MeetingCompanion {
+    /// She slips up into the notch and fades, so the way back is seen to the end.
+    func returnToNotch(on screen: NSScreen? = nil) {
+        guard let panel, let screen = screen ?? panel.screen ?? NSScreen.main else { return close() }
+        let target = CGPoint(x: screen.frame.midX - panel.frame.width + Self.figure.x,
+                             y: screen.frame.maxY - Self.figure.y + 30)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Theme.reduceMotion ? 0 : 0.28
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().setFrameOrigin(target)
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated { self?.close() }
+        })
     }
 }
 
@@ -255,8 +317,8 @@ private struct CompanionView: View {
         let asking = companion.ask?.isOpen == true
         VStack(alignment: .trailing, spacing: 6) {
             Spacer(minLength: 0)
-            // While she's asked something, her answer takes the cards' place.
-            if !asking {
+            // While she's asked something or shows a tip, that takes the cards' place.
+            if !asking && companion.tip == nil {
                 ForEach(companion.bubbles) { bubble in
                     BubbleView(bubble: bubble) { companion.onOpenCard(bubble.id) }
                         .transition(Theme.reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
@@ -267,6 +329,11 @@ private struct CompanionView: View {
                     AskTaraView(ask: ask)
                         .padding(.bottom, 10)
                         .transition(.opacity)
+                } else if let tip = companion.tip {
+                    TipBubble(tip: tip) { companion.closeTip() }
+                        .id(tip.id)
+                        .padding(.bottom, 30)
+                        .transition(Theme.reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
                 }
                 if hovering {
                     Button { companion.close() } label: {
@@ -336,4 +403,119 @@ private struct BubbleView: View {
         .buttonStyle(PressScale())
         .help("Open the full card")
     }
+}
+
+// MARK: - Tips
+
+/// A speech bubble beside the floating Tara: a title line, a short text, one or two buttons and a
+/// close. The welcome after onboarding uses it; any later tip can.
+struct TaraTip: Identifiable {
+    struct Action {
+        let title: String
+        let run: @MainActor () -> Void
+    }
+
+    let id = UUID()
+    /// Already in the interface language (`Localization.string`).
+    let title: String
+    let text: String
+    /// Short items under the text, such as what she found.
+    var items: [String] = []
+    var primary: Action?
+    var secondary: Action?
+}
+
+struct TipBubble: View {
+    let tip: TaraTip
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(verbatim: tip.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .padding(.trailing, -8)
+                .help(Text("Close"))
+                .accessibilityLabel(Text("Close"))
+            }
+            Text(verbatim: tip.text)
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textBody)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if !tip.items.isEmpty {
+                ChipFlow(spacing: 6) {
+                    ForEach(tip.items, id: \.self) { item in
+                        Text(verbatim: item)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 9)
+                            .frame(height: 26)
+                            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+                }
+            }
+            if tip.primary != nil || tip.secondary != nil {
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
+                    if let secondary = tip.secondary {
+                        Button { secondary.run() } label: {
+                            Text(verbatim: secondary.title)
+                                .font(.system(size: 14))
+                                .foregroundStyle(Theme.textSecondary)
+                                .padding(.horizontal, 10)
+                                .frame(minHeight: 30)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressScale())
+                    }
+                    if let primary = tip.primary {
+                        Button { primary.run() } label: {
+                            Text(verbatim: primary.title)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 30)
+                                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .buttonStyle(PressScale())
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 14)
+        .padding(.vertical, 14)
+        .frame(width: 284, alignment: .leading)
+        .background(Self.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        }
+        // A small tail toward her.
+        .overlay(alignment: .bottomTrailing) {
+            Rectangle()
+                .fill(Self.fill)
+                .frame(width: 12, height: 12)
+                .rotationEffect(.degrees(45))
+                .offset(x: 5, y: -22)
+        }
+        .shadow(color: .black.opacity(0.4), radius: 18, y: 8)
+        .accessibilityElement(children: .contain)
+    }
+
+    private static let fill = Color(hex: 0x16161A)
 }

@@ -48,13 +48,13 @@ open build/Starnotch.app
 
 Requires macOS 14 Sonoma or later and the Swift 6 toolchain (Xcode or just the Command Line Tools).
 
-The first launch is one calm window in four steps, each one skippable: meet Tara and pick her look, set up your agents, connect Jamie and choose how Tara thinks (your Claude subscription through Claude Code, your own API key, or simple rules), and switch on the tools you want. Everything is in Settings later, and nothing is set up until you click.
+The first launch is one calm window with one card per step: meet Tara and pick her look, set up your agents, allow the calendar, allow the music players, connect Jamie, choose how Tara thinks (your Claude subscription through Claude Code, your own API key, Apple Intelligence on this Mac, or simple rules), pick your notes folder, and switch on the tools you want. Each permission and connection says in one sentence why it asks and where the data stays; optional ones say so and can be skipped for now, and a granted permission turns its icon into a check. Everything is in Settings later, and nothing is set up until you click. At the end Tara drops out of the notch with "Welcome to Starnotch" (left out with Reduce Motion), greets you in a speech bubble beside her and shows what she already found on this Mac: your agents, meetings in her memory, your notes and your next meeting.
 
 <p align="center"><img src="docs/screenshots/onboarding.png" width="420" alt="Starnotch first launch: Tara comes out of the notch, pick her character and colour"></p>
 
 ## Set up in one click
 
-The second step of the first launch lists what it found (Claude Code, Codex, calendars, Spotify or Music, Wispr Flow) and exactly what it would set up: the Claude Code approvals plugin, the Codex approvals hook, the plan-limits status line (your current status line keeps running behind it), a small zsh snippet for long terminal commands, open at login, and the calendar and player permissions. One button sets up everything, or switch items off first. Nothing happens before that click; each change keeps a backup, and Settings › What's set up removes it again exactly. The one step left to you: trust the new hook once in Codex with `/hooks`. The menu bar's "Set up…" opens it again.
+The second step of the first launch lists the agents it found (Claude Code, Codex and the other agent tools) and exactly what it would set up: the Claude Code approvals plugin, the Codex approvals hook, the plan-limits status line (your current status line keeps running behind it), the MCP server and a small zsh snippet for long terminal commands. One button sets up everything, or switch items off first. The calendar and the players get a step each, and open at login sits with the tools. Nothing happens before that click; each change keeps a backup, and Settings › What's set up removes it again exactly. The one step left to you: trust the new hook once in Codex with `/hooks`. The menu bar's "Set up…" opens it again.
 
 ## Permissions
 

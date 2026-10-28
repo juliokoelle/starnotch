@@ -35,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var toolsLive = false
     private let headphones = HeadphoneBattery()
     private var companion: MeetingCompanion?
+    /// Tara's welcome after the first onboarding.
+    private var welcome: WelcomeTour?
     private let battery = BatteryMonitor()
     private let keepAwake = KeepAwake()
     private var lidAwake: LidAwakeController?
@@ -211,6 +213,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !sample { meeting.jamie.startAutomatic() }
         let companion = MeetingCompanion(cast: cast)
         self.companion = companion
+        let welcome = WelcomeTour(companion: companion, cast: cast)
+        self.welcome = welcome
+        // Her first bubble: what she can see on this Mac already.
+        welcome.findings = { [weak self, weak calendar, weak meeting] in
+            var found = WelcomeTour.Findings()
+            found.agents = self?.setup?.foundAgents.map(\.name) ?? []
+            if case .done(let count, _) = meeting?.jamie.phase { found.meetings = count }
+            found.notes = (VaultSetup.preview ?? Runtime.vault)?.folder?.lastPathComponent
+            if let next = calendar?.nextAttention { found.nextMeeting = (next.title, next.start) }
+            return found
+        }
+        welcome.openNotch = { [weak self] in self?.notch.expand(.agents) }
         companion.onOpenCard = { [weak self] id in
             if let url = URL(string: "\(Brand.urlScheme)://meeting?card=\(id)") { self?.showMeetingCard(url) }
         }
@@ -379,8 +393,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notch.paletteSources.persists = state.persists
         notch.paletteSources.providers = [ClosurePaletteProvider { [weak self] _ in
             guard let self else { return [] }
-            let setup: [(Onboarding.Step, String)] = [(.agents, "Set up your agents"), (.meetings, "Set up meetings and Tara's brain"),
-                                                      (.tools, "Choose tools"), (.tara, "Choose Tara's look")]
+            let setup: [(Onboarding.Step, String)] = [(.agents, "Set up your agents"), (.meetings, "Set up meetings"),
+                                                      (.brain, "Choose how Tara thinks"), (.tools, "Choose tools"),
+                                                      (.tara, "Choose Tara's look")]
             return [PaletteItem(id: "settings", title: Localization.string("Settings"), symbol: "gearshape", kind: .settings,
                                 keywords: ["preferences", "display", "quiet", "providers", "loops"],
                                 perform: { [weak self] in self?.settingsWindow.show() })]
@@ -408,6 +423,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             agendaPreview.run(name, notch: notch, agents: agents)
         } else if options.preview?.hasPrefix("notes-settings") == true {
             NotesSettingsPreview.show(state: state)   // Notes (vault strand)
+        } else if let name = options.preview, name.hasPrefix("welcome") {
+            // Tara's welcome, with sample sessions behind "Open the notch".
+            agents.usePreview(PreviewDirector.snapshot(agentsActive: true))
+            self.welcome?.preview(name)
         } else if let name = options.preview, name == "setup-consent" || name == "setup-done" || name == "setup-agents" || name.hasPrefix("onboarding") {
             // The setup pages with nothing behind them (the center is in preview mode).
             agents.usePreview(PreviewDirector.snapshot(agentsActive: false))
@@ -666,20 +685,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if onboarding == nil {
             let window = OnboardingWindowController(model: Onboarding(state: state, cast: cast, setup: setup,
                                                                       jamie: meeting?.jamie ?? JamieConnect()))
-            window.onClose = { [weak self] in self?.state.settings.didOnboard = true }
+            window.onClose = { [weak self] finished in
+                guard let self else { return }
+                // Tara's welcome once, after the first onboarding finished through its last
+                // button (and in previews, which never save that it was done).
+                let firstTime = !self.state.settings.didOnboard || !self.state.persists
+                self.state.settings.didOnboard = true
+                if finished && firstTime { self.welcome?.play() }
+            }
             onboarding = window
         }
         onboarding?.show(at: step)
     }
 
-    /// `--preview onboarding[:step[:jamie]]`: a step with nothing behind it; the Jamie row in
-    /// one of its states (`connecting`, `login`, `syncing`, `done`, `empty`, `failed`).
+    /// `--preview onboarding[:step[:state]]`: a step with nothing behind it; the Jamie row in
+    /// one of its states (`connecting`, `login`, `syncing`, `done`, `empty`, `failed`), or with
+    /// `granted` the step as it looks right after its button (its check popped).
     private func showOnboardingPreview(_ name: String) {
         let parts = name.split(separator: ":").map(String.init)
         let step = name == "setup-consent" || name == "setup-agents" ? .agents : parts.count > 1 ? Int(parts[1]).flatMap(Onboarding.Step.init(rawValue:)) : nil
         showSetup(at: step)
         guard parts.count > 2, let jamie = onboarding?.model.jamie else { return }
         switch parts[2] {
+        case "granted": onboarding?.model.previewDone()
         case "connecting": jamie.preview(.connecting)
         case "login": jamie.preview(.login(nil))
         case "syncing": jamie.preview(.syncing(count: 7, title: "Weekly with Lena"))

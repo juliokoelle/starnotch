@@ -29,7 +29,8 @@ struct LaunchOptions {
     var tour = false
     /// Test mode: sample agents, calendar, Today and music, no permissions, nothing written.
     var sampleData = false
-    /// Open onboarding right after launch, even when it was done; `--onboarding-step 0…3` picks the step.
+    /// Open onboarding right after launch, even when it was done; `--onboarding-step 0…7` picks the step
+    /// (Tara, agents, calendar, music, meetings, Tara's brain, notes, tools).
     var onboarding = false
     var onboardingStep: Int?
 

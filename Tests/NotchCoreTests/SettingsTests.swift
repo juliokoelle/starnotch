@@ -63,8 +63,9 @@ import TestSupport
         #expect(loaded.holdDuration == 0.25)
         #expect(loaded.modules == ModuleKind.defaultLayout)
         // Saved before the Tools gallery: every tool stays on, the brain is the agent's pick.
+        // Tools added after the gallery (lyrics, volume per app) start off all the same.
         #expect(loaded.disabledModules.isEmpty)
-        #expect(loaded.disabledFeatures.isEmpty)
+        #expect(Set(loaded.disabledFeatures) == [.lyrics, .lyricsOnHover, .appVolume])
         #expect(loaded.brain == .auto)
     }
 

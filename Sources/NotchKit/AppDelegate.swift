@@ -206,6 +206,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         calendar.start()
         meeting.nextEvent = { [weak calendar] in calendar?.next.map { ($0.title, $0.attendees) } }
+        // Jamie syncs on its own while a login is saved, also a while after each call or meeting ends.
+        meeting.jamie.meetingEnds = { [weak calendar] in calendar?.today.filter { $0.kind.takesAttention }.map(\.end) ?? [] }
+        if !sample { meeting.jamie.startAutomatic() }
         let companion = MeetingCompanion(cast: cast)
         self.companion = companion
         companion.onOpenCard = { [weak self] id in
@@ -227,7 +230,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ask = AskTara(demo: sample)
         self.ask = ask
         companion.ask = ask
-        ask.onOpen = { companion.showAsk() }
+        // Opening Ask Tara syncs an old Jamie sync in the background; new meetings reach her agent at once.
+        ask.onOpen = { [weak meeting] in
+            companion.showAsk()
+            meeting?.jamie.syncIfDue(.askOpened)
+        }
+        meeting.onMemoryChanged = { [weak ask] in ask?.reloadMemory() }
         ask.onClose = { companion.hideAsk() }
         if let name = options.preview, name.hasPrefix("ask-") { ask.preview(name) }
         meeting.onCard = { [weak self] entry in

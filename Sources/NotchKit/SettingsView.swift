@@ -245,6 +245,10 @@ struct MeetingAgentSettings: View {
     var body: some View {
         if !compact, let jamie {
             JamieRow(jamie: jamie)
+            if let synced = jamie.lastSynced {
+                LabeledContent("Last synced") { lastSync(synced, new: jamie.lastNew) }
+                    .help("Jamie syncs on its own every 30 minutes, after the Mac wakes and after your meetings")
+            }
         }
         if !compact {
             Picker("How Tara thinks", selection: $state.settings.brain) {
@@ -283,6 +287,17 @@ struct MeetingAgentSettings: View {
         }
         if !compact, let url = URL(string: "https://console.anthropic.com/settings/keys") {
             Link("Get an Anthropic key", destination: url)
+        }
+    }
+
+    /// "10:17 · 2 new meetings"; the date too when it wasn't today, the count only when known.
+    @ViewBuilder private func lastSync(_ date: Date, new: Int?) -> some View {
+        let time = date.formatted(date: Calendar.current.isDateInToday(date) ? .omitted : .abbreviated, time: .shortened)
+        switch new {
+        case nil: Text(time)
+        case 0?: Text("\(time) · nothing new")
+        case 1?: Text("\(time) · 1 new meeting")
+        case let count?: Text("\(time) · \(count) new meetings")
         }
     }
 }

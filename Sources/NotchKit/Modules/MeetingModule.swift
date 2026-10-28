@@ -52,6 +52,8 @@ final class MeetingModule: NotchModule {
     @ObservationIgnored var nextEvent: () -> (title: String, attendees: [String])? = { nil }
     /// Meetings came in from Jamie (the app switches the Meeting agent on).
     @ObservationIgnored var onJamieSynced: (Int) -> Void = { _ in }
+    /// A Jamie sync wrote new or changed meetings: other agents holding the memory re-read it (Ask Tara's).
+    @ObservationIgnored var onMemoryChanged: () -> Void = {}
 
     @ObservationIgnored private var agent: MeetingProcess?
     @ObservationIgnored private var agentIsDemo = false
@@ -183,6 +185,8 @@ final class MeetingModule: NotchModule {
     }
 
     private func jamieChanged(_ phase: JamieConnect.Phase) {
+        // A sync of its own stays out of the line unless it fails.
+        if jamie.automatic, phase.isRunning { return }
         switch phase {
         case .idle:
             break
@@ -193,7 +197,11 @@ final class MeetingModule: NotchModule {
         case .syncing(let count, let title):
             message = "Jamie: \(count) · \(title)"
         case .done:
-            agent?.write(MeetingCommand.reload)
+            if jamie.wroteMeetings {
+                agent?.write(MeetingCommand.reload)
+                onMemoryChanged()
+            }
+            if jamie.automatic { break }
             if phase.isEmpty {
                 message = "Jamie: no meetings in this account"
             } else if case .done(let meetings, _) = phase {

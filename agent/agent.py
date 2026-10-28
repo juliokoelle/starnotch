@@ -23,6 +23,7 @@ from typing import Any, Callable, TextIO
 
 import captures as quick
 import connectors as linked
+from jamie_sync import last_synced
 from memory import Commitment, Line, Meeting, Memory, _words
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
@@ -105,6 +106,8 @@ vault:3) and the words you used from it. If the material does not answer a quest
 plainly and give no sources. A general question that is not about their work you may answer briefly from general
 knowledge, with no sources. A screenshot, when one comes along, shows the window the user asks about.
 The conversation so far, when there is one, is context for follow-up questions.
+
+Today is {today}.{synced}
 
 # Meeting memory
 
@@ -211,13 +214,18 @@ class Agent:
         self.brain = brain or ("rules" if llm is None else "claude")
         self.llm = llm
         self.emit = emit
-        self.today = today or dt.date.today()
+        self.fixed_today = today
         self.live: list[Utterance] = []
         self.commitments: list[Commitment] = []
         self.reported: set[str] = set()
         self.reported_text: list[str] = []
         self.warned = False
         self.resting_until = 0.0  # time.monotonic() until which Claude isn't asked
+
+    @property
+    def today(self) -> dt.date:
+        """The date given at start (demo, tests), else the real one: an agent kept warm overnight moves on."""
+        return self.fixed_today or dt.date.today()
 
     # Commands
 
@@ -274,6 +282,14 @@ class Agent:
             parts.append("# Snapshots from the user's other tools\n" + linked.as_context(notes))
         return "\n\n".join(parts)
 
+    def ask_system(self, notes: list[linked.Item]) -> str:
+        """Tara's instructions with today's date, when Jamie last synced the meetings, and the material."""
+        synced = last_synced(self.memory.folder)
+        line = (f" Jamie last synced the meetings at {synced:%Y-%m-%d %H:%M}. A meeting that ended after that is not "
+                f"in the memory yet: asked about one, say when Jamie last synced instead of guessing." if synced else "")
+        return ASK_SYSTEM.format(today=f"{self.today:%A}, {self.today.isoformat()}", synced=line,
+                                 memory=self.ask_context(notes))
+
     def prep(self, participants: list[str]) -> dict[str, Any]:
         meetings = self.memory.with_participants(participants)
         ids = {m.id for m in meetings}
@@ -322,7 +338,7 @@ class Agent:
             picture = Path(str(image)).expanduser() if image else None
             extra = {"images": [picture]} if picture and picture.is_file() else {}  # a picture that's gone: ask without
             try:
-                result = self.llm.json(ASK_SYSTEM.format(memory=self.ask_context(notes)), prompt, ASK_SCHEMA, 2000, **extra)
+                result = self.llm.json(self.ask_system(notes), prompt, ASK_SCHEMA, 2000, **extra)
             except Exception as error:
                 self._warn(error, rest=False)
             if result is not None:

@@ -568,7 +568,7 @@ struct JamieRow: View {
                     .frame(minHeight: 28)
             }
         case (_, .idle):
-            Button("Connect") { jamie.connect() }
+            Button(jamie.hasLogin ? "Sync now" as LocalizedStringKey : "Connect") { jamie.connect() }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
         }

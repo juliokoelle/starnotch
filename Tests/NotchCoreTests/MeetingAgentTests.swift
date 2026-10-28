@@ -62,7 +62,19 @@ import TestSupport
         #expect(parse(#"{"type":"synced","meeting_id":"jamie-abc","title":"Weekly","date":"2026-10-19","lines":120,"path":"/p"}"#) == .synced(title: "Weekly"))
         #expect(parse(#"{"type":"status","state":"synced","meetings":12}"#) == .syncDone(meetings: 12))
         #expect(parse(#"{"type":"status","state":"synced","meetings":0,"hint":"empty_account"}"#) == .syncDone(meetings: 0, hint: "empty_account"))
+        #expect(parse(#"{"type":"status","state":"synced","meetings":12,"updated":2,"unchanged":10}"#) == .syncDone(meetings: 12, updated: 2))
         #expect(parse(#"{"type":"status","state":"warning","message":"get_meeting abc: 404"}"#) == .status(state: "warning", message: "get_meeting abc: 404"))
+    }
+
+    @Test func onlyASyncThatWroteMeetingsReloadsTheAgents() {
+        #expect(parse(#"{"type":"status","state":"synced","meetings":12,"updated":1,"unchanged":11}"#)?.reloadsMemory == true)
+        #expect(parse(#"{"type":"status","state":"synced","meetings":12,"updated":0,"unchanged":12}"#)?.reloadsMemory == false)
+        #expect(parse(#"{"type":"status","state":"synced","meetings":0,"hint":"empty_account"}"#)?.reloadsMemory == false)
+        #expect(parse(#"{"type":"synced","meeting_id":"jamie-abc","title":"Weekly"}"#)?.reloadsMemory == false)
+    }
+
+    @Test func aLostLoginIsAStatus() {
+        #expect(parse(#"{"type":"status","state":"login_required"}"#) == .status(state: "login_required", message: nil))
     }
 
     @Test func commandsRoundTrip() {

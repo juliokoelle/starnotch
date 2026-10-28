@@ -511,3 +511,11 @@
 "Don't send the window" = "Fenster nicht mitschicken";
 "Tara needs Screen Recording to see a window: System Settings › Privacy & Security › Screen Recording" = "Tara braucht Bildschirmaufnahme, um ein Fenster zu sehen: Systemeinstellungen › Datenschutz & Sicherheit › Bildschirmaufnahme";
 "Couldn't take a picture of that window" = "Von diesem Fenster ließ sich kein Bild machen";
+/* Strand sync: Jamie syncs on its own */
+"Last synced" = "Zuletzt abgeglichen";
+"Jamie syncs on its own every 30 minutes, after the Mac wakes and after your meetings" = "Jamie gleicht sich alle 30 Minuten von selbst ab, nach dem Aufwachen des Mac und nach deinen Meetings";
+"%@ · nothing new" = "%@ · nichts Neues";
+"%@ · 1 new meeting" = "%@ · 1 neues Meeting";
+"%@ · %lld new meetings" = "%@ · %lld neue Meetings";
+"Sync now" = "Jetzt abgleichen";
+"Jamie signed you out; connect again to keep your meetings in sync" = "Jamie hat dich abgemeldet; verbinde dich erneut, damit deine Meetings abgeglichen bleiben";

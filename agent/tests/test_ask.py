@@ -2,11 +2,12 @@
 
 import datetime as dt
 import json
+import os
 from types import SimpleNamespace
 
 import connectors
 from agent import ASK_SCHEMA, Agent, _language
-from memory import Memory
+from memory import Line, Meeting, Memory
 
 TODAY = dt.date(2026, 10, 26)
 
@@ -205,3 +206,41 @@ def test_language_guess():
     assert _language("Was haben wir mit Max besprochen?") == "de"
     assert _language("What did we decide with Max?") == "en"
     assert _language("Größe?") == "de" and _language("ok?") == "en"
+
+
+def test_ask_knows_today_and_when_jamie_last_synced(tmp_path, memory_dir):
+    llm = FakeLLM({"answer": "ok", "sources": []}, {"answer": "ok", "sources": []})
+    agent, _ = setup(tmp_path, memory_dir, llm)
+    agent.handle({"cmd": "ask", "question": "What was my meeting today about?"})
+    assert "Today is Monday, 2026-10-26." in llm.calls[0].system
+    assert "Jamie last synced" not in llm.calls[0].system  # no Jamie sync yet: nothing to say about it
+
+    state = memory_dir / "jamie-sync.state"
+    state.write_text("{}")
+    synced = dt.datetime(2026, 10, 26, 10, 17).timestamp()
+    os.utime(state, (synced, synced))
+    agent.handle({"cmd": "ask", "question": "What was my meeting today about?"})
+    assert "Jamie last synced the meetings at 2026-10-26 10:17." in llm.calls[1].system
+
+
+def test_without_a_given_date_the_agent_follows_the_clock(memory_dir):
+    agent = Agent(Memory(memory_dir), None, lambda _: None)
+    assert agent.today == dt.date.today()
+
+
+def test_reload_brings_a_meeting_synced_while_the_agent_ran(tmp_path, memory_dir):
+    agent, out = setup(tmp_path, memory_dir, None)
+    question = "Wann ist der Umzug ins neue Lagerhaus?"
+    agent.handle({"cmd": "ask", "question": question})
+    assert out[-1]["sources"] == []  # not in the memory yet
+
+    Memory(memory_dir).save(Meeting(id="2026-10-26-lager", title="Lager-Sync", date="2026-10-26", transcript=[
+        Line("Mara", "Der Umzug ins neue Lagerhaus ist am Donnerstag.", 4.0)]))
+    agent.handle({"cmd": "ask", "question": question})
+    assert out[-1]["sources"] == []  # a warm agent still holds the old memory
+
+    agent.handle({"cmd": "reload", "id": "r"})
+    assert out[-1] == {"type": "status", "state": "reloaded", "meetings": 3, "reply_to": "r"}
+    agent.handle({"cmd": "ask", "question": question})
+    assert out[-1]["text"] == "Der Umzug ins neue Lagerhaus ist am Donnerstag."
+    assert out[-1]["sources"][0]["title"] == "Lager-Sync"

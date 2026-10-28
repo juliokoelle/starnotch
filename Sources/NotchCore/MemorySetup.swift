@@ -77,9 +77,10 @@ extension SetupActions {
 
     /// Adds `mcpServers.starnotch-memory`. A server of that name that isn't ours is kept in the
     /// ledger and comes back on Remove; a file that isn't JSON stops the change.
-    static func addJSONServer(_ item: SetupItem, file: URL, label: String, backupName: String, paths: SetupPaths,
+    static func addJSONServer(_ item: SetupItem, file link: URL, label: String, backupName: String, paths: SetupPaths,
                               now: Date, note: String) throws -> SetupLedger.Entry {
         let command = try memoryCommand(paths)
+        let file = realFile(link)
         var (root, existed) = try readJSON(file, name: label)
         var servers = root["mcpServers"] as? [String: Any] ?? [:]
         if root["mcpServers"] != nil, root["mcpServers"] as? [String: Any] == nil {
@@ -91,6 +92,7 @@ extension SetupActions {
         }
         let backup = try backup(file, name: backupName, paths: paths, now: now)
         var previous: [String: Any] = ["file": existed ? "existed" : "created"]
+        if root["mcpServers"] == nil { previous["servers"] = "absent" }  // Remove takes the key out again
         if let old = servers[memoryMCPName], !isMemoryServer(old) { previous["entry"] = old }
         servers[memoryMCPName] = ours
         root["mcpServers"] = servers
@@ -101,7 +103,8 @@ extension SetupActions {
 
     /// Takes our entry out (a server of that name from before comes back); a file we created and
     /// that holds nothing else goes. An entry the user changed since is left alone.
-    static func removeJSONServer(file: URL, label: String, entry: SetupLedger.Entry?) throws {
+    static func removeJSONServer(file link: URL, label: String, entry: SetupLedger.Entry?) throws {
+        let file = realFile(link)
         guard let (object, existed) = try? readJSON(file, name: label), existed else { return }
         var root = object
         var servers = root["mcpServers"] as? [String: Any] ?? [:]
@@ -113,8 +116,20 @@ extension SetupActions {
             try FileManager.default.removeItem(at: file)
             return
         }
-        root["mcpServers"] = servers
+        if servers.isEmpty, previous["servers"] as? String == "absent" {
+            root.removeValue(forKey: "mcpServers")
+        } else {
+            root["mcpServers"] = servers
+        }
         try writeJSON(root, to: file)
+    }
+
+    /// The file a config's path points to: a symlinked config (a dotfiles setup) is written
+    /// through, so the link stays a link.
+    static func realFile(_ url: URL) -> URL {
+        guard let type = try? FileManager.default.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType,
+              type == .typeSymbolicLink else { return url }
+        return url.resolvingSymlinksInPath()
     }
 
     // MARK: Codex's config.toml (ChatGPT)
@@ -147,16 +162,26 @@ extension SetupActions {
         return "\(codexBegin)\n[mcp_servers.\(memoryMCPName)]\ncommand = \(tomlString(command[0]))\nargs = [\(args)]\n\(codexEnd)\n"
     }
 
-    /// Whether the TOML already defines the server, or `mcp_servers` in a way a new table can't
-    /// join (an inline table): adding ours then would break the whole file.
+    /// Whether the TOML already defines the server (as a table, or as a key under `[mcp_servers]`),
+    /// or `mcp_servers` in a way a new table can't join (an inline table): adding ours then would
+    /// break the whole file. CRLF files count line by line too.
     static func codexConflict(_ text: String) -> String? {
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        let names = [memoryMCPName, "\"\(memoryMCPName)\"", "'\(memoryMCPName)'"]
+        var table = ""
+        for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: " ", with: "")
-            if line.hasPrefix("[mcp_servers.\(memoryMCPName)]") || line.hasPrefix("[mcp_servers.\"\(memoryMCPName)\"]")
-                || line.hasPrefix("[mcp_servers.'\(memoryMCPName)']") {
+            if line.hasPrefix("#") || line.isEmpty { continue }
+            if line.hasPrefix("[") {
+                table = line
+                if names.contains(where: { line.hasPrefix("[mcp_servers.\($0)]") || line.hasPrefix("[mcp_servers.\($0).") }) {
+                    return "Codex's config already has a starnotch-memory server; nothing was changed."
+                }
+                continue
+            }
+            if table == "[mcp_servers]", names.contains(where: { line.hasPrefix($0 + "=") || line.hasPrefix($0 + ".") }) {
                 return "Codex's config already has a starnotch-memory server; nothing was changed."
             }
-            if line.hasPrefix("mcp_servers=") || line.hasPrefix("mcp_servers.\(memoryMCPName)") {
+            if table.isEmpty, line.hasPrefix("mcp_servers=") || names.contains(where: { line.hasPrefix("mcp_servers.\($0)") }) {
                 return "Codex's config sets mcp_servers in a way Starnotch can't add to; nothing was changed."
             }
         }
@@ -166,9 +191,10 @@ extension SetupActions {
     static func addCodexBlock(_ paths: SetupPaths, now: Date) throws -> SetupLedger.Entry {
         guard FileManager.default.fileExists(atPath: paths.codexHome.path) else { throw SetupError.missing("~/.codex") }
         let command = try memoryCommand(paths)
+        let config = realFile(paths.codexConfig)
         let existing: String
-        if FileManager.default.fileExists(atPath: paths.codexConfig.path) {
-            guard let text = try? String(contentsOf: paths.codexConfig, encoding: .utf8) else {
+        if FileManager.default.fileExists(atPath: config.path) {
+            guard let text = try? String(contentsOf: config, encoding: .utf8) else {
                 throw SetupError.failed("~/.codex/config.toml isn't readable text; nothing was changed.")
             }
             existing = text
@@ -177,28 +203,33 @@ extension SetupActions {
         }
         if existing.contains(codexBegin) { return SetupLedger.Entry(item: .memoryChatGPT, at: now, note: "Was already set up.") }
         if let conflict = codexConflict(existing) { throw SetupError.failed(conflict) }
-        let backup = try backup(paths.codexConfig, name: "codex-config.toml", paths: paths, now: now)
-        // One blank line of ours before the block (Remove takes it out again).
-        let separator = existing.isEmpty ? "" : existing.hasSuffix("\n") ? "\n" : "\n\n"
-        try (existing + separator + codexBlock(command)).write(to: paths.codexConfig, atomically: true, encoding: .utf8)
+        let backup = try backup(config, name: "codex-config.toml", paths: paths, now: now)
+        // One blank line of ours before the block (Remove takes it out again). Scalars, not
+        // characters: Swift reads a CRLF as one character, which isn't "\n".
+        let separator = existing.isEmpty ? "" : existing.unicodeScalars.last == "\n" ? "\n" : "\n\n"
+        try (existing + separator + codexBlock(command)).write(to: config, atomically: true, encoding: .utf8)
         return SetupLedger.Entry(item: .memoryChatGPT, at: now, backup: backup, previous: existing.isEmpty ? "created" : nil,
                                  note: "Quit and reopen ChatGPT. Codex reads it too.")
     }
 
     /// Takes out exactly our block (and the blank line we put before it).
     static func removeCodexBlock(_ paths: SetupPaths) throws {
-        guard var text = try? String(contentsOf: paths.codexConfig, encoding: .utf8),
+        let config = realFile(paths.codexConfig)
+        guard var text = try? String(contentsOf: config, encoding: .utf8),
               let begin = text.range(of: codexBegin),
               let end = text.range(of: codexEnd + "\n", range: begin.upperBound..<text.endIndex)
                 ?? text.range(of: codexEnd, range: begin.upperBound..<text.endIndex) else { return }
         var start = begin.lowerBound
         // The blank line added before the block, when the block isn't the first thing.
-        if start > text.startIndex, text[..<start].hasSuffix("\n\n") || text[..<start] == "\n" { start = text.index(before: start) }
+        let before = text[..<start].unicodeScalars
+        if start > text.startIndex, before.count == 1 ? before.last == "\n" : Array(before.suffix(2)) == ["\n", "\n"] {
+            start = text.index(before: start)
+        }
         text.removeSubrange(start..<end.upperBound)
         if text.isEmpty {
-            try FileManager.default.removeItem(at: paths.codexConfig)
+            try FileManager.default.removeItem(at: config)
         } else {
-            try text.write(to: paths.codexConfig, atomically: true, encoding: .utf8)
+            try text.write(to: config, atomically: true, encoding: .utf8)
         }
     }
 }

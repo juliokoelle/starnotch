@@ -10,6 +10,8 @@ struct MemorySettings: View {
     var setup: SetupCenter?
     var openSetup: () -> Void = {}
     @State private var counts: [MemorySource: Int] = [:]
+    /// Whether a source holds any file at all (a feed or calendar file with no meeting left counts).
+    @State private var holds: [MemorySource: Bool] = [:]
     @State private var deleting: MemorySource?
     @State private var deleted: MemorySource?
 
@@ -34,9 +36,9 @@ struct MemorySettings: View {
             RowSymbol(name: source.symbol, active: on)
             VStack(alignment: .leading, spacing: 2) {
                 Text(LocalizedStringKey(source.title)).font(.system(size: 14, weight: .medium))
-                Text(LocalizedStringKey(source.detail)).font(.system(size: 12.5)).foregroundStyle(.secondary)
+                Text(LocalizedStringKey(source.detail)).font(.system(size: 13.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(holding(source)).font(.system(size: 12.5)).foregroundStyle(deleted == source ? Color.green : Color.secondary)
+                Text(holding(source)).font(.system(size: 13.5)).foregroundStyle(deleted == source ? Color.green : Color.secondary)
                     .monospacedDigit()
                     .contentTransition(.opacity)
             }
@@ -55,7 +57,7 @@ struct MemorySettings: View {
             .accessibilityLabel(Text(LocalizedStringKey(source.title)))
         }
         .padding(.vertical, 2)
-        .onAppear { counts[source] = state.memoryCount?(source) ?? 0 }
+        .onAppear { recount(source) }
         .confirmationDialog(Text(confirmTitle(source)), isPresented: Binding(
             get: { deleting == source }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
             Button("Delete", role: .destructive) { forget(source) }
@@ -66,13 +68,18 @@ struct MemorySettings: View {
     }
 
     private func canDelete(_ source: MemorySource) -> Bool {
-        (counts[source] ?? 0) > 0
+        (counts[source] ?? 0) > 0 || holds[source] == true
+    }
+
+    private func recount(_ source: MemorySource) {
+        counts[source] = state.memoryCount?(source) ?? 0
+        holds[source] = state.memoryHasFiles?(source) ?? false
     }
 
     private func forget(_ source: MemorySource) {
         let ok = state.onForgetMemory?(source) ?? false
         withAnimation(Theme.snappy) {
-            counts[source] = state.memoryCount?(source) ?? 0
+            recount(source)
             deleted = ok ? source : nil
         }
         Haptics.confirm()
@@ -116,7 +123,7 @@ struct MemorySettings: View {
                 Text("In your AI apps").font(.system(size: 14, weight: .medium))
                 Text(apps.isEmpty ? Localization.string("None yet. Claude, ChatGPT and Cursor can search your memory, read only.")
                                   : apps.joined(separator: ", ") + " · " + Localization.string("read only, what's switched on above"))
-                    .font(.system(size: 12.5)).foregroundStyle(.secondary)
+                    .font(.system(size: 13.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
@@ -138,7 +145,7 @@ private struct PauseRow: View {
             RowSymbol(name: paused ? "pause.circle.fill" : "record.circle", active: true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(paused ? "Paused" : "Remembering").font(.system(size: 14, weight: .semibold))
-                Text(line(privacy, paused: paused)).font(.system(size: 12.5)).foregroundStyle(.secondary)
+                Text(line(privacy, paused: paused)).font(.system(size: 13.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
@@ -160,7 +167,7 @@ private struct PauseRow: View {
 
     private func line(_ privacy: MemoryPrivacy, paused: Bool) -> String {
         guard paused, let until = privacy.pausedUntil else {
-            return Localization.string("On this Mac only. Pause it for a private call or a client's screen.")
+            return Localization.string("On this Mac only. Pause it for a call or work you don't want kept; what Tara already has stays.")
         }
         if privacy.isPausedUntilResumed { return Localization.string("Nothing new is recorded until you resume.") }
         let time = until.formatted(Calendar.current.isDate(until, inSameDayAs: now) ? .dateTime.hour().minute() : .dateTime.weekday(.wide).hour().minute())
@@ -179,7 +186,7 @@ private struct IgnoreList: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Never recorded").font(.system(size: 14, weight: .medium))
                     Text("Password apps always: 1Password, Bitwarden, Passwords, Keychain Access and more. Add apps whose copies and windows Tara should never keep.")
-                        .font(.system(size: 12.5)).foregroundStyle(.secondary)
+                        .font(.system(size: 13.5)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)

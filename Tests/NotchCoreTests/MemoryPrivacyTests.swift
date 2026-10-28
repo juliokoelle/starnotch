@@ -124,19 +124,22 @@ import TestSupport
         try "# feed".write(to: files.meetingFeed, atomically: true, encoding: .utf8)
         try "{}".write(to: files.calendarSnapshot, atomically: true, encoding: .utf8)
         try "{}".write(to: files.connectorsFolder.appending(path: "vault.json"), atomically: true, encoding: .utf8)
+        // Another tool's calendar in connectors/ is a notes snapshot, not Starnotch's calendar.
+        try "{}".write(to: files.connectorsFolder.appending(path: "calendar.json"), atomically: true, encoding: .utf8)
         try "{\"text\":\"a\"}\n{\"text\":\"b\"}\n\n".write(to: files.captureQueue, atomically: true, encoding: .utf8)
         try "{}".write(to: files.privacyFile, atomically: true, encoding: .utf8)
 
         #expect(files.count(.meetings) == 2)
         #expect(files.count(.captures) == 2)
-        #expect(files.count(.notes) == 1)
+        #expect(files.count(.notes) == 2)
         #expect(files.count(.clipboard) == 0)
 
         let gone = files.forget(.meetings)
-        #expect(gone.map(\.lastPathComponent).sorted() == ["2026-10-12-kickoff.json", "2026-10-20-review.json", "Meeting-Agent.md", "calendar.json"])
+        #expect(gone.map(\.lastPathComponent).sorted() == ["2026-10-12-kickoff.json", "2026-10-20-review.json", "Meeting-Agent.md", "calendar-today.json"])
         // The sync state, the notes and the captures stay.
         #expect(fm.fileExists(atPath: files.meetingsFolder.appending(path: "jamie-sync.state").path))
         #expect(fm.fileExists(atPath: files.connectorsFolder.appending(path: "vault.json").path))
+        #expect(fm.fileExists(atPath: files.connectorsFolder.appending(path: "calendar.json").path))
         #expect(files.count(.captures) == 2)
         files.forget(.notes)
         #expect(!fm.fileExists(atPath: files.connectorsFolder.appending(path: "vault.json").path))
@@ -148,7 +151,7 @@ import TestSupport
     @Test func calendarSnapshotOnlyWhileMeetingsRecord() throws {
         let folder = Fixtures.temp("privacy-calendar")
         defer { Fixtures.remove(folder) }
-        let url = folder.appending(path: "connectors/calendar.json")
+        let url = MemoryFiles(support: folder).calendarSnapshot
         let events = [CalendarSnapshotEvent(title: "Design review", start: now, end: now.addingTimeInterval(1800),
                                             location: "Room 2", attendees: ["Lena", "Max"], link: "https://meet.google.com/abc")]
         var privacy = MemoryPrivacy()
@@ -294,6 +297,51 @@ import TestSupport
             #expect(throws: SetupError.self) { try SetupActions.installMemory(.memoryChatGPT, paths) }
             #expect(SetupSandbox.read(paths.codexConfig) == text)
         }
+    }
+
+    @Test func codexConfigWithTheServerUnderMcpServersOrInCRLFIsNotTouched() throws {
+        let paths = SetupSandbox.make()
+        defer { Fixtures.remove(paths.home) }
+        try Self.withAgent(paths)
+        for text in ["[mcp_servers]\nstarnotch-memory = { command = \"/x\" }\n",
+                     "model = \"x\"\r\n[mcp_servers.starnotch-memory]\r\ncommand = \"/x\"\r\n",
+                     "[mcp_servers.starnotch-memory.env]\nA = \"1\"\n"] {
+            try text.write(to: paths.codexConfig, atomically: true, encoding: .utf8)
+            #expect(throws: SetupError.self) { try SetupActions.installMemory(.memoryChatGPT, paths) }
+            #expect(SetupSandbox.read(paths.codexConfig) == text)
+        }
+        // Another server under [mcp_servers] is fine.
+        try "[mcp_servers]\nnotes = { command = \"/x\" }\n".write(to: paths.codexConfig, atomically: true, encoding: .utf8)
+        #expect(throws: Never.self) { try SetupActions.installMemory(.memoryChatGPT, paths) }
+    }
+
+    @Test func codexConfigInCRLFComesBackExactly() throws {
+        let paths = SetupSandbox.make()
+        defer { Fixtures.remove(paths.home) }
+        try Self.withAgent(paths)
+        let original = "model = \"x\"\r\n"
+        try original.write(to: paths.codexConfig, atomically: true, encoding: .utf8)
+        let entry = try SetupActions.installMemory(.memoryChatGPT, paths)
+        #expect(SetupSandbox.read(paths.codexConfig).hasPrefix(original + "\n# >>> Starnotch"))
+        try SetupActions.removeMemory(.memoryChatGPT, paths, entry: entry)
+        #expect(SetupSandbox.read(paths.codexConfig) == original)
+    }
+
+    @Test func jsonConfigWithoutServersLosesTheKeyAgainAndSymlinksStay() throws {
+        let paths = SetupSandbox.make()
+        defer { Fixtures.remove(paths.home) }
+        try Self.withAgent(paths)
+        try FileManager.default.createDirectory(at: paths.cursorHome, withIntermediateDirectories: true)
+        let real = paths.home.appending(path: "dotfiles-mcp.json")
+        try #"{"theme":"dark"}"#.write(to: real, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: paths.cursorMCPConfig, withDestinationURL: real)
+        let entry = try SetupActions.installMemory(.memoryCursor, paths)
+        #expect(SetupSandbox.read(real).contains("starnotch-memory"))
+        try SetupActions.removeMemory(.memoryCursor, paths, entry: entry)
+        let after = SetupSandbox.json(real)
+        #expect(after["mcpServers"] == nil && after["theme"] as? String == "dark")
+        let type = try FileManager.default.attributesOfItem(atPath: paths.cursorMCPConfig.path)[.type] as? FileAttributeType
+        #expect(type == .typeSymbolicLink)
     }
 
     @Test func tomlStringsAreEscaped() {

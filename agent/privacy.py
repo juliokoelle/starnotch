@@ -20,8 +20,6 @@ from memory import DEFAULT_DIR
 
 FILE = DEFAULT_DIR.parent / "privacy.json"
 SOURCES = ("meetings", "captures", "notes", "clipboard", "sessions")
-# Connector snapshots that belong to a source other than notes (the file's stem).
-CONNECTOR_SOURCES = {"calendar": "meetings"}
 
 
 @dataclass
@@ -78,8 +76,3 @@ def load(file: Path | None = None) -> Privacy:
             until = None
     off = {str(s) for s in data.get("off") or [] if str(s) in SOURCES}
     return Privacy(paused=bool(data.get("paused")), paused_until=until, off=off)
-
-
-def connector_source(stem: str) -> str:
-    """Which switch a connector snapshot answers to: calendar.json is a meeting source, the rest are notes."""
-    return CONNECTOR_SOURCES.get(stem, "notes")

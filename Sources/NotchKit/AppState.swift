@@ -38,6 +38,8 @@ final class AppState {
     @ObservationIgnored var onForgetMemory: ((MemorySource) -> Bool)?
     /// What a source holds now (counts for the Settings rows).
     @ObservationIgnored var memoryCount: ((MemorySource) -> Int)?
+    /// Whether a source holds any file Delete would remove.
+    @ObservationIgnored var memoryHasFiles: ((MemorySource) -> Bool)?
     private(set) var isAccessibilityTrusted = AXIsProcessTrusted()
     private(set) var loginItemStatus = SMAppService.mainApp.status
     private(set) var loginItemError: String?

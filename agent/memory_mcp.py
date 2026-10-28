@@ -11,6 +11,9 @@ What's set up). Tools:
 - recent_decisions: decisions from the meetings of the last days.
 - today: today's calendar, tasks due or overdue, commitments due.
 
+Today's calendar comes from `calendar-today.json`, which the app writes into its folder while an AI app is set up and
+meetings may be recorded; only events of the local day count, and a file from an earlier day counts as none.
+
 Every result names where it comes from (`source`, `id`, and a `link` when there is one). Nothing here writes. The
 privacy switches (Settings › Tara's memory, `privacy.json`) are read on every call: a source that is off is left
 out and said so in `left_out`; a pause only stops new recordings, so what Tara has stays searchable.
@@ -33,6 +36,7 @@ import privacy as switches
 from memory import DEFAULT_DIR, Meeting, Memory, _words
 
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
+CALENDAR = DEFAULT_DIR.parent / "calendar-today.json"
 MAX_TRANSCRIPT_CHARS = 40_000
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
@@ -56,16 +60,16 @@ def _capture_source(c: quick.Capture) -> dict[str, Any]:
 
 
 def _item_source(item: linked.Item) -> dict[str, Any]:
-    out = {"source": "calendar" if item.id.startswith("calendar:") else "note", "id": item.id, "title": item.title,
-           "date": item.date, "from": item.source}
+    out = {"source": "note", "id": item.id, "title": item.title, "date": item.date, "from": item.source}
     if item.url:
         out["link"] = item.url
     return out
 
 
 def recent_sessions(root: Path, now: dt.datetime, days: float = 7, limit: int = 20) -> list[dict[str, Any]]:
-    """Claude Code sessions changed in the last days, newest first: title, folder, when. Only the titles and folders
-    are read (the head and tail of each transcript), never what was said."""
+    """Claude Code sessions changed in the last days, newest first: title, folder, when. Only the session's title
+    (the user's or the generated one, else the folder's name) and folder are read from the head and tail of each
+    transcript, never what was said."""
     found = []
     try:
         folders = [d for d in root.iterdir() if d.is_dir()]
@@ -84,6 +88,7 @@ def recent_sessions(root: Path, now: dt.datetime, days: float = 7, limit: int = 
         if len(out) >= limit:
             break
         title, cwd = _session_title(file)
+        title = title or Path(cwd).name
         if title and cwd:
             out.append({"source": "session", "id": file.stem, "title": title, "folder": cwd,
                         "date": mtime.isoformat(timespec="minutes"), "tool": "Claude Code"})
@@ -91,8 +96,8 @@ def recent_sessions(root: Path, now: dt.datetime, days: float = 7, limit: int = 
 
 
 def _session_title(file: Path) -> tuple[str, str]:
-    """The user's name for the session, else the generated one, else the first prompt; and its folder."""
-    custom = ai = first = cwd = ""
+    """The user's name for the session, else the generated one (empty when it has neither); and its folder."""
+    custom = ai = cwd = ""
     try:
         with file.open("rb") as handle:
             head = handle.read(64 * 1024)
@@ -117,11 +122,7 @@ def _session_title(file: Path) -> tuple[str, str]:
                 ai = record["aiTitle"]
             if isinstance(record.get("cwd"), str):
                 cwd = record["cwd"]
-            if not first and kind == "user":
-                content = (record.get("message") or {}).get("content")
-                if isinstance(content, str) and content.strip() and not content.startswith("<"):
-                    first = _short(content, 80)
-    return custom or ai or first, cwd
+    return custom or ai, cwd
 
 
 class Library:
@@ -129,12 +130,13 @@ class Library:
 
     def __init__(self, memory_dir: Path | None = None, captures: Path | None = None, connectors: Path | None = None,
                  claude_projects: Path | None = None, privacy_file: Path | None = None,
-                 now: dt.datetime | None = None):
+                 now: dt.datetime | None = None, calendar: Path | None = None):
         self.memory_dir = memory_dir or DEFAULT_DIR
         self.captures_path = captures or quick.QUEUE
         self.connectors_path = connectors or linked.FOLDER
         self.claude_projects = claude_projects or CLAUDE_PROJECTS
         self.privacy_file = privacy_file
+        self.calendar_path = calendar or CALENDAR
         self.fixed_now = now
 
     @property
@@ -155,7 +157,34 @@ class Library:
         return quick.read(self.captures_path) if p.shares("captures") else []
 
     def items(self, p: switches.Privacy) -> list[linked.Item]:
-        return linked.read(self.connectors_path, allow=lambda stem: p.shares(switches.connector_source(stem)))
+        return linked.read(self.connectors_path) if p.shares("notes") else []
+
+    def calendar(self, p: switches.Privacy) -> tuple[list[dict[str, Any]], str]:
+        """Today's events from the app's calendar file, and a note when there are none to trust (file missing or from
+        an earlier day). Only events that start today (local) count."""
+        if not p.shares("meetings"):
+            return [], ""
+        try:
+            data = json.loads(self.calendar_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return [], "Starnotch hasn't written today's calendar (no AI app set up before, Calendar access off, or not open yet)."
+        today = self.today.isoformat()
+        updated = str(data.get("updated") or "") if isinstance(data, dict) else ""
+        if updated[:10] != today:
+            why = "Tara's memory is paused" if p.is_paused() else "Starnotch wasn't open today"
+            return [], f"The calendar Starnotch wrote is from {updated[:10] or 'an earlier day'} ({why}), so today's events are unknown."
+        events = []
+        for e in data.get("today") or []:
+            if not isinstance(e, dict) or not str(e.get("date") or "").startswith(today):
+                continue
+            event = {"title": str(e.get("title") or ""), "start": e.get("date"), "end": e.get("end"), "source": "calendar"}
+            for key in ("location", "attendees"):
+                if e.get(key):
+                    event[key] = e[key]
+            if e.get("url"):
+                event["link"] = e["url"]
+            events.append(event)
+        return events, ""
 
     def sessions(self, p: switches.Privacy) -> list[dict[str, Any]]:
         return recent_sessions(self.claude_projects, self.now) if p.shares("sessions") else []
@@ -272,11 +301,10 @@ def today_view(lib: Library) -> dict[str, Any]:
     p = lib.privacy()
     today = lib.today.isoformat()
     items = lib.items(p)
-    events = [{"title": i.title, "start": i.date, **({"details": i.body} if i.body else {}), "source": "calendar", "id": i.id}
-              for i in items if i.id.startswith("calendar:")]
+    events, calendar_note = lib.calendar(p)
     tasks = []
     for i in items:
-        if i.id.startswith("calendar:") or i.group != "tasks":
+        if i.group != "tasks":
             continue
         due = (i.date or "")[:10]
         if due and due <= today:
@@ -286,11 +314,10 @@ def today_view(lib: Library) -> dict[str, Any]:
             tasks.append({"task": c.text, "due": c.due, "overdue": str(c.due) < today, **_capture_source(c)})
     promised = [row for row in commitments(lib)["open"] if row.get("source") == "meeting" and row.get("due")
                 and str(row["due"]) <= today]
-    calendar_known = any(i.id.startswith("calendar:") for i in items) or (lib.connectors_path / "calendar.json").exists()
     out = lib.envelope(p, ("meetings", "captures", "notes"), date=today, events=events, tasks=tasks,
                        commitments_due=promised)
-    if not calendar_known and p.shares("meetings"):
-        out["calendar"] = "Starnotch hasn't written today's calendar (Calendar access off, or not opened yet)."
+    if calendar_note:
+        out["calendar"] = calendar_note
     return out
 
 

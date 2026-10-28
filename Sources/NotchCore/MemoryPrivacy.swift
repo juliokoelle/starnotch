@@ -55,7 +55,7 @@ public enum MemoryPause: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .oneHour: "For 1 hour"
-        case .untilTomorrow: "Until tomorrow"
+        case .untilTomorrow: "Until midnight"
         case .untilResumed: "Until I resume"
         }
     }
@@ -220,8 +220,9 @@ public struct MemoryFiles: Sendable {
     public var meetingFeed: URL { support.appending(path: "Meeting-Agent.md") }
     public var captureQueue: URL { support.appending(path: "capture-queue.jsonl") }
     public var connectorsFolder: URL { support.appending(path: "connectors") }
-    /// Today's calendar for Tara (written by the app; counts as a meeting source).
-    public var calendarSnapshot: URL { connectorsFolder.appending(path: "calendar.json") }
+    /// Today's calendar for the memory server (written by the app while an AI app is set up;
+    /// counts as a meeting source). Outside `connectors/`, which other tools write to.
+    public var calendarSnapshot: URL { support.appending(path: "calendar-today.json") }
     /// Scripts that reopen a past agent session.
     public var resumeFolder: URL { support.appending(path: "resume") }
 
@@ -240,7 +241,7 @@ public struct MemoryFiles: Sendable {
         case .captures:
             return fm.fileExists(atPath: captureQueue.path) ? [captureQueue] : []
         case .notes:
-            return listing(connectorsFolder) { $0.pathExtension == "json" && $0.lastPathComponent != calendarSnapshot.lastPathComponent }
+            return listing(connectorsFolder) { $0.pathExtension == "json" }
         case .clipboard:
             return []
         case .sessions:
@@ -270,7 +271,7 @@ public struct MemoryFiles: Sendable {
 
 // MARK: - Today's calendar for Tara
 
-/// One event of today, as the app writes it to `connectors/calendar.json`.
+/// One event of today, as the app writes it to `calendar-today.json`.
 public struct CalendarSnapshotEvent: Equatable, Sendable {
     public var title: String
     public var start: Date
@@ -291,7 +292,7 @@ public struct CalendarSnapshotEvent: Equatable, Sendable {
 
 public enum CalendarSnapshot {
     /// `{"name": "Calendar", "updated": …, "today": [{"title", "date", "end", "location", "attendees", "url"}]}`:
-    /// the shape the sidecar's connector reader turns into items (`agent/connectors.py`).
+    /// what the memory server's `today` reads (`agent/memory_mcp.py`), in the connector shape.
     /// Times in the Mac's time zone with its offset, so "10:00" reads as the user's 10:00.
     public static func json(_ events: [CalendarSnapshotEvent], now: Date, timeZone: TimeZone = .current) -> Data {
         let iso = ISO8601DateFormatter()

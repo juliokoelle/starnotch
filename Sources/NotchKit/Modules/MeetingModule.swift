@@ -313,12 +313,11 @@ final class MeetingModule: NotchModule {
             } else if state == "offline" {
                 message = text ?? "Tara's model isn't reachable; running on rules"
             } else if state == "not_saved" {
-                // Paused or switched off meanwhile: nothing went into the memory.
-                message = "Not saved: Tara's memory is paused or meetings are off"
-                if phase == .saving {
-                    endAgent()
-                    set(.idle)
-                }
+                // Meetings switched off (or paused before anything was heard): nothing went into the
+                // memory. The agent keeps what it heard, so Save works once meetings are back on;
+                // Close drops it.
+                message = "Not saved: meetings are off in Settings › Tara's memory, or nothing was heard before the pause"
+                if phase == .saving { set(.stopped(demo: agentIsDemo)) }
             }
         case .error(let text):
             message = text

@@ -323,7 +323,7 @@ final class AskTara {
         // The rules and Apple's model can't see pictures; sample data never brings up the Screen Recording prompt.
         guard ![.rules, .apple].contains(MeetingAgentSetup.brain), !demo || CGPreflightScreenCaptureAccess() else { return }
         guard !ignores(target.bundleID) else {
-            fail("\(target.app) is on the ignore list in Settings › Tara's memory, so Tara doesn't look at it")
+            fail(String(format: Localization.string("%@ is on the ignore list in Settings › Tara's memory, so Tara doesn't look at it"), target.app))
             return
         }
         withAnimation(Theme.snappy) { capturing = true }

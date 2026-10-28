@@ -14,7 +14,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import quote
 
 from memory import DEFAULT_DIR
@@ -39,15 +39,12 @@ class Item:
     url: str = ""
 
 
-def read(folder: Path | None = FOLDER, allow: Callable[[str], bool] | None = None) -> list[Item]:
-    """Every item of every snapshot in the folder, file by file in name order. `allow` gets each file's stem
-    ("vault", "calendar") and leaves out the files it refuses (the privacy switches)."""
+def read(folder: Path | None = FOLDER) -> list[Item]:
+    """Every item of every snapshot in the folder, file by file in name order."""
     if not folder or not folder.is_dir():
         return []
     items: list[Item] = []
     for path in sorted(folder.glob("*.json")):
-        if allow is not None and not allow(path.stem):
-            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):

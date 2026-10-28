@@ -45,8 +45,9 @@ uv run python jamie_sync.py --logout
 (schema in `memory.py`). `--offline` runs the agent without Claude, on simple built-in rules.
 
 The agent follows the privacy switches in `privacy.json` (README › Privacy switches): while Tara's memory is paused or
-meetings are off, utterances are dropped and `save` answers `{"type": "status", "state": "not_saved", "message": …}`;
-a source switched off is left out of `ask` and `prep`.
+meetings are off, utterances are dropped. `save` during a pause stores what was heard before it; with meetings off (or
+nothing heard) it answers `{"type": "status", "state": "not_saved", "message": …}` and keeps what it heard for a later
+`save`. A source switched off is left out of `ask` and `prep`.
 
 The agent also reads what the user noted with quick capture (⌃⌥N): the app's `capture-queue.jsonl` in the same
 folder (`--captures` points elsewhere, `--captures ''` ignores it). Lines with `"memory": false` (kept only as a

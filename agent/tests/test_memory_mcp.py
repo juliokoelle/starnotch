@@ -22,9 +22,10 @@ def library(memory_dir, tmp_path):
     (folder / "vault.json").write_text(json.dumps({"tasks": [
         {"title": "Landingpage Text schreiben", "due": "2026-10-28", "path": "/notes/Tasks.md"},
         {"title": "Steuer", "due": "2026-11-15"}]}), encoding="utf-8")
-    (folder / "calendar.json").write_text(json.dumps({"name": "Calendar", "today": [
-        {"title": "Design review", "date": "2026-10-28T10:00:00+01:00", "description": "until 10:30 · with Lena"}]}),
-        encoding="utf-8")
+    (tmp_path / "calendar-today.json").write_text(json.dumps({"name": "Calendar", "updated": "2026-10-28T08:00:00+01:00", "today": [
+        {"title": "Board meeting", "date": "2026-10-27T10:00:00+01:00", "end": "2026-10-27T11:00:00+01:00"},
+        {"title": "Design review", "date": "2026-10-28T10:00:00+01:00", "end": "2026-10-28T10:30:00+01:00",
+         "attendees": "Lena", "url": "https://meet.example/abc"}]}), encoding="utf-8")
     projects = tmp_path / "claude" / "projects" / "-Users-x-lumen"
     projects.mkdir(parents=True)
     session = projects / "0b7e2f0a-1111-2222-3333-444455556666.jsonl"
@@ -34,7 +35,8 @@ def library(memory_dir, tmp_path):
     ]) + "\n", encoding="utf-8")
     now = time.time()
     os.utime(session, (now, now))
-    return Library(memory_dir, queue, folder, tmp_path / "claude" / "projects", tmp_path / "privacy.json", now=NOW)
+    return Library(memory_dir, queue, folder, tmp_path / "claude" / "projects", tmp_path / "privacy.json", now=NOW,
+                   calendar=tmp_path / "calendar-today.json")
 
 
 async def call(lib, tool, args=None):
@@ -95,7 +97,9 @@ async def test_today(memory_dir, tmp_path):
     lib = library(memory_dir, tmp_path)
     day = await call(lib, "today")
     assert day["date"] == "2026-10-28"
-    assert day["events"][0]["title"] == "Design review" and day["events"][0]["source"] == "calendar"
+    assert [e["title"] for e in day["events"]] == ["Design review"]  # yesterday's board meeting isn't today's
+    assert day["events"][0]["source"] == "calendar" and day["events"][0]["link"] == "https://meet.example/abc"
+    assert "calendar" not in day
     tasks = {t["task"]: t for t in day["tasks"]}
     assert tasks["Landingpage Text schreiben"]["overdue"] is False and tasks["Landingpage Text schreiben"]["link"].startswith("file://")
     assert tasks["Zahlen von Max nachfragen"]["overdue"] is True
@@ -104,6 +108,36 @@ async def test_today(memory_dir, tmp_path):
     (tmp_path / "privacy.json").write_text(json.dumps({"off": ["meetings"]}), encoding="utf-8")
     day = await call(lib, "today")
     assert day["events"] == [] and day["commitments_due"] == [] and day["left_out"] == ["meetings"]
+
+
+async def test_today_trusts_no_calendar_from_an_earlier_day(memory_dir, tmp_path):
+    lib = library(memory_dir, tmp_path)
+    lib.fixed_now = dt.datetime(2026, 10, 29, 9, 0)
+    (tmp_path / "privacy.json").write_text(json.dumps({"paused": True}), encoding="utf-8")
+    day = await call(lib, "today")
+    assert day["events"] == [] and "2026-10-28" in day["calendar"] and "paused" in day["calendar"]
+    (tmp_path / "calendar-today.json").unlink()
+    day = await call(lib, "today")
+    assert day["events"] == [] and "hasn't written" in day["calendar"]
+
+
+async def test_another_tools_calendar_in_connectors_is_a_note(memory_dir, tmp_path):
+    lib = library(memory_dir, tmp_path)
+    (tmp_path / "connectors" / "calendar.json").write_text(json.dumps({"today": [
+        {"title": "Old offsite", "date": "2026-10-01T10:00"}]}), encoding="utf-8")
+    day = await call(lib, "today")
+    assert [e["title"] for e in day["events"]] == ["Design review"]
+    found = await call(lib, "search_memory", {"query": "offsite", "sources": ["notes"]})
+    assert found["results"][0]["source"] == "note"
+
+
+def test_sessions_never_show_what_was_said(tmp_path):
+    folder = tmp_path / "-Users-x-acme"
+    folder.mkdir()
+    (folder / "s.jsonl").write_text(json.dumps({"type": "user", "cwd": "/Users/x/acme",
+                                                "message": {"content": "my secret plan for the deal"}}) + "\n", encoding="utf-8")
+    rows = memory_mcp.recent_sessions(tmp_path, dt.datetime.now(dt.timezone.utc))
+    assert rows[0]["title"] == "acme" and "secret" not in json.dumps(rows)
 
 
 async def test_tools_are_read_only(memory_dir, tmp_path):

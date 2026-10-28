@@ -815,7 +815,7 @@ private struct StatusChips: View {
                 }
                 if module.onToggleMemory != nil {
                     toggle(module.memoryPaused ? "pause.circle.fill" : "pause.circle",
-                           labels(module.memoryPaused) ? (module.memoryPaused ? "Memory paused" : "Pause memory") : nil,
+                           labels(module.memoryPaused) ? (module.memoryPaused ? "Tara paused" : "Pause Tara") : nil,
                            on: module.memoryPaused,
                            help: module.memoryPaused ? "Tara's memory is paused: nothing new is recorded. Click to resume"
                                                      : "Pause Tara's memory: no meetings, captures, notes or clipboard until you resume") {

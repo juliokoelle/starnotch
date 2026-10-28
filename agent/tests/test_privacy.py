@@ -2,7 +2,6 @@ import datetime as dt
 import json
 
 import agent as agent_module
-import connectors as linked
 import jamie_sync
 import privacy
 from agent import Agent
@@ -34,11 +33,6 @@ def test_pause_until_a_time_and_until_resumed(tmp_path):
     assert privacy.load(file).is_paused(NOW + dt.timedelta(days=400))
 
 
-def test_connector_files_answer_to_their_source():
-    assert privacy.connector_source("calendar") == "meetings"
-    assert privacy.connector_source("vault") == "notes"
-
-
 def make(memory_dir, tmp_path, out):
     queue = tmp_path / "capture-queue.jsonl"
     queue.write_text(json.dumps({"id": "c1", "created": "2026-10-24T09:00:00Z", "route": "task",
@@ -56,9 +50,10 @@ def test_sources_switched_off_are_left_out_of_answers(memory_dir, tmp_path, monk
     assert agent.memory.meetings and agent.captures() and {i.source for i in agent.notes()} == {"Calendar", "vault"}
     write(tmp_path / "privacy.json", off=["meetings", "captures"])
     assert agent.memory.meetings == [] and agent.captures() == []
-    assert {i.source for i in agent.notes()} == {"vault"}  # the calendar is a meeting source
+    # Another tool's calendar.json in connectors/ is a snapshot like any other: notes.
+    assert {i.source for i in agent.notes()} == {"Calendar", "vault"}
     write(tmp_path / "privacy.json", off=["notes"])
-    assert {i.source for i in agent.notes()} == {"Calendar"}
+    assert agent.notes() == []
     agent.handle({"cmd": "prep", "participants": ["Max"], "id": 1})
     assert out[-1]["decisions"]  # meetings are on again
 
@@ -71,7 +66,7 @@ def test_nothing_is_saved_or_heard_while_paused(memory_dir, tmp_path):
     assert agent.waiting == []
     agent.handle({"cmd": "save", "title": "Secret", "id": 7})
     assert out[-1]["state"] == "not_saved" and "paused" in out[-1]["message"]
-    assert not any("secret" in p.name for p in memory_dir.iterdir())
+    assert not any("secret" in p.name for p in memory_dir.iterdir())  # nothing was heard
     write(tmp_path / "privacy.json", paused=False)
     agent.hear([{"speaker": "Max", "text": "Wir nehmen 30 Euro", "t": 2}])
     agent.handle({"cmd": "save", "title": "Open", "id": 8})
@@ -87,15 +82,36 @@ def test_jamie_sync_does_nothing_while_paused(tmp_path, capsys, monkeypatch):
     assert line["state"] == "paused" and called == []
 
 
-def test_connectors_read_with_allow(tmp_path):
-    write(tmp_path / "a.json", items=[{"title": "x"}])
-    write(tmp_path / "b.json", items=[{"title": "y"}])
-    assert [i.title for i in linked.read(tmp_path, allow=lambda stem: stem != "a")] == ["y"]
-
-
 def test_captures_kept_only_as_a_safety_net_are_not_tara_s(tmp_path):
     import captures as quick
     queue = tmp_path / "q.jsonl"
     queue.write_text(json.dumps({"id": "a", "route": "note", "text": "kept"}) + "\n"
                      + json.dumps({"id": "b", "route": "note", "text": "while paused", "memory": False}) + "\n", encoding="utf-8")
     assert [c.id for c in quick.read(queue)] == ["a"]
+
+
+def test_a_pause_mid_meeting_keeps_what_was_heard_before_it(memory_dir, tmp_path):
+    out = []
+    agent = make(memory_dir, tmp_path, out)
+    agent.hear([{"speaker": "Max", "text": "Wir nehmen 30 Euro", "t": 1}])
+    write(tmp_path / "privacy.json", paused=True, paused_until=None)
+    agent.hear([{"speaker": "Max", "text": "Das hier ist privat", "t": 2}])
+    agent.handle({"cmd": "save", "title": "Pricing", "id": 7})
+    assert out[-1]["state"] == "saved"
+    saved = json.loads(open(out[-1]["path"], encoding="utf-8").read())
+    assert [line["text"] for line in saved["transcript"]] == ["Wir nehmen 30 Euro"]
+
+
+def test_meetings_off_saves_nothing_but_keeps_it_for_a_save_once_back_on(memory_dir, tmp_path):
+    out = []
+    agent = make(memory_dir, tmp_path, out)
+    agent.hear([{"speaker": "Max", "text": "Wir nehmen 30 Euro", "t": 1}])
+    write(tmp_path / "privacy.json", off=["meetings"])
+    agent.handle({"cmd": "save", "title": "Pricing", "id": 7})
+    assert out[-1]["state"] == "not_saved" and "switched off" in out[-1]["message"]
+    assert not any("pricing" in p.name for p in memory_dir.iterdir())
+    write(tmp_path / "privacy.json", off=[])
+    agent.handle({"cmd": "save", "title": "Pricing", "id": 8})
+    assert out[-1]["state"] == "saved"
+    saved = json.loads(open(out[-1]["path"], encoding="utf-8").read())
+    assert [line["text"] for line in saved["transcript"]] == ["Wir nehmen 30 Euro"]

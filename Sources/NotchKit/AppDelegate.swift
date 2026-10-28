@@ -881,6 +881,9 @@ extension AppDelegate {
             if source == .clipboard { return self?.tools?.history.items.count ?? 0 }
             return files.count(source)
         }
+        state.memoryHasFiles = { [weak self] source in
+            source == .clipboard ? (self?.tools?.history.items.isEmpty == false) : !files.files(for: source).isEmpty
+        }
         state.onForgetMemory = { [weak self] source in
             guard let self else { return false }
             guard self.state.persists else { return true }  // previews delete nothing
@@ -936,11 +939,17 @@ extension AppDelegate {
         applyPrivacy()
         let now = Date()
         let new = state.settings.privacy
-        // Paused, or meetings off: a meeting being heard stops at once (nothing new is transcribed).
-        if !new.records(.meetings, at: now), meeting?.isRunning == true { meeting?.stop() }
+        // How it was just before: a timed pause that has just run out still counted then.
+        let before = old.pausedUntil.map { min(now, $0.addingTimeInterval(-1)) } ?? now
+        // Paused, or meetings off: a meeting being heard stops at once (nothing new is transcribed),
+        // and a Jamie sync already running ends.
+        if !new.records(.meetings, at: now) {
+            if meeting?.isRunning == true { meeting?.stop() }
+            meeting?.jamie.cancel()
+        }
         // Back on: the vault snapshot and today's calendar are written fresh.
-        if new.records(.notes, at: now), !old.records(.notes, at: now) { vaultLive?.restart() }
-        if new.records(.meetings, at: now), !old.records(.meetings, at: now) {
+        if new.records(.notes, at: now), !old.records(.notes, at: before) { vaultLive?.restart() }
+        if new.records(.meetings, at: now), !old.records(.meetings, at: before) {
             lastCalendarSnapshot = nil
             writeCalendarSnapshot(calendar.today)
         }
@@ -948,9 +957,20 @@ extension AppDelegate {
         if new.off != old.off { ask?.reloadMemory() }
     }
 
-    /// Today's calendar for Tara and the AI apps (`connectors/calendar.json`), while meetings may be recorded.
+    /// Today's calendar for the AI apps that read Tara's memory (`calendar-today.json`, which
+    /// only the memory server reads): written while meetings may be recorded and an AI app is set
+    /// up in Settings › What's set up. With none set up, the file goes.
     private func writeCalendarSnapshot(_ events: [CalendarModule.Meeting]) {
-        guard state.persists, calendar.access == .granted else { return }
+        guard state.persists else { return }
+        let url = MemoryFiles(support: Brand.supportFolder).calendarSnapshot
+        guard SetupItem.memoryItems.contains(where: setup.isSetUp) else {
+            if lastCalendarSnapshot != nil || FileManager.default.fileExists(atPath: url.path) {
+                lastCalendarSnapshot = nil
+                try? FileManager.default.removeItem(at: url)
+            }
+            return
+        }
+        guard calendar.access == .granted else { return }
         let snapshot = events.map {
             CalendarSnapshotEvent(title: $0.title, start: $0.start, end: $0.end, location: $0.location,
                                   attendees: $0.attendees, link: $0.link?.url.absoluteString)
@@ -958,7 +978,6 @@ extension AppDelegate {
         let privacy = state.settings.privacy
         guard snapshot != lastCalendarSnapshot, privacy.records(.meetings, at: Date()) else { return }
         lastCalendarSnapshot = snapshot
-        let url = MemoryFiles(support: Brand.supportFolder).calendarSnapshot
         Task.detached(priority: .utility) { CalendarSnapshot.write(snapshot, to: url, privacy: privacy) }
     }
 }

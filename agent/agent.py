@@ -330,10 +330,9 @@ class Agent:
         return text + ("\n\n# Quick capture: the user's own tasks, questions and notes\n" + noted if noted else "")
 
     def notes(self) -> list[linked.Item]:
-        if not self.connectors_path:
+        if not self.connectors_path or not self.privacy.shares("notes"):
             return []
-        privacy = self.privacy
-        return linked.read(self.connectors_path, allow=lambda stem: privacy.shares(switches.connector_source(stem)))
+        return linked.read(self.connectors_path)
 
     def ask_context(self, notes: list[linked.Item]) -> str:
         """For questions: the meetings, the captures with their ids, and the connector snapshots."""
@@ -584,10 +583,11 @@ class Agent:
     def save(self, message: dict[str, Any]) -> dict[str, Any]:
         """Writes the meeting, the utterances still waiting for the meeting gap included, before it analyses those:
         the transcript doesn't depend on the analysis, and the app ends the agent if the save takes too long.
-        Commitments that analysis finds are written in a second go."""
+        Commitments that analysis finds are written in a second go. A pause only stopped the listening, so what
+        was heard before it is saved (a meeting with nothing heard isn't). With meetings switched off nothing is
+        saved, and what was heard stays for a Save once they are back on (Close drops it)."""
         refused = self.privacy.why_not("meetings")
-        if refused:  # paused or switched off: nothing new goes into the memory
-            self.live, self.waiting = [], []
+        if refused and (not self.privacy.shares("meetings") or not (self.live or self.waiting)):
             return {"type": "status", "state": "not_saved", "message": refused}
         date = str(message.get("date") or self.today.isoformat())
         title = str(message.get("title") or "Meeting")

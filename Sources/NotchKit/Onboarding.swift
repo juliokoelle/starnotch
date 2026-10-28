@@ -399,7 +399,7 @@ private struct AgentsStep: View {
                     OnboardingLabel("Tara's memory in your AI apps")
                     CardList(items: memory) { SetupItemRow(center: setup, item: $0, detailed: model.detailed) }
                     Text("Read only, on this Mac. Settings › Tara's memory decides what they see.")
-                        .font(.system(size: 11.5)).foregroundStyle(.tertiary)
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
                         .padding(.leading, 2)
                 }
             }

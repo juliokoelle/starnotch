@@ -19,7 +19,8 @@ struct DailySettingsSection: View {
             } header: {
                 Text("Daily")
             } footer: {
-                Text("Weather comes from Open-Meteo, free and without an account; only the city or a location rounded to about a kilometre leaves the Mac. Tokens for Oura and WHOOP stay in the Keychain.")
+                // Open-Meteo's data is CC BY 4.0: the credit with its links.
+                Text("Weather data by [Open-Meteo.com](https://open-meteo.com), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Only the city or a location rounded to about a kilometre leaves the Mac. Tokens for Oura and WHOOP stay in the Keychain.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -142,8 +143,6 @@ private struct NotesFolderSettings: View {
 
 private struct HealthSettings: View {
     @Bindable var daily: DailyStore
-    @State private var ouraToken = ""
-    @State private var whoopSecret = ""
 
     var body: some View {
         Picker("Sleep and recovery from", selection: $daily.settings.healthSource) {
@@ -152,33 +151,10 @@ private struct HealthSettings: View {
         }
         switch daily.settings.healthSource {
         case .oura:
-            SecureField("Personal access token", text: $ouraToken, prompt: Text("from cloud.ouraring.com"))
-                .task(id: ouraToken) {
-                    try? await Task.sleep(for: .milliseconds(800))
-                    guard !Task.isCancelled else { return }
-                    daily.ouraToken = ouraToken
-                }
-                // Read when the field shows; typing saves to the Keychain.
-                .onAppear { ouraToken = daily.ouraToken }
-            Link("Get a token from Oura", destination: OuraAPI.tokenPage)
+            OAuthAppFields(daily: daily, source: .oura, clientID: $daily.settings.ouraClientID)
+            OuraTokenField(daily: daily)
         case .whoop:
-            TextField("Client ID", text: $daily.settings.whoopClientID, prompt: Text("from developer.whoop.com"))
-            SecureField("Client secret", text: $whoopSecret)
-                .onChange(of: whoopSecret) { _, value in daily.whoopSecret = value }
-                .onAppear { whoopSecret = daily.whoopSecret }
-            LabeledContent("Redirect URL") {
-                Text(WhoopAPI.redirectURI(scheme: Brand.urlScheme)).textSelection(.enabled).foregroundStyle(.secondary)
-            }
-            LabeledContent("Account") {
-                if daily.whoopConnected {
-                    Button("Disconnect") { daily.disconnectWhoop() }
-                } else {
-                    Button("Connect WHOOP") { daily.connectWhoop() }
-                        .disabled(daily.settings.whoopClientID.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-            Text("Register an app at developer.whoop.com with the redirect URL above and the scopes for recovery, sleep, cycles and offline access, then enter its client ID and secret here.")
-                .font(.callout).foregroundStyle(.secondary)
+            OAuthAppFields(daily: daily, source: .whoop, clientID: $daily.settings.whoopClientID)
         case nil:
             EmptyView()
         }
@@ -190,6 +166,67 @@ private struct HealthSettings: View {
                 Text("Morning line")
                 Text("Last night's scores once a morning, the first time you use the Mac.")
             }
+        }
+    }
+}
+
+/// The user's own developer app at Oura or WHOOP: client ID, secret, the redirect URL to enter
+/// there, and the sign-in.
+private struct OAuthAppFields: View {
+    @Bindable var daily: DailyStore
+    let source: HealthSource
+    @Binding var clientID: String
+    @State private var secret = ""
+
+    var body: some View {
+        TextField("Client ID", text: $clientID, prompt: Text(source == .oura ? "from cloud.ouraring.com" : "from developer.whoop.com"))
+        SecureField("Client secret", text: $secret)
+            .onChange(of: secret) { _, value in
+                if source == .oura { daily.ouraSecret = value } else { daily.whoopSecret = value }
+            }
+            .onAppear { secret = source == .oura ? daily.ouraSecret : daily.whoopSecret }
+        LabeledContent("Redirect URL") {
+            Text(source == .oura ? OuraAPI.redirectURI(scheme: Brand.urlScheme) : WhoopAPI.redirectURI(scheme: Brand.urlScheme))
+                .textSelection(.enabled).foregroundStyle(.secondary)
+        }
+        LabeledContent("Account") {
+            if daily.isConnected(source) {
+                Button("Disconnect") { daily.disconnect(source) }
+            } else {
+                Button(source == .oura ? "Connect Oura" : "Connect WHOOP") { daily.connect(source) }
+                    .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        if source == .oura {
+            Text("Register an app at cloud.ouraring.com with the redirect URL above and the daily scope, then enter its client ID and secret here.")
+                .font(.callout).foregroundStyle(.secondary)
+        } else {
+            Text("Register an app at developer.whoop.com with the redirect URL above and the scopes for recovery, sleep, cycles and offline access, then enter its client ID and secret here.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Oura's older personal access token, folded away: the fallback while no Oura app is connected.
+private struct OuraTokenField: View {
+    @Bindable var daily: DailyStore
+    @State private var token = ""
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup("Personal access token instead", isExpanded: $expanded) {
+            SecureField("Personal access token", text: $token, prompt: Text("from cloud.ouraring.com"))
+                .task(id: token) {
+                    try? await Task.sleep(for: .milliseconds(800))
+                    guard !Task.isCancelled else { return }
+                    daily.ouraToken = token
+                }
+            Link("Get a token from Oura", destination: OuraAPI.tokenPage)
+        }
+        // Read when the field shows; typing saves to the Keychain. Open when a token is saved.
+        .onAppear {
+            token = daily.ouraToken
+            expanded = !token.isEmpty
         }
     }
 }

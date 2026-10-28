@@ -271,7 +271,6 @@
 "Fetching last night…" = "Letzte Nacht wird abgerufen…";
 "Pick Oura or WHOOP in Settings › Daily." = "Wähle Oura oder WHOOP in den Einstellungen unter Tagesablauf.";
 "Connect it in Settings › Daily." = "Verbinde es in den Einstellungen unter Tagesablauf.";
-"Oura didn't accept the token" = "Oura hat das Token nicht akzeptiert";
 "WHOOP signed you out: connect again" = "WHOOP hat dich abgemeldet: neu verbinden";
 "WHOOP sent no token" = "WHOOP hat kein Token geschickt";
 "WHOOP didn't accept the app's client id or secret" = "WHOOP hat Client-ID oder Secret der App nicht akzeptiert";
@@ -288,7 +287,6 @@
 "Show in Finder" = "Im Finder zeigen";
 "Move to Trash" = "In den Papierkorb";
 "Daily" = "Tagesablauf";
-"Weather comes from Open-Meteo, free and without an account; only the city or a location rounded to about a kilometre leaves the Mac. Tokens for Oura and WHOOP stay in the Keychain." = "Das Wetter kommt von Open-Meteo, kostenlos und ohne Konto; nur die Stadt oder ein auf etwa einen Kilometer gerundeter Ort verlässt den Mac. Tokens für Oura und WHOOP bleiben im Schlüsselbund.";
 "Weather for" = "Wetter für";
 "Where I am" = "Wo ich bin";
 "A city" = "Eine Stadt";
@@ -327,3 +325,17 @@
 "Snow likely now" = "Jetzt Schnee wahrscheinlich";
 "Rain likely from %@" = "Regen wahrscheinlich ab %@";
 "Snow likely from %@" = "Schnee wahrscheinlich ab %@";
+"H %@ L %@" = "H %@ T %@";
+"Weather data by Open-Meteo.com, CC BY 4.0" = "Wetterdaten von Open-Meteo.com, CC BY 4.0";
+"Weather data by [Open-Meteo.com](https://open-meteo.com), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Only the city or a location rounded to about a kilometre leaves the Mac. Tokens for Oura and WHOOP stay in the Keychain." = "Wetterdaten von [Open-Meteo.com](https://open-meteo.com), lizenziert unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Nur die Stadt oder ein auf etwa einen Kilometer gerundeter Ort verlässt den Mac. Tokens für Oura und WHOOP bleiben im Schlüsselbund.";
+"Changed elsewhere, saved as a copy" = "Anderswo geändert, als Kopie gespeichert";
+"Oura signed you out: connect again" = "Oura hat dich abgemeldet: neu verbinden";
+"Oura no longer accepts this token: connect your Oura app above" = "Oura nimmt dieses Token nicht mehr an: verbinde oben deine Oura-App";
+"Oura sent no token" = "Oura hat kein Token geschickt";
+"Oura didn't accept the app's client id or secret" = "Oura hat Client-ID oder Secret der App nicht akzeptiert";
+"Couldn't reach Oura" = "Oura nicht erreichbar";
+"Oura sign-in was cancelled" = "Oura-Anmeldung abgebrochen";
+"The sign-in didn't come back: connect again" = "Die Anmeldung kam nicht zurück: neu verbinden";
+"Connect Oura" = "Oura verbinden";
+"Register an app at cloud.ouraring.com with the redirect URL above and the daily scope, then enter its client ID and secret here." = "Registriere auf cloud.ouraring.com eine App mit der Weiterleitungs-URL oben und dem Scope daily, dann trage hier Client-ID und Secret ein.";
+"Personal access token instead" = "Stattdessen persönliches Zugriffstoken";

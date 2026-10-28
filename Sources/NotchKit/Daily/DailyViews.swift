@@ -94,8 +94,8 @@ struct DailyChip: View {
                 .padding(.horizontal, 6)
                 .frame(height: 15)
                 .background(Color.white.opacity(hovering ? 0.08 : 0), in: Capsule())
-                // Sits in the summary line; the click area is taller than the text.
-                .contentShape(Rectangle().inset(by: -5))
+                // Sits in the summary line; the click area is 29 pt tall, more than the text.
+                .contentShape(Rectangle().inset(by: -7))
             }
             .buttonStyle(PressScale())
             .onHover { hovering = $0 }
@@ -163,7 +163,7 @@ private struct WeatherPanel: View {
                                 .font(Theme.font(28, .semibold).monospacedDigit()).foregroundStyle(Theme.textPrimary)
                             HStack(spacing: 6) {
                                 Text(LocalizedStringKey(weather.condition.title))
-                                Text(weather.range).monospacedDigit()
+                                Text(DailyText.range(weather)).monospacedDigit()
                             }
                             .font(Theme.font(12)).foregroundStyle(Theme.textSecondary)
                         }
@@ -198,6 +198,8 @@ private struct WeatherPanel: View {
                 DailyEmpty(symbol: "cloud.sun", title: "Weather", text: weatherHint)
             }
         }
+        // Open-Meteo's data is CC BY 4.0; Settings › Daily has the links.
+        .help("Weather data by Open-Meteo.com, CC BY 4.0")
     }
 
     private var weatherHint: String {
@@ -254,7 +256,7 @@ private struct HealthPanel: View {
                         }
                         if let sleep = health.sleep {
                             metric("Sleep", value: sleep, unit: health.source == .whoop ? "%" : nil,
-                                   level: HealthDay.level(sleep, source: health.source))
+                                   level: HealthDay.sleepLevel(sleep, source: health.source))
                         }
                         Spacer(minLength: 0)
                     }
@@ -343,7 +345,7 @@ final class DailyEars: NotchModule {
     }
 
     func trailingEar(peek: Bool) -> AnyView {
-        let text = weather.map { WeatherReport.degrees($0.temperature) } ?? day.map { "\(Int(($0.progress * 100).rounded(.down)))%" }
+        let text = weather.map { WeatherReport.degrees($0.temperature) } ?? day?.percent
         return AnyView(Text(text ?? "")
             .font(Theme.font(11, .semibold).monospacedDigit())
             .foregroundStyle(Theme.textBody)
@@ -352,17 +354,9 @@ final class DailyEars: NotchModule {
             .fixedSize())
     }
 
-    func peekLine() -> AnyView {
-        AnyView(HStack(spacing: 8) {
-            if let weather {
-                Text("\(WeatherReport.degrees(weather.temperature)) \(Localization.string(weather.condition.title))")
-                Text(weather.range).foregroundStyle(Theme.textSecondary)
-            }
-            if let day { Text(day.line).foregroundStyle(Theme.textSecondary) }
-            Spacer(minLength: 0)
-        }
-        .font(Theme.font(12.5)).foregroundStyle(Theme.textBody).lineLimit(1))
-    }
+    /// Not shown: on hover these ears stay and the line under them is the current tab's
+    /// (`NotchModel.peekModule`), so the next meeting and its join button don't give way.
+    func peekLine() -> AnyView { AnyView(EmptyView()) }
 
     func body() -> AnyView { AnyView(EmptyView()) }
     func primaryAction() {}

@@ -14,15 +14,35 @@ import TestSupport
          "daily":{"time":[1793142000,1793228400],"temperature_2m_max":[13.0,11.4],"temperature_2m_min":[6.9,6.1]}}
         """
         let fetched = UTC.date("2026-10-28 06:00")
-        let report = try OpenMeteo.parseForecast(Bytes.data(json), unit: .celsius, fetched: fetched, place: "Berlin")
+        let berlin = GeoPlace(name: "Berlin", latitude: 52.52, longitude: 13.41)
+        let report = try OpenMeteo.parseForecast(Bytes.data(json), unit: .celsius, fetched: fetched, place: berlin)
         #expect(report.temperature == 8.6)
         #expect(report.condition == .overcast)
         #expect(report.high == 13.0 && report.low == 6.9)
         // The hour without a temperature is left out.
         #expect(report.hours.count == 3)
         #expect(report.hours[2].condition == .rain && report.hours[2].precipitation == 23)
-        #expect(report.range == "H 13° L 7°")
         #expect(report.place == "Berlin")
+        #expect(report.latitude == 52.52 && report.located == false)
+    }
+
+    @Test func forecastBelongsToItsPlace() {
+        let berlin = GeoPlace(name: "Berlin", latitude: 52.52, longitude: 13.41)
+        let hamburg = GeoPlace(name: "Hamburg", latitude: 53.55, longitude: 9.99)
+        let fetched = UTC.date("2026-10-28 06:00")
+        func report(_ place: GeoPlace?, located: Bool?) -> WeatherReport {
+            WeatherReport(temperature: 1, code: 0, isDay: true, high: 5, low: 0, hours: [], unit: .celsius, fetched: fetched,
+                          place: place?.name, latitude: place?.latitude, longitude: place?.longitude, located: located)
+        }
+        #expect(report(berlin, located: false).matches(berlin))
+        #expect(!report(berlin, located: false).matches(hamburg))
+        // A city's forecast isn't where the Mac is, and the other way round.
+        #expect(!report(berlin, located: false).matches(nil))
+        #expect(report(berlin, located: true).matches(nil))
+        #expect(!report(berlin, located: true).matches(berlin))
+        // Saved before coordinates were kept: fine for where the Mac is, not for a city.
+        #expect(report(nil, located: nil).matches(nil))
+        #expect(!report(nil, located: nil).matches(berlin))
     }
 
     @Test func unreadableForecastThrows() {
@@ -66,6 +86,15 @@ import TestSupport
         #expect(url.contains("latitude=52.520") && url.contains("longitude=13.405"))
         #expect(url.contains("temperature_unit=fahrenheit"))
         #expect(!OpenMeteo.forecastURL(latitude: 1, longitude: 1, unit: .celsius).absoluteString.contains("temperature_unit"))
+        #expect(!url.contains("apikey"))
+    }
+
+    @Test func aKeyUsesTheCustomerAPI() {
+        let forecast = OpenMeteo.forecastURL(latitude: 1, longitude: 1, unit: .celsius, apiKey: "k1").absoluteString
+        #expect(forecast.hasPrefix("https://customer-api.open-meteo.com/v1/forecast?") && forecast.hasSuffix("&apikey=k1"))
+        let search = OpenMeteo.geocodingURL(name: "Ulm", language: "de", apiKey: "k1").absoluteString
+        #expect(search.hasPrefix("https://customer-geocoding-api.open-meteo.com/v1/search?") && search.contains("apikey=k1"))
+        #expect(OpenMeteo.geocodingURL(name: "Ulm", language: "de", apiKey: "").absoluteString.hasPrefix("https://geocoding-api.open-meteo.com/"))
     }
 
     @Test func geocodingResults() {
@@ -139,6 +168,21 @@ import TestSupport
         #expect(NoteNaming.isPlaceholder(placeholder))
         #expect(NoteNaming.isPlaceholder(placeholder + " 2"))
         #expect(!NoteNaming.isPlaceholder("Note to self"))
+        #expect(NoteNaming.conflictName("Groceries", taken: ["Groceries"]) == "Groceries (conflict)")
+        #expect(NoteNaming.conflictName("Groceries", taken: ["Groceries", "Groceries (conflict)"]) == "Groceries (conflict) 2")
+    }
+
+    @Test func noteChangedElsewhere() {
+        let read = UTC.date("2026-10-28 06:00")
+        let later = read.addingTimeInterval(30)
+        #expect(NoteSync.action(disk: read, known: read, unsaved: true) == .keep)
+        #expect(NoteSync.action(disk: later, known: read, unsaved: false) == .reload)
+        #expect(NoteSync.action(disk: later, known: read, unsaved: true) == .conflict)
+        // A sync service putting back an older version counts too.
+        #expect(NoteSync.action(disk: read.addingTimeInterval(-60), known: read, unsaved: false) == .reload)
+        // Not read yet, or the file is gone: nothing to protect.
+        #expect(NoteSync.action(disk: later, known: nil, unsaved: true) == .keep)
+        #expect(NoteSync.action(disk: nil, known: read, unsaved: true) == .keep)
     }
 
     // MARK: Health
@@ -161,8 +205,12 @@ import TestSupport
                     {"cycle_id":2,"created_at":"2026-10-27T06:25:44.774Z","score_state":"SCORED",
                      "score":{"user_calibrating":false,"recovery_score":71.6,"resting_heart_rate":52,"hrv_rmssd_milli":68.2}}]}
         """
-        let parsed = WhoopAPI.parseRecovery(Bytes.data(recovery))
+        let parsed = WhoopAPI.parseRecovery(Bytes.data(recovery), calendar: UTC.calendar)
         #expect(parsed?.recovery == 72 && parsed?.restingHeartRate == 52 && parsed?.day == "2026-10-27")
+        // WHOOP answers in UTC; the day is the user's: 22:30 UTC is the next morning in Tokyo.
+        let late = #"{"records":[{"created_at":"2026-10-27T22:30:00Z","score_state":"SCORED","score":{"recovery_score":50}}]}"#
+        #expect(WhoopAPI.parseRecovery(Bytes.data(late), calendar: UTC.calendar(hours: 9))?.day == "2026-10-28")
+        #expect(WhoopAPI.parseRecovery(Bytes.data(late), calendar: UTC.calendar)?.day == "2026-10-27")
         let sleep = """
         {"records":[{"id":"n","nap":true,"score_state":"SCORED","score":{"sleep_performance_percentage":40}},
                     {"id":"s","nap":false,"score_state":"SCORED","score":{"sleep_performance_percentage":91}}]}
@@ -183,6 +231,15 @@ import TestSupport
         #expect(body == "grant_type=authorization_code&code=c%2F1&code_verifier=v&client_id=id&redirect_uri=starnotch%3A%2F%2Foauth%2Fwhoop")
     }
 
+    @Test func ouraSignInRequests() {
+        let url = OuraAPI.authorize(clientID: "id", redirect: OuraAPI.redirectURI(scheme: "starnotch"), state: "abcdefgh", challenge: "xyz").absoluteString
+        #expect(url.hasPrefix("https://cloud.ouraring.com/oauth/authorize?"))
+        #expect(url.contains("scope=daily") && url.contains("code_challenge=xyz") && url.contains("redirect_uri=starnotch://oauth/oura"))
+        let refresh = Bytes.string(OuraAPI.refreshBody(refreshToken: "r1", clientID: "id", secret: "s"))
+        #expect(refresh == "grant_type=refresh_token&refresh_token=r1&client_id=id&client_secret=s")
+        #expect(OuraAPI.tokenURL.absoluteString == "https://api.ouraring.com/oauth/token")
+    }
+
     @Test func pkceChallengeMatchesSHA256() {
         // Computed with: printf '<verifier>' | openssl dgst -sha256 -binary | base64 (url-safe, unpadded).
         #expect(PKCE.challenge(for: "dBjftJeZ4CVP-mJ92K9TJM2-91Tr3yO3lEf_9vkj0gk") == "UiYjBpzM6bB43u5TOoO-2B9qB6PGcqLpuZKPpsdQzEI")
@@ -201,8 +258,15 @@ import TestSupport
         #expect(whoop.headlineTitle == "Recovery")
         #expect(HealthDay.level(72, source: .whoop) == .good)
         #expect(HealthDay.level(40, source: .whoop) == .fair)
-        #expect(HealthDay.level(80, source: .oura) == .fair)
-        #expect(HealthDay.level(60, source: .oura) == .low)
+        #expect(HealthDay.level(20, source: .whoop) == .low)
+        // Oura: good from 70 (optimal from 85 is good too); only "pay attention" below 70 is fair.
+        #expect(HealthDay.level(80, source: .oura) == .good)
+        #expect(HealthDay.level(69, source: .oura) == .fair)
+        #expect(HealthDay.sleepLevel(84, source: .oura) == .good)
+        // WHOOP sleep performance: optimal from 85, sufficient from 70, poor below.
+        #expect(HealthDay.sleepLevel(91, source: .whoop) == .good)
+        #expect(HealthDay.sleepLevel(75, source: .whoop) == .fair)
+        #expect(HealthDay.sleepLevel(60, source: .whoop) == .low)
     }
 
     @Test func morningLineOncePerDayFromFive() {
@@ -210,6 +274,12 @@ import TestSupport
         #expect(!MorningLine.isDue(lastShown: nil, now: UTC.date("2026-10-28 04:59"), calendar: calendar))
         #expect(MorningLine.isDue(lastShown: "2026-10-27", now: UTC.date("2026-10-28 07:10"), calendar: calendar))
         #expect(!MorningLine.isDue(lastShown: "2026-10-28", now: UTC.date("2026-10-28 09:00"), calendar: calendar))
+        // Only today's scores: yesterday's, fetched this morning, are not last night.
+        let yesterday = HealthDay(source: .oura, day: "2026-10-27", sleep: 80, fetched: UTC.date("2026-10-28 07:00"))
+        #expect(!yesterday.isFor(UTC.date("2026-10-28 07:00"), calendar: calendar))
+        #expect(HealthDay(source: .oura, day: "2026-10-28", sleep: 80, fetched: UTC.date("2026-10-28 07:00")).isFor(UTC.date("2026-10-28 07:00"), calendar: calendar))
+        #expect(MorningLine.userIsPresent(idleSeconds: 3))
+        #expect(!MorningLine.userIsPresent(idleSeconds: 600))
     }
 
     // MARK: Settings

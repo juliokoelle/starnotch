@@ -11,3 +11,12 @@ public enum DailySettingsCodec {
 extension Bytes {
     public static func string(_ data: Data) -> String { String(decoding: data, as: UTF8.self) }
 }
+
+extension UTC {
+    /// Gregorian calendar `hours` east of UTC (a user in Tokyo: 9).
+    public static func calendar(hours: Int) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: hours * 3600)!
+        return calendar
+    }
+}

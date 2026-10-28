@@ -685,11 +685,12 @@ extension AppDelegate {
         if sample {
             DailyPreview.prepare(options.preview, store: daily)
         }
+        // Dropped while the panel is open or in Watch mode (and not counted there): it comes again.
         daily.onMorningLine = { [weak self] health, weather in
             let level = health.headline.map { HealthDay.level($0, source: health.source) } ?? .good
-            self?.notch.sneak(Sneak(visual: .symbol("heart.fill", tint: level == .good ? .ok : level == .fair ? .waiting : .critical),
-                                    title: DailyText.health(health), detail: weather.map { WeatherReport.degrees($0.temperature) }, duration: 5),
-                              key: "daily.morning", onlyAtRest: true)
+            return self?.notch.sneak(Sneak(visual: .symbol("heart.fill", tint: level == .good ? .ok : level == .fair ? .waiting : .critical),
+                                           title: DailyText.health(health), detail: weather.map { WeatherReport.degrees($0.temperature) }, duration: 5),
+                                     key: "daily.morning", onlyAtRest: true, counts: false) ?? false
         }
         if options.preview == "daily-settings" {
             // Settings › Daily with every daily tool on (in memory only: previews don't save).

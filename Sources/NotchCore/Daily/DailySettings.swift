@@ -17,12 +17,14 @@ public struct DailySettings: Codable, Equatable, Sendable {
     public var healthSource: HealthSource?
     /// The client id of the user's own WHOOP app (developer.whoop.com); the secret is in the Keychain.
     public var whoopClientID: String
+    /// The client id of the user's own Oura app (cloud.ouraring.com); the secret is in the Keychain.
+    public var ouraClientID: String
     /// One line with last night's scores, once each morning.
     public var morningLine: Bool
 
     public init(place: GeoPlace? = nil, unit: TemperatureUnit = .celsius, weatherInEar: Bool = false, workDay: WorkDay = WorkDay(),
                 progressInEar: Bool = false, notesFolder: String? = nil, healthSource: HealthSource? = nil,
-                whoopClientID: String = "", morningLine: Bool = true) {
+                whoopClientID: String = "", ouraClientID: String = "", morningLine: Bool = true) {
         self.place = place
         self.unit = unit
         self.weatherInEar = weatherInEar
@@ -31,6 +33,7 @@ public struct DailySettings: Codable, Equatable, Sendable {
         self.notesFolder = notesFolder
         self.healthSource = healthSource
         self.whoopClientID = whoopClientID
+        self.ouraClientID = ouraClientID
         self.morningLine = morningLine
     }
 
@@ -51,6 +54,7 @@ public struct DailySettings: Codable, Equatable, Sendable {
                   notesFolder: try? c.decodeIfPresent(String.self, forKey: .notesFolder),
                   healthSource: try? c.decodeIfPresent(HealthSource.self, forKey: .healthSource),
                   whoopClientID: (try? c.decodeIfPresent(String.self, forKey: .whoopClientID)) ?? d.whoopClientID,
+                  ouraClientID: (try? c.decodeIfPresent(String.self, forKey: .ouraClientID)) ?? d.ouraClientID,
                   morningLine: (try? c.decodeIfPresent(Bool.self, forKey: .morningLine)) ?? d.morningLine)
     }
 }

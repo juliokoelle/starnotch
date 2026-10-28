@@ -88,16 +88,20 @@ final class NotchModel {
     }
 
     /// Ears at rest when no module has anything to show: the weather or the day's progress, when
-    /// the user put them beside the notch (`DailyEars`). Not while watching or with ears set to Never.
+    /// the user put them beside the notch (`DailyEars`). They stay on hover, so the ears don't jump
+    /// to the tab's. Not while watching or with ears set to Never.
     @ObservationIgnored var restEars: () -> NotchModule? = { nil }
 
     private var restEarsShown: NotchModule? {
-        guard interaction == .rest, ambient == nil, !watching, earsMode != .never else { return nil }
+        guard interaction == .rest || interaction == .peek, ambient == nil, !watching, earsMode != .never else { return nil }
         return restEars()
     }
 
-    /// The module whose ears and peek line show while not expanded.
+    /// The module whose ears show while not expanded.
     var earModule: NotchModule { ambient ?? restEarsShown ?? current }
+
+    /// The module whose line shows under the notch on hover: never the rest ears, which have none.
+    var peekModule: NotchModule { ambient ?? current }
 
     enum Presentation: Equatable { case closed, compact, sneak, peek, expanded, capture }
 

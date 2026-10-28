@@ -1,8 +1,10 @@
 import Foundation
 
-// Weather from Open-Meteo (open-meteo.com: free, no key, no account). The app asks for the
-// forecast at most every 30 minutes and keeps the last answer on disk, so the card and the ear
-// still show something offline.
+// Weather from Open-Meteo (open-meteo.com). Without a key the free API answers, which Open-Meteo
+// allows for non-commercial use only; with a key (`[weather] api_key` in config.toml) the
+// customer API does. The data is CC BY 4.0: the app credits it where the weather shows. The app
+// asks for the forecast at most every 30 minutes and keeps the last answer on disk, so the card
+// and the ear still show something offline.
 
 public enum TemperatureUnit: String, Codable, CaseIterable, Sendable {
     case celsius, fahrenheit
@@ -132,9 +134,15 @@ public struct WeatherReport: Codable, Equatable, Sendable {
     public var fetched: Date
     /// Where it is for, as shown ("Hamburg").
     public var place: String?
+    /// The coordinates asked for, and whether they were where the Mac is rather than a chosen
+    /// city; nil in forecasts saved before they were kept.
+    public var latitude: Double?
+    public var longitude: Double?
+    public var located: Bool?
 
     public init(temperature: Double, code: Int, isDay: Bool, high: Double, low: Double, hours: [WeatherHour],
-                unit: TemperatureUnit, fetched: Date, place: String? = nil) {
+                unit: TemperatureUnit, fetched: Date, place: String? = nil, latitude: Double? = nil, longitude: Double? = nil,
+                located: Bool? = nil) {
         self.temperature = temperature
         self.code = code
         self.isDay = isDay
@@ -144,6 +152,9 @@ public struct WeatherReport: Codable, Equatable, Sendable {
         self.unit = unit
         self.fetched = fetched
         self.place = place
+        self.latitude = latitude
+        self.longitude = longitude
+        self.located = located
     }
 
     public var condition: WeatherCondition { WeatherCondition(code: code) }
@@ -168,17 +179,36 @@ public struct WeatherReport: Codable, Equatable, Sendable {
         return "\(rounded == 0 ? 0 : rounded)°"
     }
 
-    /// "H 21° L 12°".
-    public var range: String { "H \(Self.degrees(high)) L \(Self.degrees(low))" }
+    /// Whether this forecast is for the place set: the chosen city (nil asks where the Mac is).
+    /// A forecast from before coordinates were kept passes only for where the Mac is.
+    public func matches(_ place: GeoPlace?) -> Bool {
+        guard let place else { return located != false }
+        guard located != true, let latitude, let longitude else { return false }
+        return abs(latitude - place.latitude) < 0.01 && abs(longitude - place.longitude) < 0.01
+    }
 }
 
 public enum OpenMeteo {
     public enum Failure: Error { case unreadable }
 
+    /// For the credit the licence asks for.
+    public static let site = URL(string: "https://open-meteo.com")!
+    public static let licence = URL(string: "https://creativecommons.org/licenses/by/4.0/")!
+
+    /// The free API without a key (non-commercial use), the customer API with one.
+    static func host(_ service: String, apiKey: String?) -> String {
+        apiKey?.isEmpty == false ? "customer-\(service).open-meteo.com" : "\(service).open-meteo.com"
+    }
+
+    static func withKey(_ items: [URLQueryItem], _ apiKey: String?) -> [URLQueryItem] {
+        guard let apiKey, !apiKey.isEmpty else { return items }
+        return items + [URLQueryItem(name: "apikey", value: apiKey)]
+    }
+
     /// Current conditions, the next two days by the hour, today's high and low, in the place's
     /// own time zone; times as Unix seconds.
-    public static func forecastURL(latitude: Double, longitude: Double, unit: TemperatureUnit) -> URL {
-        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+    public static func forecastURL(latitude: Double, longitude: Double, unit: TemperatureUnit, apiKey: String? = nil) -> URL {
+        var components = URLComponents(string: "https://\(host("api", apiKey: apiKey))/v1/forecast")!
         components.queryItems = [
             URLQueryItem(name: "latitude", value: String(format: "%.3f", latitude)),
             URLQueryItem(name: "longitude", value: String(format: "%.3f", longitude)),
@@ -189,18 +219,19 @@ public enum OpenMeteo {
             URLQueryItem(name: "forecast_days", value: "2"),
             URLQueryItem(name: "timeformat", value: "unixtime"),
         ] + (unit == .fahrenheit ? [URLQueryItem(name: "temperature_unit", value: "fahrenheit")] : [])
+        components.queryItems = withKey(components.queryItems ?? [], apiKey)
         return components.url!
     }
 
     /// Places matching a typed name, in the interface language.
-    public static func geocodingURL(name: String, language: String) -> URL {
-        var components = URLComponents(string: "https://geocoding-api.open-meteo.com/v1/search")!
-        components.queryItems = [
+    public static func geocodingURL(name: String, language: String, apiKey: String? = nil) -> URL {
+        var components = URLComponents(string: "https://\(host("geocoding-api", apiKey: apiKey))/v1/search")!
+        components.queryItems = withKey([
             URLQueryItem(name: "name", value: name.trimmingCharacters(in: .whitespacesAndNewlines)),
             URLQueryItem(name: "count", value: "5"),
             URLQueryItem(name: "language", value: language),
             URLQueryItem(name: "format", value: "json"),
-        ]
+        ], apiKey)
         return components.url!
     }
 
@@ -226,7 +257,9 @@ public enum OpenMeteo {
         var daily: Daily
     }
 
-    public static func parseForecast(_ data: Data, unit: TemperatureUnit, fetched: Date, place: String? = nil) throws -> WeatherReport {
+    /// `place` is what was asked for; `located` says it was where the Mac is.
+    public static func parseForecast(_ data: Data, unit: TemperatureUnit, fetched: Date, place: GeoPlace? = nil,
+                                     located: Bool = false) throws -> WeatherReport {
         guard let forecast = try? JSONDecoder().decode(Forecast.self, from: data) else { throw Failure.unreadable }
         let hourly = forecast.hourly
         var hours: [WeatherHour] = []
@@ -243,7 +276,8 @@ public enum OpenMeteo {
         let high = forecast.daily.temperature_2m_max.first.flatMap { $0 } ?? hours.prefix(24).map(\.temperature).max() ?? current.temperature_2m
         let low = forecast.daily.temperature_2m_min.first.flatMap { $0 } ?? hours.prefix(24).map(\.temperature).min() ?? current.temperature_2m
         return WeatherReport(temperature: current.temperature_2m, code: current.weather_code, isDay: current.is_day == 1,
-                             high: high, low: low, hours: hours, unit: unit, fetched: fetched, place: place)
+                             high: high, low: low, hours: hours, unit: unit, fetched: fetched, place: place?.name,
+                             latitude: place?.latitude, longitude: place?.longitude, located: place == nil ? nil : located)
     }
 
     private struct Places: Decodable {

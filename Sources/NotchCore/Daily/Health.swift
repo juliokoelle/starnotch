@@ -1,7 +1,8 @@
 import CryptoKit
 import Foundation
 
-// Sleep and recovery from a wearable: Oura (personal access token) or WHOOP (OAuth 2). The
+// Sleep and recovery from a wearable: Oura or WHOOP, both signed in with OAuth 2 through the
+// user's own developer app (Oura's older personal access tokens still work as a fallback). The
 // tokens live in the Keychain; this file only builds requests and reads answers.
 
 public enum HealthSource: String, Codable, CaseIterable, Sendable {
@@ -41,16 +42,29 @@ public struct HealthDay: Codable, Equatable, Sendable {
     public var headline: Int? { readiness ?? recovery }
     public var headlineTitle: String { recovery != nil && readiness == nil ? "Recovery" : "Readiness" }
 
-    /// Good, okay or low, by the wearables' own bands (WHOOP: green from 67, red below 34;
-    /// Oura: optimal from 85, pay attention below 70).
+    /// Good, okay or low, by the wearables' own bands.
     public enum Level: Sendable { case good, fair, low }
 
+    /// Readiness or recovery. WHOOP recovery: green from 67, yellow, red below 34. Oura readiness:
+    /// optimal from 85 and good from 70 are both good; only "pay attention" below 70 is fair.
     public static func level(_ score: Int, source: HealthSource) -> Level {
         switch source {
         case .whoop: score >= 67 ? .good : score >= 34 ? .fair : .low
-        case .oura: score >= 85 ? .good : score >= 70 ? .fair : .low
+        case .oura: score >= 70 ? .good : .fair
         }
     }
+
+    /// The sleep score. Oura uses the same bands as readiness; WHOOP's sleep performance has its
+    /// own: optimal from 85, sufficient from 70, poor below.
+    public static func sleepLevel(_ score: Int, source: HealthSource) -> Level {
+        switch source {
+        case .whoop: score >= 85 ? .good : score >= 70 ? .fair : .low
+        case .oura: level(score, source: .oura)
+        }
+    }
+
+    /// Scores for today, the morning line's night: anything older is not last night.
+    public func isFor(_ now: Date, calendar: Calendar = .current) -> Bool { day == MorningLine.day(now, calendar: calendar) }
 
     /// "Readiness 80 · Sleep 84", "Recovery 72 % · Sleep 91 %".
     public var line: String {
@@ -67,6 +81,10 @@ public struct HealthDay: Codable, Equatable, Sendable {
 /// The morning line: once a day, the first time the Mac is in use from 5 in the morning on.
 public enum MorningLine {
     public static let earliestHour = 5
+    /// The user touched the keyboard, mouse or trackpad this recently: someone is at the Mac.
+    public static let presentWithin: TimeInterval = 20
+
+    public static func userIsPresent(idleSeconds: TimeInterval) -> Bool { idleSeconds < presentWithin }
 
     public static func isDue(lastShown: String?, now: Date, calendar: Calendar = .current) -> Bool {
         calendar.component(.hour, from: now) >= earliestHour && lastShown != day(now, calendar: calendar)
@@ -81,9 +99,43 @@ public enum MorningLine {
 
 // MARK: Oura
 
-/// Oura API v2 with a personal access token (cloud.ouraring.com/personal-access-tokens).
+/// Oura API v2. The user registers an app at cloud.ouraring.com/oauth/applications with the
+/// redirect URL `<scheme>://oauth/oura` and enters its client id and secret in Settings. A
+/// personal access token (deprecated by Oura) still works where Oura accepts it.
 public enum OuraAPI {
     public static let tokenPage = URL(string: "https://cloud.ouraring.com/personal-access-tokens")!
+    public static let applications = URL(string: "https://cloud.ouraring.com/oauth/applications")!
+    public static let authorizeURL = URL(string: "https://cloud.ouraring.com/oauth/authorize")!
+    public static let tokenURL = URL(string: "https://api.ouraring.com/oauth/token")!
+    /// `daily` covers the sleep and readiness summaries.
+    public static let scopes = "daily"
+
+    public static func redirectURI(scheme: String) -> String { "\(scheme)://oauth/oura" }
+
+    public static func authorize(clientID: String, redirect: String, state: String, challenge: String) -> URL {
+        var components = URLComponents(url: authorizeURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "client_id", value: clientID),
+            URLQueryItem(name: "redirect_uri", value: redirect),
+            URLQueryItem(name: "scope", value: scopes),
+            URLQueryItem(name: "state", value: state),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+        ]
+        return components.url!
+    }
+
+    public static func tokenBody(code: String, verifier: String, clientID: String, secret: String?, redirect: String) -> Data {
+        WhoopAPI.form([("grant_type", "authorization_code"), ("code", code), ("code_verifier", verifier), ("client_id", clientID),
+                       ("client_secret", secret), ("redirect_uri", redirect)])
+    }
+
+    /// Oura's refresh tokens work once: the answer brings the next one.
+    public static func refreshBody(refreshToken: String, clientID: String, secret: String?) -> Data {
+        WhoopAPI.form([("grant_type", "refresh_token"), ("refresh_token", refreshToken), ("client_id", clientID),
+                       ("client_secret", secret)])
+    }
 
     /// `daily_sleep` or `daily_readiness` from one day to another (both inclusive, `yyyy-MM-dd`).
     public static func url(_ collection: String, from start: String, to end: String) -> URL {
@@ -205,13 +257,23 @@ public enum WhoopAPI {
         var sleep_performance_percentage: Double?
     }
 
-    /// The latest scored recovery: percent, resting heart rate, HRV (ms), and its day (`yyyy-MM-dd` of `created_at`).
-    public static func parseRecovery(_ data: Data) -> (recovery: Int, restingHeartRate: Int?, hrv: Double?, day: String?)? {
+    /// The latest scored recovery: percent, resting heart rate, HRV (ms), and its day (`yyyy-MM-dd`
+    /// of `created_at` in the user's time zone: WHOOP answers in UTC).
+    public static func parseRecovery(_ data: Data, calendar: Calendar = .current) -> (recovery: Int, restingHeartRate: Int?, hrv: Double?, day: String?)? {
         guard let page = try? JSONDecoder().decode(Records<RecoveryScore>.self, from: data),
               let record = page.records.first(where: { $0.score_state == "SCORED" && $0.score?.recovery_score != nil }),
               let score = record.score, let recovery = score.recovery_score else { return nil }
         return (Int(recovery.rounded()), score.resting_heart_rate.map { Int($0.rounded()) }, score.hrv_rmssd_milli,
-                record.created_at.map { String($0.prefix(10)) })
+                record.created_at.flatMap(date).map { MorningLine.day($0, calendar: calendar) })
+    }
+
+    /// `2026-10-28T06:25:44.774Z`, with or without the fraction.
+    static func date(_ text: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: text) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: text)
     }
 
     /// Sleep performance of the latest scored night's sleep (naps left out).

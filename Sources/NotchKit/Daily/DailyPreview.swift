@@ -23,6 +23,12 @@ enum DailyText {
         return parts.joined(separator: " · ")
     }
 
+    /// "H 19° L 11°" ("H 19° T 11°" in German).
+    static func range(_ report: WeatherReport) -> String {
+        let high = WeatherReport.degrees(report.high), low = WeatherReport.degrees(report.low)
+        return String(localized: "H \(high) L \(low)")
+    }
+
     /// The next hours in one sentence: when rain or snow is likely, else that it stays dry.
     static func outlook(_ report: WeatherReport, now: Date) -> String {
         let hours = report.upcoming(from: now, count: 8)
@@ -45,12 +51,13 @@ enum DailyText {
 ///     daily-card-empty      nothing set up yet
 ///     daily-ears            weather and progress beside the notch at rest
 ///     daily-ears-weather    the weather alone beside the notch
+///     daily-ears-peek       hovering them: the ears stay, the line is the tab's
 ///     daily-notes           notes in the Tools tab
 ///     daily-morning         the morning line
 ///     daily-settings        Settings with the Daily section
 enum DailyPreview {
     static let names = ["daily-calendar", "daily-card", "daily-card-whoop", "daily-card-weather", "daily-card-empty",
-                        "daily-ears", "daily-ears-weather", "daily-notes", "daily-morning", "daily-settings"]
+                        "daily-ears", "daily-ears-weather", "daily-ears-peek", "daily-notes", "daily-morning", "daily-settings"]
 
     static func handles(_ name: String) -> Bool { names.contains(name) }
 
@@ -65,7 +72,7 @@ enum DailyPreview {
         switch name {
         case "daily-card-whoop": settings.healthSource = .whoop
         case "daily-card-weather": features = [.weather]
-        case "daily-ears":
+        case "daily-ears", "daily-ears-peek":
             settings.weatherInEar = true
             settings.progressInEar = true
         case "daily-ears-weather":
@@ -80,9 +87,14 @@ enum DailyPreview {
     @MainActor
     static func run(_ name: String, store: DailyStore, notch: NotchController, tools: ToolsModule, agents: AgentsModule) {
         switch name {
-        case "daily-ears", "daily-ears-weather":
+        case "daily-ears", "daily-ears-weather", "daily-ears-peek":
             // Nothing else asks for the ears.
             agents.usePreview(AgentSnapshot())
+            if name == "daily-ears-peek" {
+                // The sample music pauses, or its ears would take the hover.
+                notch.model.modules.compactMap { $0 as? NowPlayingModule }.first?.togglePlay()
+                notch.tourPeek()
+            }
         case "daily-calendar":
             notch.expand(.calendar, pinned: true)
         case "daily-card", "daily-card-whoop", "daily-card-weather", "daily-card-empty":
@@ -95,7 +107,7 @@ enum DailyPreview {
             tools.tab = .notes
             notch.expand(.tools, pinned: true)
         case "daily-morning":
-            if let health = store.health { store.onMorningLine?(health, store.shownWeather) }
+            if let health = store.health { _ = store.onMorningLine?(health, store.shownWeather) }
         default:
             break
         }

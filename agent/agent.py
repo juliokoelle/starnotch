@@ -131,7 +131,7 @@ ASK_SCHEMA = {
     "required": ["answer", "sources"],
     "additionalProperties": False,
 }
-MATCH = 2  # shared words a line needs before the rules offer it as an answer (one is usually "das" or "the")
+MATCH = 2  # shared content words (no stop words) a line needs before the rules offer it as an answer
 HISTORY = 6  # earlier questions and answers of the conversation that come along in a follow-up
 NO_BRAIN = {
     "de": "Ohne Claude finde ich nur Wörter in deinen Meetings und Notizen, und dazu steht dort nichts. "
@@ -139,10 +139,29 @@ NO_BRAIN = {
     "en": "Without Claude I can only look up words in your meetings and notes, and nothing there matches. "
           "Connect Claude Code in Settings and I can answer real questions.",
 }
+NO_ANSWER = {  # Claude is connected but gave no answer this time (a refusal, a failed call, an unreadable reply)
+    "de": "Darauf habe ich gerade keine Antwort, und in deinen Meetings und Notizen steht dazu nichts.",
+    "en": "I don't have an answer to that right now, and nothing in your meetings and notes matches.",
+}
 GERMAN = {"wie", "wer", "wann", "wo", "warum", "welche", "welcher", "welches", "welchen", "ich", "wir", "haben", "hat",
           "ist", "sind", "der", "die", "das", "und", "nicht", "mit", "noch", "schon", "bis", "heute", "mein", "meine"}
 ENGLISH = {"what", "who", "when", "where", "why", "which", "how", "did", "do", "does", "is", "are", "the", "and", "we",
            "i", "have", "has", "today", "my", "was", "were"}
+
+# Words that carry no topic: two of them must not make a meeting line look like the answer.
+STOP = GERMAN | ENGLISH | {
+    "was", "ein", "eine", "einen", "einem", "einer", "den", "dem", "des", "für", "von", "vom", "zum", "zur", "auf",
+    "aus", "bei", "beim", "über", "unter", "nach", "vor", "oder", "aber", "auch", "denn", "dann", "wenn", "dass",
+    "ihr", "sie", "uns", "unser", "unsere", "dein", "deine", "wird", "werden", "wurde", "war", "kann", "können",
+    "soll", "sollen", "muss", "gibt", "steht", "morgen", "gestern", "jetzt", "eigentlich", "mal", "doch", "nur",
+    "sehr", "viel", "alles", "etwas", "nichts", "man", "euch", "this", "that", "these", "those", "for", "with",
+    "about", "from", "you", "your", "our", "will", "would", "can", "could", "should", "there", "any", "some", "been",
+    "into", "tomorrow", "yesterday", "now", "much", "many", "all", "not", "but", "its", "it's", "what's", "they",
+}
+
+# A question about a decision ("Welchen Preis haben wir beschlossen?"): one topic word then finds the decision.
+DECIDED = {"beschlossen", "entschieden", "entscheidung", "beschluss", "vereinbart", "abgemacht", "festgelegt",
+           "decided", "decision", "agreed", "settled"}
 
 WEEKDAYS = {
     "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3, "freitag": 4, "samstag": 5, "sonntag": 6,
@@ -213,7 +232,8 @@ class Agent:
             if cmd == "prep":
                 out = self.prep(list(message.get("participants") or []))
             elif cmd == "ask":
-                out = self.ask(str(message.get("question") or ""), message.get("history"), message.get("image"))
+                out = self.ask(str(message.get("question") or ""), message.get("history"), message.get("image"),
+                               answering=str(reply_to)[len("capture:"):] if str(reply_to).startswith("capture:") else None)
             elif cmd == "reload":
                 self.memory.load()
                 out = {"type": "status", "state": "reloaded", "meetings": len(self.memory.meetings)}
@@ -284,26 +304,33 @@ class Agent:
             "captures": noted,
         }
 
-    def ask(self, question: str, history: Any = None, image: Any = None) -> dict[str, Any]:
+    def ask(self, question: str, history: Any = None, image: Any = None, answering: str | None = None) -> dict[str, Any]:
         """A question to Tara: answered from the meetings, captures and connector snapshots, with sources.
-        `history` is the conversation so far ([{"question", "answer"}], oldest first), `image` a screenshot's path."""
+        `history` is the conversation so far ([{"question", "answer"}], oldest first), `image` a screenshot's path,
+        `answering` the id of the quick capture that asked it (the rules never offer it as its own answer).
+        Someone waits for the answer, so Claude is asked even while meeting batches rest it, and a failure here
+        doesn't rest it."""
         if not question.strip():
             return {"type": "error", "message": "ask: empty question"}
         notes = self.notes()
         result, brain = None, "rules"
-        if self._thinking():
+        if self.llm is not None:
             recall = self._recall(question)
             prompt = _conversation(history) + question
             if recall:
                 prompt += "\n\n# Earlier lines with the same words\n" + "\n".join(recall)
-            extra = {"images": [Path(str(image)).expanduser()]} if image else {}
+            picture = Path(str(image)).expanduser() if image else None
+            extra = {"images": [picture]} if picture and picture.is_file() else {}  # a picture that's gone: ask without
             try:
                 result = self.llm.json(ASK_SYSTEM.format(memory=self.ask_context(notes)), prompt, ASK_SCHEMA, 2000, **extra)
-                brain = self.brain
             except Exception as error:
-                self._warn(error)
+                self._warn(error, rest=False)
+            if result is not None:
+                brain = self.brain
         if result is None:
-            result = self._offline_answer(question, notes)
+            result = self._offline_answer(question, notes, answering)
+            if self.llm is not None and not result["sources"]:
+                brain = self.brain  # Claude is there and simply had no answer this time: not the rules talking
         sources: list[dict[str, Any]] = []
         for s in result.get("sources") or []:
             source = self._resolve(s, notes)
@@ -333,30 +360,35 @@ class Agent:
         return {"kind": "meeting", "title": meeting.title or meeting.id, "quote": text, "speaker": speaker,
                 **self._source(meeting)}
 
-    def _offline_answer(self, question: str, notes: list[linked.Item] | None = None) -> dict[str, Any]:
-        """Without Claude: the newest decision sharing words with the question, else the transcript line, capture
-        or note sharing the most (at least MATCH); when nothing matches, an honest line about what Tara can do without a brain."""
-        words = set(_norm(question).split())
+    def _offline_answer(self, question: str, notes: list[linked.Item] | None = None,
+                        answering: str | None = None) -> dict[str, Any]:
+        """Without Claude: the newest decision sharing content words with the question, else the transcript line,
+        capture or note sharing the most (at least MATCH, stop words left out). Captured questions are no answers,
+        least of all the one being asked. When nothing matches, an honest line about what Tara can do."""
+        query = _content(question)
+        topic, need = query - DECIDED, 1 if query & DECIDED else MATCH
         for m, d in reversed(self.memory.decisions()):
-            if len(words & set(_norm(d.text + " " + d.quote).split())) >= 2:
+            if topic and len(topic & _content(d.text + " " + d.quote)) >= need:
                 return {"answer": d.text, "sources": [{"kind": "meeting", "id": m.id, "quote": d.quote or d.text}]}
-        query = _words(question)
         best: tuple[float, dict[str, Any]] | None = None
-        hits = self.memory.search(question, limit=1)
+        hits = self.memory.search(" ".join(sorted(query)), limit=1) if len(query) >= MATCH else []
         if hits and hits[0].score >= MATCH:
             best = (hits[0].score, {"answer": hits[0].line.text,
                                     "sources": [{"kind": "meeting", "id": hits[0].meeting.id, "quote": hits[0].line.text}]})
+        asked = _norm(question)
         for c in self.captures():
-            score = float(len(query & _words(c.text)))
+            if c.id == answering or c.is_question or _norm(c.text) == asked:
+                continue
+            score = float(len(query & _content(c.text)))
             if score >= MATCH and (best is None or score > best[0]):
                 best = (score, {"answer": c.text, "sources": [{"kind": "capture", "id": c.id, "quote": c.text}]})
         for item in notes or []:
-            score = float(len(query & _words(item.title + " " + item.body)))
+            score = float(len(query & _content(item.title + " " + item.body)))
             if score >= MATCH and (best is None or score > best[0]):
                 best = (score, {"answer": item.title, "sources": [{"kind": "note", "id": item.id, "quote": item.title}]})
         if best:
             return best[1]
-        return {"answer": NO_BRAIN[_language(question)], "sources": []}
+        return {"answer": (NO_BRAIN if self.llm is None else NO_ANSWER)[_language(question)], "sources": []}
 
     def save(self, message: dict[str, Any]) -> dict[str, Any]:
         date = str(message.get("date") or self.today.isoformat())
@@ -475,10 +507,10 @@ class Agent:
     def _thinking(self) -> bool:
         return self.llm is not None and time.monotonic() >= self.resting_until
 
-    def _warn(self, error: Exception) -> None:
+    def _warn(self, error: Exception, rest: bool = True) -> None:
         if type(error).__name__ in ("AuthenticationError", "PermissionDeniedError", "TypeError", "ClaudeCodeUnavailable"):
             self.llm = None  # no or bad credentials: stop waiting on Claude for every line
-        else:  # slow, overloaded or throttled: the rules for a while, then Claude again
+        elif rest:  # slow, overloaded or throttled: the rules for a while, then Claude again
             self.resting_until = time.monotonic() + REST
         if not self.warned:
             self.emit({"type": "status", "state": "offline", "message": f"Claude unavailable, using rules: {error}"})
@@ -523,6 +555,11 @@ def _conversation(history: Any) -> str:
         if question:
             lines += [f"User: {question[:600]}", f"Tara: {answer[:600]}"]
     return "# Conversation so far\n" + "\n".join(lines) + "\n\n# Question now\n" if lines else ""
+
+
+def _content(text: str) -> set[str]:
+    """The words of `text` that carry its topic: _words without stop words."""
+    return _words(text) - STOP
 
 
 def _language(text: str) -> str:

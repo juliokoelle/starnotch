@@ -118,8 +118,47 @@ def test_history_is_capped(tmp_path, memory_dir):
 def test_screenshot_goes_to_the_brain(tmp_path, memory_dir):
     llm = FakeLLM({"answer": "A pull request.", "sources": []})
     agent, _ = setup(tmp_path, memory_dir, llm)
-    agent.handle({"cmd": "ask", "question": "What is this?", "image": "~/shot.png"})
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(b"png")
+    agent.handle({"cmd": "ask", "question": "What is this?", "image": str(shot)})
     assert [p.name for p in llm.calls[0].extra["images"]] == ["shot.png"]
+
+
+def test_a_missing_screenshot_is_left_out_and_claude_keeps_answering(tmp_path, memory_dir):
+    llm = FakeLLM({"answer": "Nothing to see.", "sources": []}, {"answer": "30 Euro.", "sources": []})
+    agent, out = setup(tmp_path, memory_dir, llm)
+    agent.handle({"cmd": "ask", "question": "What is this?", "image": str(tmp_path / "gone.jpg")})
+    agent.handle({"cmd": "ask", "question": "Welchen Preis haben wir beschlossen?"})
+    assert llm.calls[0].extra == {} and len(llm.calls) == 2
+    assert [o["brain"] for o in out] == ["claude-code", "claude-code"] and out[1]["text"] == "30 Euro."
+
+
+class FailingLLM:
+    def __init__(self):
+        self.calls = 0
+
+    def json(self, *args, **kwargs):
+        self.calls += 1
+        raise TimeoutError("slow")
+
+
+def test_a_failed_question_does_not_rest_claude(tmp_path, memory_dir):
+    llm = FailingLLM()
+    agent, out = setup(tmp_path, memory_dir, llm)
+    agent.handle({"cmd": "ask", "question": "Wie wird das Wetter morgen?"})
+    agent.handle({"cmd": "ask", "question": "Wie wird das Wetter morgen?"})
+    assert llm.calls == 2
+    answers = [o for o in out if o["type"] == "answer"]
+    assert answers[0]["text"].startswith("Darauf habe ich gerade keine Antwort")
+    assert answers[0]["brain"] == "claude-code"  # Claude is connected: no "connect Claude" line, no rules hint
+
+
+def test_a_refusal_is_not_the_rules_talking(tmp_path, memory_dir):
+    agent, out = setup(tmp_path, memory_dir, FakeLLM(None, None))
+    agent.handle({"cmd": "ask", "question": "What is the weather today?"})
+    agent.handle({"cmd": "ask", "question": "Welchen Preis haben wir beschlossen?"})
+    assert out[0]["text"].startswith("I don't have an answer") and out[0]["brain"] == "claude-code"
+    assert out[1]["brain"] == "rules" and out[1]["sources"][0]["kind"] == "meeting"  # the rules found it, and say so
 
 
 def test_rules_say_honestly_what_they_can_do(tmp_path, memory_dir):
@@ -129,6 +168,29 @@ def test_rules_say_honestly_what_they_can_do(tmp_path, memory_dir):
     assert out[0]["brain"] == "rules" and out[0]["sources"] == []
     assert out[0]["text"].startswith("Ohne Claude finde ich nur Wörter")
     assert out[1]["text"].startswith("Without Claude I can only look up words")
+
+
+def test_rules_ignore_stop_words(tmp_path, memory_dir):
+    agent, out = setup(tmp_path, memory_dir, None, vault=False)
+    agent.handle({"cmd": "ask", "question": "Was ist das Wetter heute?"})
+    agent.handle({"cmd": "ask", "question": "What is the weather today?"})
+    assert [o["sources"] for o in out] == [[], []]
+    assert out[0]["text"].startswith("Ohne Claude finde ich nur Wörter")
+    assert out[1]["text"].startswith("Without Claude I can only look up words")
+
+
+def test_a_captured_question_is_not_its_own_answer(tmp_path, memory_dir):
+    agent, out = setup(tmp_path, memory_dir, None, vault=False)
+    question = {"id": "c9", "created": "2026-10-26T09:00:00Z", "route": "question",
+                "text": "Wann ist der Launch der Landingpage geplant?"}
+    asked_as_task = {"id": "c10", "created": "2026-10-26T09:05:00Z", "route": "task", "text": "Workshop room Lisa booked?"}
+    with agent.captures_path.open("a", encoding="utf-8") as queue:
+        queue.write(json.dumps(question) + "\n" + json.dumps(asked_as_task) + "\n")
+    agent.handle({"cmd": "ask", "question": question["text"], "id": "capture:c9"})  # what --watch-captures sends
+    agent.handle({"cmd": "ask", "question": "Workshop room Lisa booked?"})
+    assert out[0]["reply_to"] == "capture:c9"
+    assert out[0]["text"] != question["text"] and all(s.get("id") != "c9" for s in out[0]["sources"])
+    assert [s["id"] for s in out[1]["sources"]] == ["c1"]  # the task, not the question that repeats it
 
 
 def test_rules_find_captures_and_notes(tmp_path, memory_dir):

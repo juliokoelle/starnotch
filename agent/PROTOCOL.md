@@ -204,9 +204,12 @@ today. `captures` are quick-capture tasks and questions that tag or name a parti
 `sources` may be empty (then nothing in the material answered it, or it was a general question). Every source
 exists: a meeting quote is a line of that meeting, a capture is in the queue, a note is an item of a snapshot (its
 `quote` is empty unless the words are in the item; `url` is empty when the item names no place). `brain` is what
-answered: `claude-code`, `api`, or `rules` (no brain, or Claude failed just now). On rules the answer is the line
-that shares the most words with the question (at least two), or, when none does, a sentence in the question's
-language saying what Tara can do without a brain.
+answered: `claude-code`, `api`, or `rules` (no brain, or Claude failed just now and the rules found a line). On rules
+the answer is the line that shares the most words with the question, stop words left out (at least two; one for a
+question about a decision); a captured question is never an answer, least of all to itself. When nothing matches,
+the answer is a sentence in the question's language: without a brain, what Tara can do without one; with a brain
+that gave no answer this time (a refusal, a failed call), that she has no answer, and `brain` names the brain. A
+missing screenshot is left out, and a failed question doesn't rest Claude for the questions after it.
 
 **status**
 

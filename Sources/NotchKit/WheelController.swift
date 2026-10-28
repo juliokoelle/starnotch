@@ -32,6 +32,8 @@ final class WheelController {
     var onTapNotch: (() -> Void)?
     /// A press on the notch pulled down: the main character comes out.
     var onPullDown: (() -> Void)?
+    /// A press on the notch or the closed island began (`true`) or ended: Tara squashes meanwhile.
+    var onPress: ((Bool) -> Void)?
     /// The island around the notch (peek, dictation): a press there may pull too, without the wheel.
     var canPull: ((CGPoint) -> Bool)?
     private var pullArmed = false
@@ -73,6 +75,7 @@ final class WheelController {
 
     /// Returns `true` if the event was consumed (only meaningful for local events).
     private func handle(_ event: NSEvent, isLocal: Bool) -> Bool {
+        if event.type == .leftMouseUp { onPress?(false) }
         switch (event.type, phase) {
         case (.leftMouseDown, .idle):
             beginPress()
@@ -81,10 +84,12 @@ final class WheelController {
                 pullArmed = true
                 pressStart = NSEvent.mouseLocation
             }
+            if phase == .pressing || pullArmed { onPress?(true) }
             return false
         case (.leftMouseDragged, .idle) where pullArmed:
             if pressStart.y - NSEvent.mouseLocation.y > 24 {
                 pullArmed = false
+                onPress?(false)
                 onPullDown?()
             }
             return false
@@ -101,6 +106,7 @@ final class WheelController {
             let mouse = NSEvent.mouseLocation
             if pressStart.y - mouse.y > 24 {
                 cancelPress()
+                onPress?(false)
                 onPullDown?()
             } else if abs(mouse.x - pressStart.x) > 12 || mouse.y - pressStart.y > 8 {
                 cancelPress()

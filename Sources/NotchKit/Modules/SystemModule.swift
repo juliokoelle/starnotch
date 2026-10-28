@@ -265,8 +265,7 @@ final class SystemModule: NotchModule {
         if media.inUse {
             // The main character listens (whole, the handle to pull it out); the dots go right.
             if let cast {
-                return AnyView(AvatarView(character: cast.main, mood: .listening, height: peek ? 28 : 25,
-                                          colorway: cast.colorway, sink: peek ? 0 : 0.25)
+                return AnyView(EarFigure(cast: cast, mood: .listening, height: peek ? 28 : 25, sink: peek ? 0 : 0.25)
                     .frame(height: 32, alignment: .bottom)
                     .help(media.line))
             }

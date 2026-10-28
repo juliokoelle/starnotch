@@ -16,6 +16,8 @@ struct NotchRootView: View {
 
     @Namespace private var namespace
     @FocusState private var focused: Bool
+    /// Each opening of the peek: the figures nudge once, staggered (`FigureNudge`).
+    @State private var figureCue = 0
 
     var body: some View {
         let layout = model.layout
@@ -32,6 +34,9 @@ struct NotchRootView: View {
                 .coordinateSpace(.named(Self.space))
                 .environment(\.notch, NotchEnvironment(namespace: namespace))
                 .environment(\.figuresHidden, model.watching)
+                .environment(\.figureCue, figureCue)
+                .environment(\.handlePressed, model.handlePressed)
+                .environment(\.musicPlaying, model.music?.isPlaying == true)
                 .contentShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
                 .onTapGesture { if model.interaction != .expanded { onTapIsland() } }
             Spacer(minLength: 0)
@@ -48,6 +53,7 @@ struct NotchRootView: View {
         .focused($focused)
         .onKeyPress(phases: .down) { onKey($0) }
         .onChange(of: model.keyboardFocus) { _, focus in focused = focus }
+        .onChange(of: model.presentation) { _, now in if now == .peek { figureCue += 1 } }
     }
 
     @ViewBuilder
@@ -70,8 +76,9 @@ struct NotchRootView: View {
                         // The sneak line carries the figure; the left ear stays empty meanwhile.
                         Color.clear.frame(maxWidth: .infinity)
                         Color.clear.frame(width: notch.width)
-                        // Watch mode: the breakthrough line alone, no ear beside it.
-                        if model.watching {
+                        // Watch mode: the breakthrough line alone, no ear beside it; nor where an
+                        // icon sits next to the notch.
+                        if model.watching || layout.earRoom < NotchLayout.minEarWidth {
                             Color.clear.frame(maxWidth: .infinity)
                         } else {
                             model.earModule.trailingEar(peek: false).frame(maxWidth: .infinity)
@@ -88,6 +95,14 @@ struct NotchRootView: View {
                 }
                 .padding(.horizontal, layout.topRadius)
                 .transition(.blurSlide(scale: 0.9))
+            case .compact where layout.showsCue:
+                // No room for ears beside the notch: a short mark under it instead.
+                Capsule()
+                    .fill(model.earModule.needsAttention ? Theme.waiting : Theme.textSecondary)
+                    .frame(width: 18, height: 3)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 2)
+                    .transition(.opacity)
             case .compact, .peek:
                 let ears = model.earModule
                 let isPeek = layout.presentation == .peek
@@ -96,10 +111,12 @@ struct NotchRootView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         ears.leadingEar(peek: roomyEars)
+                            .environment(\.islandPeek, isPeek)
                             .frame(maxWidth: .infinity)
                             .clipped()
                         Color.clear.frame(width: notch.width)
                         ears.trailingEar(peek: roomyEars)
+                            .environment(\.figureOrder, 1)
                             .frame(maxWidth: .infinity)
                             .clipped()
                     }
@@ -129,6 +146,8 @@ struct NotchRootView: View {
                     // panel wider, which used to shift and clip the whole body).
                     let side = max(0, (layout.innerWidth - notch.width) / 2)
                     // Tabs that don't fit left of the notch continue right of it, before the status.
+                    // Each panel size splits for its own width; on a size change the tabs glide
+                    // with the island's edge.
                     let fit = TabStrip.fitting(in: side - 10)
                     let split = model.modules.count > fit
                     HStack(spacing: 0) {

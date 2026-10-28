@@ -737,9 +737,11 @@ private struct MainFigure: View {
     var sink: CGFloat = 0
     var emergeOnAppear = true
     @State private var draggingOut = false
+    @Environment(\.musicPlaying) private var musicPlaying
 
     var body: some View {
         figure
+            .handleSquash()
             .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
                 .onChanged { value in
                     // Pulled down past the notch: the figure leaves it and follows the pointer.
@@ -755,10 +757,11 @@ private struct MainFigure: View {
             let character = module.character(of: main)
             AvatarView(character: character, mood: module.avatarMood(of: main), height: height,
                        colorway: module.colorway(of: main), sink: sink, emergeOnAppear: emergeOnAppear,
-                       level: module.variantLevel(of: main))
+                       level: module.variantLevel(of: main), headphones: musicPlaying)
         } else {
             AvatarView(character: module.cast.main, mood: module.failedLoops.isEmpty ? .idle : .failed,
-                       height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: emergeOnAppear)
+                       height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: emergeOnAppear,
+                       headphones: musicPlaying)
         }
     }
 }
@@ -802,10 +805,11 @@ private struct AgentsTrailingEar: View {
         } else {
             // The other agents as small figures peeking from the bottom edge, overlapping.
             HStack(spacing: -7) {
-                ForEach(others) { agent in
+                ForEach(Array(others.enumerated()), id: \.element.id) { index, agent in
                     AvatarView(character: module.character(of: agent), mood: module.avatarMood(of: agent),
                                height: peek ? 24 : 20, colorway: module.colorway(of: agent), sink: peek ? 0 : 0.25,
                                level: module.variantLevel(of: agent))
+                        .environment(\.figureOrder, 1 + index)
                 }
             }
             .overlay(alignment: .topTrailing) {

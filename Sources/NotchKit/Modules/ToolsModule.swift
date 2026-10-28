@@ -511,41 +511,41 @@ private struct TimerCard: View {
     let module: ToolsModule
 
     var body: some View {
-        NotchCard(padding: 14) {
+        // Compact panel: the ring, the kind and its settings beside it, the buttons on the right.
+        NotchCard(padding: 12) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let now = context.date
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 4) {
-                        ForEach(ToolsModule.TimerKind.allCases, id: \.self) { kind in
-                            let selected = module.timerKind == kind
-                            Button {
-                                Haptics.tick()
-                                withAnimation(Theme.snappy) { module.timerKind = kind }
-                            } label: {
-                                Text(LocalizedStringKey(kind.rawValue))
-                                    .font(Theme.font(11.5, .semibold))
-                                    .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
-                                    .padding(.horizontal, 9)
-                                    .frame(height: 22)
-                                    .background(Color.white.opacity(selected ? 0.12 : 0), in: Capsule())
-                                    .contentShape(Capsule())
+                HStack(spacing: 18) {
+                    ring(now: now).frame(width: 90, height: 90)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 4) {
+                            ForEach(ToolsModule.TimerKind.allCases, id: \.self) { kind in
+                                let selected = module.timerKind == kind
+                                Button {
+                                    Haptics.tick()
+                                    withAnimation(Theme.snappy) { module.timerKind = kind }
+                                } label: {
+                                    Text(LocalizedStringKey(kind.rawValue))
+                                        .font(Theme.font(11.5, .semibold))
+                                        .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
+                                        .padding(.horizontal, 9)
+                                        .frame(height: 22)
+                                        .background(Color.white.opacity(selected ? 0.12 : 0), in: Capsule())
+                                        .contentShape(Capsule())
+                                }
+                                .buttonStyle(PressScale())
                             }
-                            .buttonStyle(PressScale())
+                        }
+                        switch module.timerKind {
+                        case .pomodoro: pomodoroControls
+                        case .countdown: countdownControls
+                        case .stopwatch: EmptyView()
                         }
                     }
-                    HStack(spacing: 20) {
-                        ring(now: now).frame(width: 128, height: 128)
-                        VStack(alignment: .leading, spacing: 10) {
-                            switch module.timerKind {
-                            case .pomodoro: pomodoroControls
-                            case .countdown: countdownControls
-                            case .stopwatch: EmptyView()
-                            }
-                            buttons
-                        }
-                        Spacer(minLength: 0)
-                    }
+                    Spacer(minLength: 0)
+                    buttons
                 }
+                .frame(maxHeight: .infinity)
             }
         }
     }
@@ -562,18 +562,28 @@ private struct TimerCard: View {
             : (simple.mode == .countdown ? simple.remaining(at: now) : simple.duration)
         let label = pomodoro ? timer.phase.title : module.timerKind == .stopwatch ? "Stopwatch" : "Timer"
         ZStack {
-            Circle().stroke(Color.white.opacity(0.08), lineWidth: 7)
+            Circle().stroke(Color.white.opacity(0.08), lineWidth: 6)
             Circle()
                 .trim(from: 0, to: progress)
-                .stroke(tint, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                .stroke(tint, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .shadow(color: tint.opacity(0.6), radius: 5)
+                .shadow(color: tint.opacity(0.6), radius: 4)
             VStack(spacing: 2) {
                 Text(Countdown.text(time))
-                    .font(Theme.font(24, .semibold).monospacedDigit())
+                    .font(Theme.font(19, .semibold).monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)
                     .contentTransition(.numericText())
-                Text(LocalizedStringKey(label)).font(Theme.font(11, .medium)).foregroundStyle(tint)
+                Text(LocalizedStringKey(label)).font(Theme.font(10.5, .medium)).foregroundStyle(tint)
+                if pomodoro {
+                    // Today's focus rounds, small under the label.
+                    HStack(spacing: 3) {
+                        ForEach(0..<max(4, timer.doneToday), id: \.self) { index in
+                            Circle().fill(index < timer.doneToday ? Theme.accent : Color.white.opacity(0.14)).frame(width: 4, height: 4)
+                        }
+                    }
+                    .padding(.top, 2)
+                    .help("\(timer.doneToday) focus rounds today")
+                }
             }
         }
     }
@@ -598,12 +608,6 @@ private struct TimerCard: View {
                     }
                 }
             }
-            HStack(spacing: 4) {
-                ForEach(0..<max(4, timer.doneToday), id: \.self) { index in
-                    Circle().fill(index < timer.doneToday ? Theme.accent : Color.white.opacity(0.12)).frame(width: 6, height: 6)
-                }
-            }
-            .help("\(timer.doneToday) focus rounds today")
         }
     }
 
@@ -614,12 +618,7 @@ private struct TimerCard: View {
         let idle = !simple.isActive
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
-                ForEach([1.0, 3, 5, 10], id: \.self) { value in
-                    chip("\(Int(value))", selected: minutes == value, enabled: idle) { module.setCountdown(minutes: value) }
-                }
-            }
-            HStack(spacing: 4) {
-                ForEach([15.0, 30, 45, 60], id: \.self) { value in
+                ForEach([1.0, 5, 10, 15, 30, 60], id: \.self) { value in
                     chip("\(Int(value))", selected: minutes == value, enabled: idle) { module.setCountdown(minutes: value) }
                 }
             }
@@ -633,7 +632,7 @@ private struct TimerCard: View {
 
     @ViewBuilder private var buttons: some View {
         let timer = module.timer, simple = module.simple
-        HStack(spacing: 8) {
+        VStack(alignment: .trailing, spacing: 6) {
             if module.timerKind == .pomodoro {
                 pill(timer.isRunning ? "Pause" : timer.isPaused ? "Resume" : "Start", symbol: timer.isRunning ? "pause.fill" : "play.fill", primary: true) {
                     module.startOrPause()

@@ -56,6 +56,10 @@ final class NotchModel {
     /// The module sitting beside the notch at rest, if any.
     /// Figures beside the notch at rest (a setting) and Watch mode (everything quiet).
     var earsMode = EarsMode.attention
+    /// The notch or the closed island is pressed (from `WheelController`): Tara squashes.
+    var handlePressed = false
+    /// Music, for the headphones on the main character in any ear while it plays (set by the app delegate).
+    @ObservationIgnored weak var music: NowPlayingModule?
     var watching = false
 
     private var active: [NotchModule] { modules.filter { $0.ambientPriority > 0 } }
@@ -107,27 +111,37 @@ final class NotchModel {
     /// empty without Accessibility permission or on a display without a notch.
     var menuBarItems: [ClosedRange<CGFloat>] = []
 
+    /// The open panel's size class: the current tab's, large while an approval card shows.
+    var panelSize: PanelSize { approvals?.current != nil ? .large : current.panelSize }
+
     var layout: NotchLayout {
-        NotchLayout(presentation: presentation, notch: notchSize,
-                    bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? NotchLayout.panelHeight,
-                    earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom,
-                    menuBarItems: menuBarItems)
+        let panel = panelSize
+        return NotchLayout(presentation: presentation, notch: notchSize, panel: panel,
+                           bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? panel.height,
+                           earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom,
+                           menuBarItems: menuBarItems)
     }
 }
 
 /// Sizes of the island per presentation. The width includes the two concave flares at the top.
 struct NotchLayout: Equatable {
-    /// Every tab opens in one panel size, so switching tabs never resizes the island; a module
-    /// fills it, and what is longer scrolls inside. Only an approval card asks for less.
-    static let expandedWidth: CGFloat = 640
-    /// The open panel narrows or widens within these bounds so its edges end between two menu
+    /// Tabs open in one of two panel sizes (`PanelSize`, picked per module): content tabs large,
+    /// music, dictation and tools compact. A module fills its panel, and what is longer scrolls
+    /// inside. Only an approval card asks for less. These are the large panel's numbers.
+    static let expandedWidth: CGFloat = PanelSize.large.width
+    /// The open panel narrows or widens within its size's range so its edges end between two menu
     /// bar icons instead of cutting one in half (`MenuBarFit`).
-    static let minExpandedWidth: CGFloat = 592
-    static let maxExpandedWidth: CGFloat = expandedWidth + 24
+    static let minExpandedWidth: CGFloat = PanelSize.large.widthRange.lowerBound
+    static let maxExpandedWidth: CGFloat = PanelSize.large.widthRange.upperBound
     /// Quick capture, fitted the same way.
     static let captureWidth: CGFloat = 520
     /// The middle between the old Agents (about 180) and Calendar (about 386) panels.
-    static let panelHeight: CGFloat = 280
+    static let panelHeight: CGFloat = PanelSize.large.height
+    /// An ear narrower than this shows nothing rather than a sliver of a figure.
+    static let minEarWidth: CGFloat = 14
+    /// Ears without room in the menu bar: the island dips this far below the notch instead, with
+    /// a small mark, so something waiting still shows at rest.
+    static let cueDip: CGFloat = 6
     /// Compact ears stay inside the gap between the hardware notch and the first menu extra
     /// (about 30 pt on a 14" MacBook Pro: measured 21.10.); with the 6 pt flare, 24 pt fits.
     static let earWidth: CGFloat = 24
@@ -137,7 +151,9 @@ struct NotchLayout: Equatable {
 
     var presentation: NotchModel.Presentation
     var notch: CGSize
-    /// The panel body: `panelHeight` for every tab, less for an approval card.
+    /// The open panel's size class.
+    var panel: PanelSize = .large
+    /// The panel body: the size class's height, less for an approval card.
     var bodyHeight: CGFloat = NotchLayout.panelHeight
     /// Width of each ear at rest (the ear module may ask for more than the default).
     var earWidth: CGFloat = NotchLayout.earWidth
@@ -169,11 +185,13 @@ struct NotchLayout: Equatable {
     var innerWidth: CGFloat {
         switch presentation {
         case .closed: notch.width
-        case .compact: notch.width + 2 * min(earWidth, besideNotch)
-        case .peek, .sneak: notch.width + 2 * besideNotch
+        case .compact: notch.width + 2 * compactEarWidth
+        case .peek: notch.width + 2 * besideNotch
+        // A sneak is unasked for: like the ears it stays out of the icons beside the notch.
+        case .sneak: notch.width + 2 * min(besideNotch, earRoom)
         // The straight sides are what runs through the icons; the flares only touch the top rows.
         case .expanded:
-            MenuBarFit.width(preferred: Self.expandedWidth, in: Self.minExpandedWidth ... Self.maxExpandedWidth, items: menuBarItems)
+            MenuBarFit.width(preferred: panel.width, in: panel.widthRange, items: menuBarItems)
         case .capture:
             MenuBarFit.width(preferred: Self.captureWidth, in: Self.captureWidth - 48 ... Self.captureWidth + 24, items: menuBarItems)
         }
@@ -182,12 +200,30 @@ struct NotchLayout: Equatable {
     /// Room for content beside the notch: the menu bar room minus the curved corner.
     var besideNotch: CGFloat { max(0, menuBarRoom - topRadius) }
 
+    /// Room beside the notch, per side, that covers no menu bar icon: the menu bar room, less
+    /// where an icon sits closer to the notch (macOS puts a long status item right beside it when
+    /// the right side is full), minus the curved corner.
+    var earRoom: CGFloat {
+        max(0, MenuBarFit.earRoom(halfNotch: notch.width / 2, limit: menuBarRoom, items: menuBarItems) - topRadius)
+    }
+
+    /// Each ear at rest: as wide as the module asks, within `earRoom`. Too little room hides the
+    /// ears (the island shows `cueDip` instead); the peek line still has it all.
+    var compactEarWidth: CGFloat {
+        let width = min(earWidth, earRoom)
+        return width < Self.minEarWidth ? 0 : width
+    }
+
+    /// Compact without room for ears: the island shows the dip with its mark.
+    var showsCue: Bool { presentation == .compact && compactEarWidth == 0 }
+
     var height: CGFloat {
         switch presentation {
-        case .closed, .compact: notch.height
+        case .closed: notch.height
+        case .compact: showsCue ? notch.height + Self.cueDip : notch.height
         case .peek: notch.height + 40
         case .sneak: notch.height + 36
-        case .expanded: notch.height + Self.bodyTop + min(bodyHeight, Self.panelHeight) + Self.bodyBottom
+        case .expanded: notch.height + Self.bodyTop + min(bodyHeight, panel.height) + Self.bodyBottom
         case .capture: notch.height + 8 + 44 + 9 + 24 + 14
         }
     }

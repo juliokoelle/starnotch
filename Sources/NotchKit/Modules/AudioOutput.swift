@@ -129,6 +129,9 @@ struct OutputButtonAnchor: PreferenceKey {
 struct OutputButton: View {
     let output: AudioOutput
     @Binding var open: Bool
+    /// The device's name beside its symbol; off in the compact music panel (the help tag and the
+    /// list still name it).
+    var showsName = true
 
     var body: some View {
         Button {
@@ -138,7 +141,7 @@ struct OutputButton: View {
             HStack(spacing: 6) {
                 Image(systemName: output.currentDevice?.kind.symbol ?? "speaker.wave.2")
                     .font(.system(size: 12, weight: .semibold))
-                if let name = output.currentDevice?.name {
+                if showsName, let name = output.currentDevice?.name {
                     Text(name).font(Theme.font(12, .medium)).lineLimit(1)
                 }
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
@@ -146,7 +149,7 @@ struct OutputButton: View {
             }
             .foregroundStyle(open ? Theme.accent : Theme.textSecondary)
             .padding(.horizontal, 10)
-            .frame(maxWidth: 200)
+            .frame(maxWidth: showsName ? 200 : nil)
             .frame(height: 28)
             .background(Color.white.opacity(open ? 0.1 : 0.06), in: Capsule())
             .contentShape(Rectangle())

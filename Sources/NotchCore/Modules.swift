@@ -1,3 +1,5 @@
+import CoreGraphics
+
 /// The built-in modules of the notch. Each wheel slot holds a module or, optionally, a
 /// third-party notch app (the original switcher behavior).
 public enum ModuleKind: String, Codable, CaseIterable, Sendable {
@@ -52,5 +54,50 @@ public enum ModuleOrder {
     /// modules keep their place relative to each other, after the visible ones.
     public static func saved(visible: [ModuleKind], previous: [ModuleKind]) -> [ModuleKind] {
         sorted(ModuleKind.allCases, by: visible + sorted(ModuleKind.allCases, by: previous))
+    }
+}
+
+/// The two sizes of the open island. A module picks a class, never numbers: content tabs (agents,
+/// calendar, system, meeting, today) open large; the quick ones (music, dictation, tools) open
+/// compact, so a glance doesn't cover half the screen. Switching tabs springs between the two.
+public enum PanelSize: String, Sendable, CaseIterable {
+    case large, compact
+
+    /// Preferred width of the panel (the open island narrows or widens a little around it to end
+    /// between two menu bar icons).
+    public var width: CGFloat {
+        switch self {
+        case .large: 640
+        case .compact: 520
+        }
+    }
+
+    /// Height of the panel body under the tab strip.
+    public var height: CGFloat {
+        switch self {
+        case .large: 280
+        case .compact: 150
+        }
+    }
+
+    /// How far the island may narrow or widen around `width` to fit the menu bar icons. The
+    /// compact panel only widens: its header already splits the tabs around the notch, and any
+    /// narrower the tabs right of the notch would run over the status.
+    public var widthRange: ClosedRange<CGFloat> {
+        switch self {
+        case .large: width - 48 ... width + 24
+        case .compact: width ... width + 24
+        }
+    }
+}
+
+extension ModuleKind {
+    /// The panel size of each built-in module; content modules (and new ones unless they say
+    /// otherwise) open large.
+    public var panelSize: PanelSize {
+        switch self {
+        case .nowPlaying, .dictation, .tools: .compact
+        default: .large
+        }
     }
 }

@@ -10,6 +10,8 @@ import SwiftUI
 ///     --preview capture-empty | capture-typed | capture-dictate | capture-sent
 ///     --preview loops-strip | loops-timeline | loops-sneak
 ///     --preview quota | quota-warn
+///     --preview music-compact | music-peek | ears-crowded | sizes
+///     --preview music-agents | crowded-sneak
 ///
 /// Nothing here runs without a flag. All names and titles are made up.
 @MainActor
@@ -18,7 +20,9 @@ final class PreviewDirector {
                         "capture-empty", "capture-typed", "capture-dictate", "capture-sent",
                         "loops-strip", "loops-timeline", "loops-sneak", "quota", "quota-warn",
                         "watch-peek", "watch-sneak", "watch-summary", "providers", "approval-codex", "extras", "media-compact", "media-peek", "limit-sneak", "shell-sneak",
-                        "battery-sneak", "capture-event", "setup-consent", "setup-done"]
+                        "battery-sneak", "capture-event", "setup-consent", "setup-done",
+                        "music-compact", "music-peek", "ears-crowded", "sizes",
+                        "music-agents", "crowded-sneak"]
 
     let notch: NotchController
     let agents: AgentsModule
@@ -395,6 +399,57 @@ final class PreviewDirector {
                 case "compact", "agents": break
                 case "peek": notch.tourPeek()
                 default: notch.expand(.system, pinned: true)
+                }
+            }
+            return
+        }
+        if name == "music-agents" || name == "crowded-sneak" {
+            // music-agents: agents working and waiting while music plays, ears as by default: the
+            // agents' figure wears the headphones. crowded-sneak: a status item right beside the
+            // notch on the left; a sneak stays out of it and drops its right ear.
+            agents.usePreview(Self.snapshot(agentsActive: true))
+            music.start()
+            if name == "crowded-sneak" {
+                let half = notch.model.notchSize.width / 2
+                notch.simulatedMenuBarItems = [-(half + 262) ... -(half + 8), half + 180 ... half + 204]
+            }
+            Task {
+                await pause(1.0)
+                if name == "crowded-sneak" {
+                    notch.sneak(Sneak(visual: .symbol("checkmark.circle", tint: .ok), title: "npm run build",
+                                      detail: "2 m 14 s", duration: 30), key: "shell")
+                }
+            }
+            return
+        }
+        if name == "music-compact" || name == "music-peek" || name == "ears-crowded" || name == "sizes" {
+            // music-compact | music-peek: Tara with headphones in the leading ear, the cover in the
+            // trailing one. ears-crowded: agents' ears with a long status item right beside the
+            // notch on the left (as macOS places one when the right side is full): no ears there.
+            // sizes: the large Calendar panel, then the compact Music panel, then back.
+            var snapshot = Self.snapshot(agentsActive: true)
+            if name != "ears-crowded" {
+                snapshot.agents = []
+                snapshot.loops = []
+            }
+            agents.usePreview(snapshot)
+            music.start()
+            if name == "ears-crowded" {
+                let half = notch.model.notchSize.width / 2
+                notch.simulatedMenuBarItems = [-(half + 262) ... -(half + 2), half + 180 ... half + 204]
+            }
+            Task {
+                await pause(0.8)
+                if name != "ears-crowded" { notch.model.earsMode = .always }
+                switch name {
+                case "music-peek": notch.tourPeek()
+                case "sizes":
+                    notch.expand(.calendar, pinned: true)
+                    await pause(2.5)
+                    notch.expand(.nowPlaying, pinned: true)
+                    await pause(2.5)
+                    notch.expand(.calendar, pinned: true)
+                default: break
                 }
             }
             return

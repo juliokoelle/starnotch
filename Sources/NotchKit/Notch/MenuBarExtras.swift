@@ -5,8 +5,9 @@ import ApplicationServices
 /// can end between two of them (`MenuBarFit`). There's no public API for this; the Accessibility
 /// tree has them as each app's `AXExtrasMenuBar`. Read off the main thread and cached: every app
 /// at launch, when an app starts or quits and at most once a minute on open, otherwise only the
-/// apps known to have extras (about 10 ms). Nothing polls. Without Accessibility permission the
-/// list stays empty and the island keeps its own widths.
+/// apps known to have extras (about 10 ms). Only while the ears show at rest does the controller
+/// re-read every 20 s. Without Accessibility permission the list stays empty and the island keeps
+/// its own widths.
 @MainActor
 final class MenuBarExtras {
     /// The icons' frames in global AppKit coordinates.

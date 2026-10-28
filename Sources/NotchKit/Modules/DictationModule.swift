@@ -120,8 +120,8 @@ final class DictationModule: NotchModule {
 
     /// The main character puts its headphones on while listening.
     func leadingEar(peek: Bool) -> AnyView {
-        AnyView(AvatarView(character: cast.main, mood: phaseIsListening ? .listening : .thinking,
-                           height: peek ? 28 : 25, colorway: cast.colorway, sink: peek ? 0 : 0.25)
+        AnyView(EarFigure(cast: cast, mood: phaseIsListening ? .listening : .thinking,
+                          height: peek ? 28 : 25, sink: peek ? 0 : 0.25)
             .frame(height: 32, alignment: .bottom)
             .clipped())
     }
@@ -181,11 +181,12 @@ private struct DictationBody: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            AvatarView(character: module.cast.main, mood: .listening, height: 112, colorway: module.cast.colorway,
+            // Compact panel (dictation mostly runs from the shortcut): Tara, the button, two lines.
+            AvatarView(character: module.cast.main, mood: .listening, height: 96, colorway: module.cast.colorway,
                        emergeOnAppear: false)
-                .frame(width: 128, alignment: .bottom)
-                .padding(.leading, 6)
-            HStack(spacing: 16) {
+                .frame(width: 92, alignment: .bottom)
+                .padding(.leading, 10)
+            HStack(spacing: 14) {
                 Button {
                     module.toggle()
                 } label: {
@@ -193,7 +194,7 @@ private struct DictationBody: View {
                         Circle().fill(module.phaseIsListening ? Theme.accent : Theme.accent.opacity(0.16))
                         ListeningGlyph(active: module.phaseIsListening, size: 18, tint: module.phaseIsListening ? .white : Theme.accent)
                     }
-                    .frame(width: 56, height: 56)
+                    .frame(width: 48, height: 48)
                     .overlay {
                         if module.phaseIsListening { Pulse() }
                     }
@@ -211,16 +212,16 @@ private struct DictationBody: View {
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if module.phase != .unavailable {
-                        HStack(spacing: 14) {
+                        HStack(spacing: 12) {
                             KeyHint(key: "↩", text: "Starts and stops it here")
                             KeyHint(key: "fn", text: "Hold in any app")
                         }
-                        .padding(.top, 8)
+                        .padding(.top, 6)
                     }
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .padding(.leading, 150)
+            .padding(.leading, 114)
             .padding(.trailing, 16)
             .frame(maxHeight: .infinity)
         }
@@ -262,6 +263,8 @@ private struct KeyHint: View {
                 .padding(.horizontal, 3)
                 .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             Text(text).font(Theme.font(11.5)).foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
+                .fixedSize()
         }
     }
 }

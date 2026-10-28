@@ -68,6 +68,11 @@ final class NotchController {
     let inbox = CaptureInbox()
     /// The menu bar icons, so the open island ends between them.
     private let menuBar = MenuBarExtras()
+    /// Previews: icons to pretend are in the menu bar (extents from the notch centre) instead of
+    /// the real ones.
+    var simulatedMenuBarItems: [ClosedRange<CGFloat>]? {
+        didSet { fitToMenuBar() }
+    }
 
     /// For our own screenshots and recordings (`--capturable`); otherwise the island stays out
     /// of screen sharing and captures.
@@ -108,6 +113,7 @@ final class NotchController {
         panel.contentView = hosting
         menuBar.onChange = { [weak self] in self?.fitToMenuBar() }
         place()
+        watchEars()
         panel.orderFrontRegardless()
 
         NotificationCenter.default.addObserver(
@@ -170,11 +176,40 @@ final class NotchController {
                 .filter { bar.contains(CGPoint(x: $0.midX, y: $0.midY)) }
                 .map { ($0.minX - notch.rect.midX) ... ($0.maxX - notch.rect.midX) }
         }
+        if let simulatedMenuBarItems { items = simulatedMenuBarItems }
         guard items != model.menuBarItems else { return }
         if model.interaction == .expanded || model.interaction == .capture {
             withAnimation(Theme.snappy) { model.menuBarItems = items }
         } else {
             model.menuBarItems = items
+        }
+    }
+
+    // MARK: Strand polish: menu bar icons that move while the island rests
+
+    private var earsWatch: Task<Void, Never>?
+
+    /// While the ears or a sneak show at rest, the icons beside the notch can change under them (a
+    /// status item appears, or its text grows, and macOS moves it next to the notch): re-read
+    /// where they sit when the ears appear and every 20 s while they stay (only the apps known to
+    /// have icons, about 10 ms off the main thread).
+    private func watchEars() {
+        let atRest = model.presentation == .compact || model.presentation == .sneak
+        if atRest, earsWatch == nil {
+            menuBar.refresh()
+            earsWatch = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(20))
+                    guard !Task.isCancelled else { return }
+                    self?.menuBar.refresh()
+                }
+            }
+        } else if !atRest {
+            earsWatch?.cancel()
+            earsWatch = nil
+        }
+        withObservationTracking { _ = model.presentation } onChange: { [weak self] in
+            Task { @MainActor in self?.watchEars() }
         }
     }
 
@@ -390,7 +425,12 @@ final class NotchController {
         leaveTask?.cancel()
         leaveTask = nil
         if let module, module != model.module {
-            model.module = module
+            // Already open: the island springs to the new tab's panel size instead of jumping.
+            if model.interaction == .expanded {
+                withAnimation(Theme.snappy) { model.module = module }
+            } else {
+                model.module = module
+            }
         }
         self.pinned = pinned
         if model.interaction != .expanded {

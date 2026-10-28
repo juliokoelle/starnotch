@@ -59,3 +59,26 @@ public enum MenuBarFit {
         return allowed
     }
 }
+
+extension MenuBarFit {
+    /// How far the closed island may reach out beside the notch, per side, without covering a menu
+    /// bar icon: `limit` (the configured room) or less where an icon sits closer to the notch on
+    /// either side (the island is centred, so the tighter side decides). Icons that overlap the
+    /// notch itself are ignored: macOS hides those behind the camera housing. Less than `minimum`
+    /// left is no room at all, so a sliver of an ear never shows.
+    ///
+    /// - Parameters:
+    ///   - halfNotch: half the notch width.
+    ///   - items: horizontal extents of the icons relative to the notch centre, negative left of it.
+    public static func earRoom(halfNotch: CGFloat, limit: CGFloat, items: [ClosedRange<CGFloat>], minimum: CGFloat = 0) -> CGFloat {
+        var room = limit
+        for item in items {
+            if item.lowerBound >= halfNotch {
+                room = min(room, item.lowerBound - halfNotch - margin)
+            } else if item.upperBound <= -halfNotch {
+                room = min(room, -halfNotch - item.upperBound - margin)
+            }
+        }
+        return room < minimum ? 0 : max(0, room)
+    }
+}

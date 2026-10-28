@@ -23,9 +23,11 @@ protocol NotchModule: AnyObject {
     func trailingEar(peek: Bool) -> AnyView
     /// The one line under the notch while hovered.
     func peekLine() -> AnyView
-    /// The expanded panel body. Every tab gets the same size (`NotchLayout.expandedWidth` by
-    /// `NotchLayout.panelHeight`); the body fills it and scrolls what is longer.
+    /// The expanded panel body. It gets its size class's panel (`panelSize`); the body fills it
+    /// and scrolls what is longer.
     func body() -> AnyView
+    /// Large for content, compact for quick tools; default: the kind's class (`ModuleKind.panelSize`).
+    var panelSize: PanelSize { get }
     /// Return key, or selection from the wheel.
     func primaryAction()
     /// The panel became visible or hidden (start or stop expensive work).
@@ -53,6 +55,7 @@ extension NotchModule {
     func setExpanded(_ expanded: Bool) {}
     func handleBack() -> Bool { false }
     var compactEarWidth: CGFloat { NotchLayout.earWidth }
+    var panelSize: PanelSize { kind.panelSize }
     func handleKey(_ press: KeyPress) -> Bool { false }
     var holdsOpen: Bool { false }
     var needsAttention: Bool { false }
@@ -73,6 +76,14 @@ private struct FiguresHiddenKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct IslandPeekKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private struct MusicPlayingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var notch: NotchEnvironment {
         get { self[NotchEnvironmentKey.self] }
@@ -83,6 +94,19 @@ extension EnvironmentValues {
     var figuresHidden: Bool {
         get { self[FiguresHiddenKey.self] }
         set { self[FiguresHiddenKey.self] = newValue }
+    }
+
+    /// The ears are shown in the hover peek (not at rest): a figure that moves into the peek
+    /// line leaves its ear empty meanwhile.
+    var islandPeek: Bool {
+        get { self[IslandPeekKey.self] }
+        set { self[IslandPeekKey.self] = newValue }
+    }
+
+    /// Music plays: the main character wears headphones in whichever ear shows it.
+    var musicPlaying: Bool {
+        get { self[MusicPlayingKey.self] }
+        set { self[MusicPlayingKey.self] = newValue }
     }
 }
 

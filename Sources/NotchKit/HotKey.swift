@@ -39,6 +39,16 @@ final class HotKey {
         HotKey(keyCode: UInt32(kVK_ANSI_I), modifiers: UInt32(controlKey | optionKey), id: 5, action: action)
     }
 
+    /// Control + Option + K: the command palette.
+    static func controlOptionK(action: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_ANSI_K), modifiers: UInt32(controlKey | optionKey), id: 8, action: action)
+    }
+
+    /// Control + Option + A: the agents inbox.
+    static func controlOptionA(action: @escaping () -> Void) -> HotKey {
+        HotKey(keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(controlKey | optionKey), id: 9, action: action)
+    }
+
     private let id: UInt32
 
     init(keyCode: UInt32, modifiers: UInt32, id: UInt32, action: @escaping () -> Void) {

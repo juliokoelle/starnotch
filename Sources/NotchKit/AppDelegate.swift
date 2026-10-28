@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shell: ShellMonitor?
     private let updater = Updater()
     private var approvals: ApprovalCenter?
+    // Command palette and agents inbox (strand cmdk).
+    private var paletteHotKey: HotKey?
+    private var agentsInboxHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -124,7 +127,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.notch.showApproval()
             }
         }
-        approvals.onEmpty = { [weak self] in self?.notch.collapse() }
+        approvals.onEmpty = { [weak self] in
+            // The inbox stays open on what else waits (it closes itself when nothing does).
+            if self?.notchModel.interaction != .inbox { self?.notch.collapse() }
+        }
         approvals.onChange = { [weak agents] requests in agents?.setPendingApprovals(requests) }
         agents.onLimitAlert = { [weak self] tool, window, used, pace in
             self?.notch.sneak(Sneak(visual: .symbol("gauge.with.dots.needle.67percent", tint: used >= 90 ? .critical : .waiting),
@@ -305,6 +311,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.demoAgentFinished()
             }
         }
+        // MARK: Command palette and agents inbox (strand cmdk)
+        // ⌃⌥K (and ⌘K while open) searches every module that is a `PaletteProvider`; ⌃⌥A works
+        // through prompts, questions, finished turns and failed loops, with its count in the ear.
+        let agentsInbox = AgentsInbox(approvals: approvals, agents: agents)
+        notchModel.inbox = agentsInbox
+        agents.inbox = agentsInbox
+        notch.paletteSources.persists = state.persists
+        notch.paletteSources.providers = [ClosurePaletteProvider { [weak self] _ in
+            guard let self else { return [] }
+            let setup: [(Onboarding.Step, String)] = [(.agents, "Set up your agents"), (.meetings, "Set up meetings and Tara's brain"),
+                                                      (.tools, "Choose tools"), (.tara, "Choose Tara's look")]
+            return [PaletteItem(id: "settings", title: Localization.string("Settings"), symbol: "gearshape", kind: .settings,
+                                keywords: ["preferences", "display", "quiet", "providers", "loops"],
+                                perform: { [weak self] in self?.settingsWindow.show() })]
+                + setup.map { step, title in
+                    PaletteItem(id: "setup:\(step.rawValue)", title: Localization.string(title), subtitle: Localization.string("Setup"),
+                                symbol: "sparkles", kind: .settings, keywords: ["onboarding", "setup"],
+                                perform: { [weak self] in self?.showSetup(at: step) })
+                }
+        }]
+        // Ask Tara: the ask strand listens for this (⌃⌥T); until then nothing answers.
+        notch.paletteSources.askTara = { text in
+            NotificationCenter.default.post(name: .starnotchAskTara, object: nil, userInfo: ["text": text])
+        }
+        paletteHotKey = HotKey.controlOptionK { [weak self] in self?.notch.togglePalette() }
+        agentsInboxHotKey = HotKey.controlOptionA { [weak self] in self?.notch.toggleInbox() }
+        // MARK: end of strand cmdk
+
         applyTools()
         notch.inbox.loadPeople(from: people)
         music.onTrackChange = { [weak self] track in

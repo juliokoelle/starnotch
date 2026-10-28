@@ -66,15 +66,16 @@ final class ApprovalCenter {
         onShow?()
     }
 
-    func answer(_ decision: ApprovalDecision) {
-        guard let pending = queue.first else { return }
+    /// Answers the request in front, or the one with `id` (the inbox works through any of them).
+    func answer(_ decision: ApprovalDecision, to id: String? = nil) {
+        guard let pending = id.map({ id in queue.first { $0.id == id } }) ?? queue.first else { return }
         // Codex can't take a session rule: ⌘↵ does nothing there rather than something else.
         if decision == .allowSession, !pending.request.supportsSessionRules { return }
         // A question with answers to pick or type: ↵ alone doesn't pick one.
         if pending.request.asksForAnswer, decision == .allowOnce || decision == .allowSession { return }
         Haptics.confirm()
         pending.reply(decision)
-        advance()
+        remove(pending.id)
     }
 
     private func expire(_ id: String) {
@@ -108,7 +109,7 @@ private struct QuestionAnswers: View {
             if !request.options.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(Array(request.options.enumerated()), id: \.offset) { index, option in
-                        let pick = Button { center.answer(.answer(option)) } label: {
+                        let pick = Button { center.answer(.answer(option), to: request.id) } label: {
                             HStack(spacing: 5) {
                                 Text("\(index + 1)").font(Theme.font(10.5, .bold)).foregroundStyle(Theme.textTertiary)
                                 Text(option).font(Theme.font(12.5, .semibold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
@@ -148,7 +149,7 @@ private struct QuestionAnswers: View {
             }
             HStack {
                 Spacer()
-                Button("Skip") { center.answer(.deny) }
+                Button("Skip") { center.answer(.deny, to: request.id) }
                     .buttonStyle(PressScale())
                     .font(Theme.font(11.5))
                     .foregroundStyle(Theme.textTertiary)
@@ -160,7 +161,7 @@ private struct QuestionAnswers: View {
     private func send() {
         let answer = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !answer.isEmpty else { return }
-        center.answer(.answer(answer))
+        center.answer(.answer(answer), to: request.id)
     }
 }
 
@@ -169,6 +170,8 @@ struct ApprovalCard: View {
     let center: ApprovalCenter
     let pending: ApprovalCenter.Pending
     let agents: AgentsModule?
+    /// In the agents inbox, ⌘↵ opens the session and esc moves on, so those keys aren't shown here.
+    var inInbox = false
 
     private var agent: AgentSnapshot.Agent? {
         guard let id = pending.request.agentID else { return nil }
@@ -212,7 +215,7 @@ struct ApprovalCard: View {
                             .font(Theme.font(14, .semibold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
                         if request.provider != ClaudeCodeProvider.id && !isQuestion { ToolBadge(provider: request.provider) }
                         Spacer(minLength: 6)
-                        if center.queue.count > 1 {
+                        if center.queue.count > 1 && !inInbox {
                             Text("+\(center.queue.count - 1) waiting").font(Theme.font(11.5)).foregroundStyle(Theme.textTertiary)
                         }
                     }
@@ -230,12 +233,12 @@ struct ApprovalCard: View {
                         QuestionAnswers(center: center, request: request)
                     } else {
                     HStack(spacing: 8) {
-                        button(isQuestion ? "Yes" : "Allow once", key: "↵", style: .primary) { center.answer(.allowOnce) }
+                        button(isQuestion ? "Yes" : "Allow once", key: "↵", style: .primary) { center.answer(.allowOnce, to: pending.id) }
                         if request.supportsSessionRules {
-                            button("Allow for session", key: "⌘↵", style: .secondary) { center.answer(.allowSession) }
+                            button("Allow for session", key: inInbox ? "" : "⌘↵", style: .secondary) { center.answer(.allowSession, to: pending.id) }
                         }
                         Spacer(minLength: 4)
-                        button(isQuestion ? "No" : "Deny", key: "esc", style: .quiet) { center.answer(.deny) }
+                        button(isQuestion ? "No" : "Deny", key: inInbox ? "" : "esc", style: .quiet) { center.answer(.deny, to: pending.id) }
                     }
                     }
                     Text(isQuestion ? "Unanswered, \(request.tool) hears no answer after \(Int(ApprovalCenter.timeout)) s."
@@ -252,7 +255,7 @@ struct ApprovalCard: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text(title).font(Theme.font(12.5, .semibold))
-                Text(key).font(Theme.font(10.5, .medium)).opacity(0.6)
+                if !key.isEmpty { Text(key).font(Theme.font(10.5, .medium)).opacity(0.6) }
             }
             .foregroundStyle(style == .primary ? Color.white : style == .secondary ? Theme.accent : Theme.textSecondary)
             .padding(.horizontal, 11)

@@ -334,6 +334,7 @@ final class PreviewDirector {
 
     func run(_ name: String) {
         if name.hasPrefix("levels:") { runLevels(name); return }
+        if name.hasPrefix("palette") || name.hasPrefix("inbox") { runCommand(name); return }
         if name.hasPrefix("system") {
             // system | system:tight | system:compact | system:peek
             let parts = name.split(separator: ":").map(String.init)

@@ -68,6 +68,8 @@ final class NotchController {
     let inbox = CaptureInbox()
     /// The menu bar icons, so the open island ends between them.
     private let menuBar = MenuBarExtras()
+    /// The command palette's providers and memory.
+    let paletteSources = PaletteSources()
 
     /// For our own screenshots and recordings (`--capturable`); otherwise the island stays out
     /// of screen sharing and captures.
@@ -101,7 +103,10 @@ final class NotchController {
             onKey: { [weak self] in self?.handleKey($0) ?? .ignored },
             onCaptureSend: { [weak self] in self?.sendCapture() },
             onCaptureMic: { [weak self] in self?.toggleCaptureMic() },
-            onCaptureEvent: { [weak self] in self?.createCaptureEvent() }
+            onCaptureEvent: { [weak self] in self?.createCaptureEvent() },
+            onPaletteActivate: { [weak self] index, secondary in self?.activatePalette(index, secondary: secondary) },
+            onInboxKey: { [weak self] primary in self?.inboxKey(primary: primary) },
+            onInboxEmpty: { [weak self] in self?.inboxEmptied() }
         )
         let hosting = NSHostingView(rootView: root)
         hosting.safeAreaRegions = []
@@ -189,7 +194,7 @@ final class NotchController {
     /// Where a press may pull the main character out: the island while it isn't open (closed,
     /// peeking, dictating), wider than the notch's own hot zone.
     func canPullFigure(at point: CGPoint) -> Bool {
-        model.interaction != .expanded && islandRect.insetBy(dx: -4, dy: -4).contains(point)
+        ![.expanded, .palette, .inbox].contains(model.interaction) && islandRect.insetBy(dx: -4, dy: -4).contains(point)
     }
 
     // MARK: Pointer
@@ -220,6 +225,11 @@ final class NotchController {
             let consumed = MainActor.assumeIsolated { self?.handleScroll(event) ?? false }
             return consumed ? nil : event
         }) { monitors.append(scroll) }
+        // The palette's and the inbox's keys, before the text field sees them.
+        if let keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            let consumed = MainActor.assumeIsolated { self?.handleCommandKey(event) ?? false }
+            return consumed ? nil : event
+        }) { monitors.append(keys) }
     }
 
     /// The drag pasteboard's count at the last mouse down: a higher one means a drag started since.
@@ -249,7 +259,7 @@ final class NotchController {
         case .rest:
             // Enter on the notch itself (or the compact ears), with the usual edge tolerance.
             inside = NotchGeometry.hotZone(for: screen.notch.rect).contains(location) || island.contains(location)
-        case .peek, .expanded, .capture:
+        case .peek, .expanded, .capture, .palette, .inbox:
             // Stay zone: 30 pt around the visible shape.
             inside = island.insetBy(dx: -Self.stayMargin, dy: -Self.stayMargin).contains(location)
         }
@@ -362,7 +372,8 @@ final class NotchController {
             IslandLock.shared.dismissOnOutsideClick()
             return
         }
-        guard !isLocked, model.interaction == .expanded, !islandRect.contains(NSEvent.mouseLocation) else { return }
+        guard !isLocked, [.expanded, .palette, .inbox].contains(model.interaction),
+              !islandRect.contains(NSEvent.mouseLocation) else { return }
         collapse()
     }
 
@@ -378,6 +389,13 @@ final class NotchController {
         if !isExpanded {
             if model.keyboardFocus { model.keyboardFocus = false }
             if panel.isKeyWindow { panel.resignKey() }
+        }
+        // The palette is gone once its island has closed or turned into something else.
+        if interaction != .palette, model.palette != nil {
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(400))
+                if self?.model.interaction != .palette { self?.model.palette = nil }
+            }
         }
         panel.ignoresMouseEvents = interaction == .rest && !islandRect.contains(NSEvent.mouseLocation)
     }
@@ -487,13 +505,15 @@ final class NotchController {
 
     /// A permission prompt arrived: open on it, with keyboard focus for ↵ / ⌘↵ / esc.
     func showApproval() {
+        // The inbox shows it already, among the rest.
+        guard model.interaction != .inbox else { return }
         expand(pinned: true)
         model.keyboardFocus = true
         panel.makeKey()
     }
 
     /// ⌃⌥N or the "+" in the panel: one field grows out of the notch, with keyboard focus.
-    func openCapture() {
+    func openCapture(text: String = "") {
         hoverTask?.cancel()
         hoverTask = nil
         leaveTask?.cancel()
@@ -501,6 +521,7 @@ final class NotchController {
         pinned = true
         let capture = QuickCapture()
         capture.people = inbox.people
+        capture.text = text
         model.capture = capture
         menuBar.refresh()
         Haptics.open()
@@ -611,6 +632,185 @@ final class NotchController {
         wheelOpen = false
         // The release that ends the hold must not count as a click on the island.
         suppressUntil = Date().addingTimeInterval(0.35)
+    }
+
+    // MARK: Command palette and agents inbox
+
+    /// ⌃⌥K, or ⌘K while the island is open: the palette, or closed when it's showing.
+    func togglePalette() {
+        if model.interaction == .palette { collapse() } else { openPalette() }
+    }
+
+    /// Opens the palette with what every provider offers right now.
+    func openPalette(query: String = "") {
+        hoverTask?.cancel()
+        hoverTask = nil
+        leaveTask?.cancel()
+        leaveTask = nil
+        pinned = true
+        let context = PaletteContext(show: { [weak self] kind in self?.show(kind) })
+        let island = ClosurePaletteProvider { [weak self] in self?.islandItems($0) ?? [] }
+        let providers: [any PaletteProvider] = [island] + model.modules.compactMap { $0 as? any PaletteProvider } + paletteSources.providers
+        let palette = CommandPalette(items: providers.flatMap { $0.paletteItems(context) }, usage: paletteSources.usage,
+                                     fallbacks: { [weak self] in self?.paletteFallbacks($0) ?? [] })
+        palette.query = query
+        model.palette = palette
+        menuBar.refresh()
+        Haptics.open()
+        set(.palette, animation: Theme.open)
+        model.keyboardFocus = true
+        panel.makeKey()
+    }
+
+    /// ↵ (or a click) on a row; ⌘ for its second action. The palette closes unless the action
+    /// opened something else in the island.
+    func activatePalette(_ index: Int, secondary: Bool) {
+        guard let palette = model.palette, palette.rows.indices.contains(index) else { return }
+        let item = palette.rows[index].item
+        palette.selection = index
+        paletteSources.record(item.id)
+        Haptics.confirm()
+        (secondary ? item.secondary ?? item.perform : item.perform)()
+        if model.interaction == .palette { collapse() }
+    }
+
+    /// The island's own items: its tabs, quick capture, the inbox, Watch mode, ask Tara.
+    private func islandItems(_ context: PaletteContext) -> [PaletteItem] {
+        var items = model.modules.map { module in
+            PaletteItem(id: "tab:\(module.kind.rawValue)", title: Localization.string(module.kind.title), symbol: module.symbol,
+                        kind: .tab, keywords: [module.kind.rawValue] + (module.kind == .calendar ? ["calendar", "meeting"] : []),
+                        perform: { context.show(module.kind) })
+        }
+        if model.requestCapture != nil {
+            items.append(PaletteItem(id: "capture", title: Localization.string("Quick capture"), subtitle: "⌃⌥N", symbol: "plus",
+                                     kind: .action, keywords: ["note", "task", "todo"],
+                                     perform: { [weak self] in self?.openCapture() }))
+        }
+        if let inbox = model.inbox {
+            let count = inbox.count
+            items.append(PaletteItem(id: "inbox", title: Localization.string("Agents inbox"),
+                                     subtitle: count > 0 ? String(format: Localization.string("%d need you"), count) : "⌃⌥A",
+                                     symbol: "tray", kind: .action, keywords: ["approvals", "questions", "waiting"],
+                                     priority: count > 0 ? 0.7 : 0, tint: count > 0 ? Theme.waiting : nil,
+                                     perform: { [weak self] in self?.openInbox() }))
+        }
+        if let ask = paletteSources.askTara {
+            items.append(PaletteItem(id: "ask-tara", title: Localization.string("Ask Tara"), subtitle: "⌃⌥T", symbol: "sparkle",
+                                     kind: .action, keywords: ["question", "memory", "assistant"], perform: { ask("") }))
+        }
+        if let toggle = model.toggleWatch {
+            items.append(PaletteItem(id: "watch", title: Localization.string(model.watching ? "Watch mode off" : "Watch mode on"),
+                                     subtitle: "⌃⌥W", symbol: model.watching ? "moon.fill" : "moon", kind: .action,
+                                     keywords: ["quiet", "focus", "video"], perform: toggle))
+        }
+        return items
+    }
+
+    /// With a query: hand it to Tara, or capture it as it is.
+    private func paletteFallbacks(_ query: String) -> [PaletteItem] {
+        guard !query.isEmpty else { return [] }
+        var items: [PaletteItem] = []
+        if let ask = paletteSources.askTara {
+            items.append(PaletteItem(id: "ask-tara-query", title: Localization.string("Ask Tara “%@”").replacingOccurrences(of: "%@", with: query),
+                                     symbol: "sparkle", kind: .action, perform: { ask(query) }))
+        }
+        if model.requestCapture != nil {
+            items.append(PaletteItem(id: "capture-query", title: Localization.string("Capture “%@”").replacingOccurrences(of: "%@", with: query),
+                                     symbol: "plus", kind: .action, perform: { [weak self] in self?.openCapture(text: query) }))
+        }
+        return items
+    }
+
+    /// ⌃⌥A: the inbox, or closed when it's showing.
+    func toggleInbox() {
+        if model.interaction == .inbox { collapse() } else { openInbox() }
+    }
+
+    func openInbox() {
+        guard let inbox = model.inbox else { return }
+        hoverTask?.cancel()
+        hoverTask = nil
+        leaveTask?.cancel()
+        leaveTask = nil
+        pinned = true
+        inbox.startRound()
+        menuBar.refresh()
+        Haptics.open()
+        set(.inbox, animation: Theme.open)
+        model.keyboardFocus = true
+        panel.makeKey()
+        if inbox.current == nil { inboxEmptied() }
+    }
+
+    /// ↵ (`primary`) or ⌘↵ on the inbox's front item, by key or by its button.
+    func inboxKey(primary: Bool) {
+        guard let inbox = model.inbox else { return }
+        switch primary ? inbox.primary() : inbox.openSession() {
+        case .stay: if inbox.current == nil { inboxEmptied() }
+        case .leave: collapse()
+        case .show(let kind): expand(kind, pinned: true)
+        }
+    }
+
+    /// Nothing left: the "nothing needs you" card for a moment, then closed.
+    func inboxEmptied() {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.4))
+            guard let self, self.model.interaction == .inbox, self.model.inbox?.current == nil, !self.isLocked else { return }
+            self.collapse()
+        }
+    }
+
+    /// Keys for the palette and the inbox, ahead of the text field; ⌘K while the panel is open.
+    private func handleCommandKey(_ event: NSEvent) -> Bool {
+        guard event.window === panel else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let command = flags.contains(.command)
+        let isK = event.charactersIgnoringModifiers?.lowercased() == "k"
+        switch model.interaction {
+        case .expanded:
+            guard command, isK else { return false }
+            openPalette()
+            return true
+        case .palette:
+            guard let palette = model.palette else { return false }
+            let control = flags.contains(.control)
+            switch event.keyCode {
+            case 125: palette.move(1)                                   // ↓
+            case 126: palette.move(-1)                                  // ↑
+            case 48: palette.move(flags.contains(.shift) ? -1 : 1)      // tab
+            case 36, 76: activatePalette(palette.selection, secondary: command)
+            case 53:                                                    // esc: the query first, then the palette
+                if palette.query.isEmpty { collapse() } else { palette.query = "" }
+            default:
+                if control, event.charactersIgnoringModifiers == "n" { palette.move(1); return true }
+                if control, event.charactersIgnoringModifiers == "p" { palette.move(-1); return true }
+                if command, isK { collapse(); return true }
+                return false
+            }
+            return true
+        case .inbox:
+            guard let inbox = model.inbox else { return false }
+            switch event.keyCode {
+            case 53:
+                inbox.skip()
+                if inbox.current == nil { inboxEmptied() }
+                return true
+            case 36, 76:
+                if command {
+                    inboxKey(primary: false)
+                    return true
+                }
+                // A question with a field takes ↵ itself (send).
+                if case .approval(let pending)? = inbox.current?.source, pending.request.freeText { return false }
+                inboxKey(primary: true)
+                return true
+            default:
+                return false
+            }
+        default:
+            return false
+        }
     }
 
     // MARK: Keyboard

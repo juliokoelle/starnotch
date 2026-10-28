@@ -14,6 +14,10 @@ final class NotchModel {
         case expanded
         /// Quick capture field (design preview).
         case capture
+        /// Command palette (⌃⌥K, ⌘K while open).
+        case palette
+        /// Agents inbox (⌃⌥A): what needs the user, one at a time.
+        case inbox
     }
 
     var interaction = Interaction.rest
@@ -29,6 +33,10 @@ final class NotchModel {
     var sneak: Sneak?
     /// Quick capture while open.
     var capture: QuickCapture?
+    /// The command palette while open.
+    var palette: CommandPalette?
+    /// Everything agents and loops need from the user (also counted in the Agents ear).
+    var inbox: AgentsInbox?
     /// Round-4 design preview (`--preview`): new modules and visuals that aren't shipped yet.
     var previewFeatures = false
     /// The moon in the panel: Watch mode on or off.
@@ -90,7 +98,7 @@ final class NotchModel {
     /// The module whose ears and peek line show while not expanded.
     var earModule: NotchModule { ambient ?? current }
 
-    enum Presentation: Equatable { case closed, compact, sneak, peek, expanded, capture }
+    enum Presentation: Equatable { case closed, compact, sneak, peek, expanded, capture, palette, inbox }
 
     var presentation: Presentation {
         switch interaction {
@@ -100,6 +108,8 @@ final class NotchModel {
         case .peek: .peek
         case .expanded: .expanded
         case .capture: .capture
+        case .palette: .palette
+        case .inbox: .inbox
         }
     }
 
@@ -109,7 +119,8 @@ final class NotchModel {
 
     var layout: NotchLayout {
         NotchLayout(presentation: presentation, notch: notchSize,
-                    bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? NotchLayout.panelHeight,
+                    bodyHeight: interaction == .inbox ? inbox?.bodyHeight ?? InboxView.emptyHeight
+                        : approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? NotchLayout.panelHeight,
                     earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom,
                     menuBarItems: menuBarItems)
     }
@@ -126,6 +137,8 @@ struct NotchLayout: Equatable {
     static let maxExpandedWidth: CGFloat = expandedWidth + 24
     /// Quick capture, fitted the same way.
     static let captureWidth: CGFloat = 520
+    /// The command palette: a little wider than capture, for a title and its context per row.
+    static let paletteWidth: CGFloat = 560
     /// The middle between the old Agents (about 180) and Calendar (about 386) panels.
     static let panelHeight: CGFloat = 280
     /// Compact ears stay inside the gap between the hardware notch and the first menu extra
@@ -151,7 +164,7 @@ struct NotchLayout: Equatable {
         switch presentation {
         case .closed, .compact: 6
         case .peek, .sneak: 9
-        case .expanded, .capture: 14
+        case .expanded, .capture, .palette, .inbox: 14
         }
     }
 
@@ -160,8 +173,8 @@ struct NotchLayout: Equatable {
         case .closed: 9
         case .compact: 11
         case .peek, .sneak: 17
-        case .expanded: 30
-        case .capture: 24
+        case .expanded, .inbox: 30
+        case .capture, .palette: 24
         }
     }
 
@@ -172,10 +185,12 @@ struct NotchLayout: Equatable {
         case .compact: notch.width + 2 * min(earWidth, besideNotch)
         case .peek, .sneak: notch.width + 2 * besideNotch
         // The straight sides are what runs through the icons; the flares only touch the top rows.
-        case .expanded:
+        case .expanded, .inbox:
             MenuBarFit.width(preferred: Self.expandedWidth, in: Self.minExpandedWidth ... Self.maxExpandedWidth, items: menuBarItems)
         case .capture:
             MenuBarFit.width(preferred: Self.captureWidth, in: Self.captureWidth - 48 ... Self.captureWidth + 24, items: menuBarItems)
+        case .palette:
+            MenuBarFit.width(preferred: Self.paletteWidth, in: Self.paletteWidth - 24 ... Self.paletteWidth + 24, items: menuBarItems)
         }
     }
 
@@ -187,8 +202,10 @@ struct NotchLayout: Equatable {
         case .closed, .compact: notch.height
         case .peek: notch.height + 40
         case .sneak: notch.height + 36
-        case .expanded: notch.height + Self.bodyTop + min(bodyHeight, Self.panelHeight) + Self.bodyBottom
+        case .expanded, .inbox: notch.height + Self.bodyTop + min(bodyHeight, Self.panelHeight) + Self.bodyBottom
         case .capture: notch.height + 8 + 44 + 9 + 24 + 14
+        // The field and six rows; fewer results leave the room empty instead of resizing.
+        case .palette: notch.height + 8 + PaletteView.fieldHeight + 6 + PaletteView.visibleRows * PaletteView.rowHeight + 10
         }
     }
 

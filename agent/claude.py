@@ -21,6 +21,8 @@ from typing import Any, Protocol
 
 import anthropic
 
+import usage as ledger
+
 MODEL = os.environ.get("STARNOTCH_MODEL", "claude-sonnet-5-5")
 EFFORT = os.environ.get("STARNOTCH_EFFORT", "low")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -45,6 +47,8 @@ IMAGE_FILES = "starnotch-image-*"  # screenshots handed to claude -p, next to th
 
 
 class JSONModel(Protocol):
+    last_usage: dict[str, Any] | None  # the tokens and cost of the latest call (usage.py), None when unknown
+
     def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000,
              images: list[Path] | None = None) -> dict[str, Any] | None: ...
 
@@ -58,9 +62,11 @@ class Claude:
         self.client = client or anthropic.Anthropic(max_retries=1, timeout=TIMEOUT)
         # Server-side fallback re-runs a declined request on another model. Switched off if the API rejects it.
         self.fallbacks = os.environ.get("STARNOTCH_NO_FALLBACK") is None
+        self.last_usage: dict[str, Any] | None = None
 
     def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000,
              images: list[Path] | None = None) -> dict[str, Any] | None:
+        self.last_usage = None
         content: str | list[dict[str, Any]] = user
         if images:  # a screenshot the user asks about, before the question
             content = [{"type": "image", "source": {"type": "base64", "media_type": _media_type(path),
@@ -73,6 +79,7 @@ class Claude:
             messages=[{"role": "user", "content": content}],
             output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": schema}},
         )
+        started = time.monotonic()
         try:
             response = self._create(request)
         except anthropic.BadRequestError as error:
@@ -81,6 +88,9 @@ class Claude:
             print(f"claude: fallbacks rejected, continuing without: {error}", file=sys.stderr)
             self.fallbacks = False
             response = self._create(request)
+        if getattr(response, "usage", None) is not None:
+            self.last_usage = ledger.from_api(str(getattr(response, "model", None) or self.model), response.usage,
+                                              (time.monotonic() - started) * 1000)
         if response.stop_reason in ("refusal", "max_tokens"):
             return None
         text = next((b.text for b in response.content if b.type == "text"), "")
@@ -139,6 +149,7 @@ class ClaudeCode:
         self.effort = effort
         self.folder = Path(folder or BRAIN_FOLDER)
         self.timeout = timeout
+        self.last_usage: dict[str, Any] | None = None
         self.folder.mkdir(parents=True, exist_ok=True)
         self.sweep()
         self.check_login()
@@ -191,6 +202,7 @@ class ClaudeCode:
         # (it carries the whole meeting memory) through a file, so neither hits the argument length limit. The file
         # lives in the brain folder, not $TMPDIR, so one a killed agent leaves behind is swept on the next start.
         # A screenshot is copied there too: the session may read its own folder and nothing else.
+        self.last_usage = None
         copies: list[Path] = []
         try:
             for image in images or []:
@@ -224,6 +236,7 @@ class ClaudeCode:
             raise ClaudeCodeError(f"claude exited {proc.returncode}: {detail}") from None
         if not isinstance(result, dict):
             raise ClaudeCodeError(f"claude exited {proc.returncode}: unexpected output")
+        self.last_usage = ledger.from_claude_code(result, self.model)
         usage = result.get("usage") or {}
         read = sum(usage.get(k) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
         print(f"claude-code: {read} tokens in, {usage.get('output_tokens', 0)} out, {result.get('duration_ms')} ms",

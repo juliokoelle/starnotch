@@ -194,7 +194,7 @@ def test_ask_with_source(memory_dir):
                      "quote": "Okay, dann entscheiden wir: Das Lumen-Abo kostet 30 Euro im Monat.", "speaker": "Jonas",
                      "meeting": "Kickoff Lumen-Abo", "meeting_id": "2026-10-12-kickoff", "date": "2026-10-12"}],
     }]
-    assert llm.calls[0].schema is ASK_SCHEMA and llm.calls[0].user == "Welcher Preis?"
+    assert llm.calls[0].schema is ASK_SCHEMA and llm.calls[0].user == "Today is Monday, 2026-10-26.\n\nWelcher Preis?"
 
 
 def test_save_live_meeting(memory_dir):

@@ -24,6 +24,7 @@ from typing import Any, Callable, TextIO
 import captures as quick
 import connectors as linked
 from jamie_sync import last_synced
+import usage as ledger
 from memory import Commitment, Line, Meeting, Memory, _words
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
@@ -105,9 +106,9 @@ that meeting, kind "capture" with the capture id and its text, or kind "note" wi
 vault:3) and the words you used from it. If the material does not answer a question about the user's own work, say so
 plainly and give no sources. A general question that is not about their work you may answer briefly from general
 knowledge, with no sources. A screenshot, when one comes along, shows the window the user asks about.
-The conversation so far, when there is one, is context for follow-up questions.
-
-Today is {today}.{synced}
+The conversation so far, when there is one, is context for follow-up questions. The question starts with today's
+date and, when known, when Jamie last synced the meetings; asked about a meeting from today that isn't in the memory,
+say when Jamie last synced instead of guessing.
 
 # Meeting memory
 
@@ -207,8 +208,9 @@ def _norm(text: str) -> str:
 class Agent:
     def __init__(self, memory: Memory, llm: Any | None, emit: Callable[[dict[str, Any]], None],
                  today: dt.date | None = None, captures: Path | None = None, connectors: Path | None = None,
-                 brain: str | None = None):
+                 brain: str | None = None, usage: Path | None = None):
         self.memory = memory
+        self.ledger = ledger.Ledger(usage) if usage else None
         self.captures_path = captures
         self.connectors_path = connectors
         self.brain = brain or ("rules" if llm is None else "claude")
@@ -283,13 +285,16 @@ class Agent:
         return "\n\n".join(parts)
 
     def ask_system(self, notes: list[linked.Item]) -> str:
-        """Tara's instructions with today's date, when Jamie last synced the meetings, and the material."""
+        """Tara's instructions and the material. Nothing in it changes with the clock or a sync that brought nothing
+        new, so Claude's prompt cache keeps it from question to question."""
+        return ASK_SYSTEM.format(memory=self.ask_context(notes))
+
+    def ask_moment(self) -> str:
+        """Today's date and when Jamie last synced the meetings: it opens the question, not the cached system prompt."""
         synced = last_synced(self.memory.folder)
         line = (f" Jamie last synced the meetings at {synced:%Y-%m-%d %H:%M}; meetings Jamie had not finished by then "
-                f"are not in the memory yet. Asked about a meeting from today that isn't below, say when Jamie last "
-                f"synced instead of guessing." if synced else "")
-        return ASK_SYSTEM.format(today=f"{self.today:%A}, {self.today.isoformat()}", synced=line,
-                                 memory=self.ask_context(notes))
+                f"are not in the memory yet." if synced else "")
+        return f"Today is {self.today:%A}, {self.today.isoformat()}.{line}\n\n"
 
     def prep(self, participants: list[str]) -> dict[str, Any]:
         meetings = self.memory.with_participants(participants)
@@ -333,13 +338,14 @@ class Agent:
         result, brain = None, "rules"
         if self.llm is not None:
             recall = self._recall(question)
-            prompt = _conversation(history) + question
+            prompt = self.ask_moment() + _conversation(history) + question
             if recall:
                 prompt += "\n\n# Earlier lines with the same words\n" + "\n".join(recall)
             picture = Path(str(image)).expanduser() if image else None
             extra = {"images": [picture]} if picture and picture.is_file() else {}  # a picture that's gone: ask without
             try:
-                result = self.llm.json(self.ask_system(notes), prompt, ASK_SCHEMA, 2000, **extra)
+                result = self._think("capture" if answering else "ask", self.ask_system(notes),
+                                     prompt, ASK_SCHEMA, 2000, **extra)
             except Exception as error:
                 self._warn(error, rest=False)
             if result is not None:
@@ -434,8 +440,8 @@ class Agent:
         result = None
         if self._thinking():
             try:
-                result = self.llm.json(SYSTEM.format(memory=self.context()),
-                                       self._analysis_prompt(before, new), ANALYSIS_SCHEMA)
+                result = self._think("meeting", SYSTEM.format(memory=self.context()),
+                                     self._analysis_prompt(before, new), ANALYSIS_SCHEMA)
             except Exception as error:
                 self._warn(error)
         if result is None:
@@ -520,6 +526,19 @@ class Agent:
         carry an excerpt of a long transcript, so the lines that matter now come along in the prompt."""
         return [f"[{h.meeting.id} | {h.meeting.date}] {h.line.speaker}: {h.line.text}"
                 for h in self.memory.search(text, RECALL) if h.score >= 2]
+
+    def _think(self, feature: str, system: str, prompt: str, schema: dict[str, Any], max_tokens: int = 4000,
+               **extra: Any) -> dict[str, Any] | None:
+        """One brain call; its tokens and cost go to the usage ledger, also when the call fails after spending them."""
+        try:
+            return self.llm.json(system, prompt, schema, max_tokens, **extra)
+        finally:
+            spent = getattr(self.llm, "last_usage", None)
+            if spent and self.ledger:
+                try:
+                    self.ledger.record(feature, self.brain, spent)
+                except Exception as error:  # a broken ledger must not cost Tara her answer
+                    print(f"usage ledger: {error}", file=sys.stderr)
 
     def _thinking(self) -> bool:
         return self.llm is not None and time.monotonic() >= self.resting_until
@@ -680,6 +699,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="answer questions typed into quick capture as they arrive")
     parser.add_argument("--connectors", default=str(linked.FOLDER),
                         help="folder of connector snapshots (*.json) for ask (default: connectors/ in Starnotch's folder); '' to ignore")
+    parser.add_argument("--usage", default=str(ledger.LEDGER),
+                        help="usage ledger, one line per brain call (default: usage.jsonl in Starnotch's folder); '' for none")
     args = parser.parse_args(argv)
 
     # The app ends a meeting with SIGTERM; as an exception it lets a running Claude call clean up its prompt file.
@@ -696,7 +717,8 @@ def main(argv: list[str] | None = None) -> int:
     today = dt.date.fromisoformat(args.today) if args.today else None
     captures = Path(args.captures).expanduser() if args.captures else None
     connectors = Path(args.connectors).expanduser() if args.connectors else None
-    agent = Agent(memory, llm, emit, today, captures, connectors, brain)
+    usage = Path(args.usage).expanduser() if args.usage else None
+    agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage)
     emit({"type": "ready", "meetings": len(memory.meetings), "memory": str(memory.folder),
           "brain": brain, "model": getattr(llm, "model", None), "errors": memory.errors})
     run(agent, sys.stdin, captures if args.watch_captures else None)

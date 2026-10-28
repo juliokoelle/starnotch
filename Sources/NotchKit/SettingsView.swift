@@ -180,6 +180,15 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                TaraUsageRows()
+            } header: {
+                Text("Tara's usage")
+            } footer: {
+                Text("What Tara's calls would cost at API prices. On a Claude plan they count against your plan's limits instead of costing money; with an API key this is what you pay. A + means some calls used a model without a known price.")
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Behavior") {
                 Toggle(isOn: $state.settings.keepOpenUntilClick) {
                     Text("Keep the panel open until I click outside")
@@ -298,6 +307,91 @@ struct MeetingAgentSettings: View {
         case 0?: Text("\(time) · nothing new")
         case 1?: Text("\(time) · 1 new meeting")
         case let count?: Text("\(time) · \(count) new meetings")
+        }
+    }
+}
+
+/// Today and the last 7 days from the sidecar's usage ledger (`usage.jsonl`), re-read while Settings is open.
+/// The window stays alive when closed, and so does this task: it reads nothing while the window is closed or
+/// minimized, reads only when the file or the day changed, and parses off the main actor.
+private struct TaraUsageRows: View {
+    @State private var summary = TaraUsage.Summary()
+    @State private var host = HostWindow()
+
+    var body: some View {
+        Group {
+            LabeledContent("Today") { Text(Self.line(summary.today)) }
+                .background(HostWindow.Reader(host: host))
+            LabeledContent("Last 7 days") { Text(Self.line(summary.week)) }
+            if summary.week.calls > 0 {
+                LabeledContent("Calls in 7 days") { Text(Self.features(summary.week)) }
+            }
+        }
+        .task {
+            let folder = Brand.supportFolder
+            var read: (file: Date?, day: Date)?
+            while !Task.isCancelled {
+                if host.window?.isVisible ?? true {
+                    let now = Date()
+                    let file = TaraUsage.modified(folder: folder), day = Calendar.current.startOfDay(for: now)
+                    if read == nil || read?.file != file || read?.day != day {
+                        summary = await Task.detached(priority: .utility) { TaraUsage.load(folder: folder, now: now) }.value
+                        read = (file, day)
+                    }
+                }
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    private static func line(_ totals: TaraUsage.Totals) -> String {
+        guard totals.calls > 0 else { return String(localized: "No calls") }
+        let calls = totals.calls == 1 ? String(localized: "1 call") : String(localized: "\(totals.calls) calls")
+        let tokens = TaraUsage.compact(totals.tokens, locale: .current)
+        let cost = TaraUsage.cost(totals, locale: .current)
+        return String(localized: "\(calls) · \(tokens) tokens · ≈ \(cost) at API prices")
+    }
+
+    private static func features(_ totals: TaraUsage.Totals) -> String {
+        let names: [String: String] = [
+            TaraUsage.Feature.ask.rawValue: String(localized: "Ask Tara"),
+            TaraUsage.Feature.capture.rawValue: String(localized: "Quick capture"),
+            TaraUsage.Feature.meeting.rawValue: String(localized: "Meeting analysis"),
+        ]
+        let order = TaraUsage.Feature.allCases.map(\.rawValue)
+        func rank(_ key: String) -> Int { order.firstIndex(of: key) ?? order.count }
+        return totals.byFeature.keys
+            .sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0 < $1 }
+            .map { "\(names[$0] ?? $0) \(totals.byFeature[$0] ?? 0)" }
+            .joined(separator: " · ")
+    }
+}
+
+/// The window a view sits in, for work that pauses while that window is closed or minimized.
+@MainActor
+private final class HostWindow {
+    weak var window: NSWindow?
+
+    struct Reader: NSViewRepresentable {
+        let host: HostWindow
+
+        func makeNSView(context: Context) -> NSView { Probe(host: host) }
+        func updateNSView(_ view: NSView, context: Context) {}
+
+        final class Probe: NSView {
+            let host: HostWindow
+
+            init(host: HostWindow) {
+                self.host = host
+                super.init(frame: .zero)
+            }
+
+            required init?(coder: NSCoder) { nil }
+
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                host.window = window
+            }
         }
     }
 }

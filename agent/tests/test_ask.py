@@ -103,7 +103,7 @@ def test_follow_up_carries_the_conversation(tmp_path, memory_dir):
     history = [{"question": "Welcher Preis?", "answer": "30 Euro."}, {"bad": True}, "x"]
     agent.handle({"cmd": "ask", "question": "Wer hat das entschieden?", "history": history})
     prompt = llm.calls[0].user
-    assert prompt.startswith("# Conversation so far\nUser: Welcher Preis?\nTara: 30 Euro.\n\n# Question now\nWer hat")
+    assert prompt.split("\n\n", 1)[1].startswith("# Conversation so far\nUser: Welcher Preis?\nTara: 30 Euro.\n\n# Question now\nWer hat")
     assert out[0]["text"] == "Jonas." and out[0]["sources"] == []
 
 
@@ -212,16 +212,18 @@ def test_ask_knows_today_and_when_jamie_last_synced(tmp_path, memory_dir):
     llm = FakeLLM({"answer": "ok", "sources": []}, {"answer": "ok", "sources": []})
     agent, _ = setup(tmp_path, memory_dir, llm)
     agent.handle({"cmd": "ask", "question": "What was my meeting today about?"})
-    assert "Today is Monday, 2026-10-26." in llm.calls[0].system
-    assert "Jamie last synced" not in llm.calls[0].system  # no Jamie sync yet: nothing to say about it
+    assert llm.calls[0].user.startswith("Today is Monday, 2026-10-26.")
+    assert "Jamie last synced" not in llm.calls[0].user  # no Jamie sync yet: nothing to say about it
 
     state = memory_dir / "jamie-sync.state"
     state.write_text("{}")
     synced = dt.datetime(2026, 10, 26, 10, 17).timestamp()
     os.utime(state, (synced, synced))
     agent.handle({"cmd": "ask", "question": "What was my meeting today about?"})
-    assert "Jamie last synced the meetings at 2026-10-26 10:17;" in llm.calls[1].system
-    assert "a meeting from today that isn't below" in llm.calls[1].system
+    assert "Jamie last synced the meetings at 2026-10-26 10:17;" in llm.calls[1].user
+    assert "a meeting from today that isn't in the memory" in llm.calls[1].system
+    # The date and the sync time stay out of the system prompt, so a sync doesn't cost the prompt cache.
+    assert llm.calls[0].system == llm.calls[1].system
 
 
 def test_without_a_given_date_the_agent_follows_the_clock(memory_dir):

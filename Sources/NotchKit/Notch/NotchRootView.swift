@@ -16,6 +16,8 @@ struct NotchRootView: View {
 
     @Namespace private var namespace
     @FocusState private var focused: Bool
+    /// Each opening of the peek: the figures nudge once, staggered (`FigureNudge`).
+    @State private var figureCue = 0
 
     var body: some View {
         let layout = model.layout
@@ -32,6 +34,8 @@ struct NotchRootView: View {
                 .coordinateSpace(.named(Self.space))
                 .environment(\.notch, NotchEnvironment(namespace: namespace))
                 .environment(\.figuresHidden, model.watching)
+                .environment(\.figureCue, figureCue)
+                .environment(\.handlePressed, model.handlePressed)
                 .contentShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
                 .onTapGesture { if model.interaction != .expanded { onTapIsland() } }
             Spacer(minLength: 0)
@@ -48,6 +52,7 @@ struct NotchRootView: View {
         .focused($focused)
         .onKeyPress(phases: .down) { onKey($0) }
         .onChange(of: model.keyboardFocus) { _, focus in focused = focus }
+        .onChange(of: model.presentation) { _, now in if now == .peek { figureCue += 1 } }
     }
 
     @ViewBuilder
@@ -96,10 +101,12 @@ struct NotchRootView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         ears.leadingEar(peek: roomyEars)
+                            .environment(\.islandPeek, isPeek)
                             .frame(maxWidth: .infinity)
                             .clipped()
                         Color.clear.frame(width: notch.width)
                         ears.trailingEar(peek: roomyEars)
+                            .environment(\.figureOrder, 1)
                             .frame(maxWidth: .infinity)
                             .clipped()
                     }

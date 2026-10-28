@@ -49,6 +49,8 @@ final class NowPlayingModule: NotchModule {
     }
     @ObservationIgnored private var outputLock: Int?
     @ObservationIgnored var onTrackChange: ((Track) -> Void)?
+    /// Tara pulled down out of the ear: she leaves the notch and follows the pointer.
+    @ObservationIgnored var onFigurePull: (() -> Void)?
 
     @ObservationIgnored private var mockTracks: [Track] = []
     @ObservationIgnored private var mockIndex = 0
@@ -165,21 +167,40 @@ final class NowPlayingModule: NotchModule {
         return true
     }
 
+    /// Tara listens along with her headphones on; she stays the handle to pull out of the notch.
     func leadingEar(peek: Bool) -> AnyView {
-        guard let track else { return AnyView(EmptyView()) }
-        return AnyView(CoverView(track: track, size: peek ? 26 : 20, badge: peek)
-            .id(track.id)
-            .transition(.blurSlide(scale: 0.8)))
+        guard track != nil else { return AnyView(EmptyView()) }
+        return AnyView(MusicEarFigure(module: self, peek: peek))
     }
 
+    /// The cover; with room (a roomy peek) the equalizer beside it.
     func trailingEar(peek: Bool) -> AnyView {
         guard let track else { return AnyView(EmptyView()) }
-        return AnyView(Equalizer(color: track.color, playing: isPlaying, height: peek ? 14 : 12))
+        return AnyView(HStack(spacing: 6) {
+            if peek { Equalizer(color: track.color, playing: isPlaying, height: 12) }
+            CoverView(track: track, size: peek ? 24 : 20, badge: false)
+                .id(track.id)
+                .transition(.blurSlide(scale: 0.8))
+        })
     }
 
     /// Hover: title, one play button, hairline progress. No artist, no other controls.
     func peekLine() -> AnyView {
-        AnyView(VStack(spacing: 7) {
+        AnyView(HStack(alignment: .bottom, spacing: 10) {
+            // Tara moves down from the ear into the line, bigger, headphones on.
+            if track != nil {
+                MusicFigure(module: self, height: 34)
+                    .frame(width: 38, height: 38, alignment: .bottom)
+                    .musicFigureMatched()
+            }
+            peekText
+                .padding(.bottom, 9)
+        }
+        .frame(maxHeight: .infinity, alignment: .bottom))
+    }
+
+    private var peekText: some View {
+        VStack(spacing: 7) {
             HStack(spacing: 8) {
                 Text(track?.title ?? "Nothing playing")
                     .font(Theme.font(13, .semibold))
@@ -211,12 +232,63 @@ final class NowPlayingModule: NotchModule {
             }
         }
         .id(track?.id)
-        .transition(.blurSlide(x: 14 * direction)))
+        .transition(.blurSlide(x: 14 * direction))
     }
 
     func body() -> AnyView { AnyView(NowPlayingBody(module: self)) }
 
     func primaryAction() { togglePlay() }
+}
+
+/// Tara in the leading ear while music plays, headphones on; in the peek she sits in the line.
+private struct MusicEarFigure: View {
+    let module: NowPlayingModule
+    let peek: Bool
+    @Environment(\.islandPeek) private var islandPeek
+
+    var body: some View {
+        if islandPeek {
+            Color.clear
+        } else {
+            MusicFigure(module: module, height: peek ? 28 : 25, sink: peek ? 0 : 0.25)
+                .frame(height: 32, alignment: .bottom)
+                .musicFigureMatched()
+                .clipped()
+        }
+    }
+}
+
+private extension View {
+    /// The same figure in the ear and the peek line: it travels between them.
+    func musicFigureMatched() -> some View { modifier(MusicFigureMatch()) }
+}
+
+private struct MusicFigureMatch: ViewModifier {
+    @Environment(\.notch) private var notch
+    func body(content: Content) -> some View { content.notchMatched("music.main", in: notch.namespace) }
+}
+
+/// Tara listening along: squashes with the island's press and pulls out of the notch.
+private struct MusicFigure: View {
+    let module: NowPlayingModule
+    let height: CGFloat
+    var sink: CGFloat = 0
+    @State private var pulling = false
+
+    var body: some View {
+        AvatarView(character: module.cast.main, mood: module.isPlaying ? .music : .idle,
+                   height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: false)
+            .handleSquash()
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                .onChanged { value in
+                    // Pulled down past the notch: she leaves it and follows the pointer.
+                    guard !pulling, value.translation.height > 24 else { return }
+                    pulling = true
+                    module.onFigurePull?()
+                }
+                .onEnded { _ in pulling = false })
+    }
 }
 
 private struct NowPlayingBody: View {

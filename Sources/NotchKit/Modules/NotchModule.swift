@@ -76,6 +76,10 @@ private struct FiguresHiddenKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct IslandPeekKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var notch: NotchEnvironment {
         get { self[NotchEnvironmentKey.self] }
@@ -86,6 +90,13 @@ extension EnvironmentValues {
     var figuresHidden: Bool {
         get { self[FiguresHiddenKey.self] }
         set { self[FiguresHiddenKey.self] = newValue }
+    }
+
+    /// The ears are shown in the hover peek (not at rest): a figure that moves into the peek
+    /// line leaves its ear empty meanwhile.
+    var islandPeek: Bool {
+        get { self[IslandPeekKey.self] }
+        set { self[IslandPeekKey.self] = newValue }
     }
 }
 

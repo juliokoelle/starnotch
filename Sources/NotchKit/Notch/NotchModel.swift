@@ -56,6 +56,8 @@ final class NotchModel {
     /// The module sitting beside the notch at rest, if any.
     /// Figures beside the notch at rest (a setting) and Watch mode (everything quiet).
     var earsMode = EarsMode.attention
+    /// The notch or the closed island is pressed (from `WheelController`): Tara squashes.
+    var handlePressed = false
     var watching = false
 
     private var active: [NotchModule] { modules.filter { $0.ambientPriority > 0 } }

@@ -417,12 +417,15 @@ struct AvatarView: View {
                 SpriteLayerView(image: image, colorway: colorway, mood: mood, alive: alive,
                                 glow: glow, highlight: library.character(character)?.finish?.highlight ?? 0)
                     .aspectRatio(image.size.width / max(1, image.size.height), contentMode: .fit)
+                    .overlay { if drawsHeadphones { Headphones() } }
                     .frame(height: height, alignment: .bottom)
                     // One view for every state: the sprite layer cross-fades between pictures.
             }
         }
         .frame(height: height, alignment: .bottom)
         .rotationEffect(.degrees(tilt), anchor: .bottom)
+        // Leans and bobs on hover and when the peek opens (still pictures stay still).
+        .modifier(FigureNudge(enabled: alive && forcedState == nil))
         .offset(y: height * max(sink, reduceMotion ? 0 : phase))
         .opacity(reduceMotion ? (emerged ? 1 : 0) : 1)
         .animation(.spring(duration: 0.45, bounce: 0.25), value: sink)
@@ -461,6 +464,16 @@ struct AvatarView: View {
 
     static let maxAspect: CGFloat = 1.6
 
+    /// Listening or music, and the pack maps its listening states to a plain face (the bundled
+    /// star has no headphones picture): the headphones are drawn on. Characters with their own
+    /// listening pictures, and those without any listening state, are left alone.
+    private var drawsHeadphones: Bool {
+        guard mood == .music || mood == .listening, forcedState == nil, let character = library.character(character) else { return false }
+        let listening = ["voice_listening", "music_playback", "music"].compactMap { character.states[$0]?.file }
+        let plain = Set(["happy", "idle"].compactMap { character.states[$0]?.file })
+        return !listening.isEmpty && listening.allSatisfy(plain.contains)
+    }
+
     /// The pack's glow in the look's colour: the level's tint, else the colorway's, else the character's.
     private var glow: (color: CGColor, amount: Double)? {
         guard let character = library.character(character), let amount = character.finish?.glow, amount > 0 else { return nil }
@@ -498,3 +511,32 @@ struct AvatarView: View {
         withAnimation(.easeIn(duration: 0.55)) { phase = 1 }                // slowly hide
     }
 }
+
+/// Headphones over the star's face: a band over the top of the face and a cup at each side, in
+/// the figure's own proportions, so they move, tilt and squash with it.
+private struct Headphones: View {
+    var body: some View {
+        GeometryReader { proxy in
+            let w = proxy.size.width, h = proxy.size.height
+            let line = max(1, h * 0.045)
+            ZStack {
+                Path { path in
+                    path.move(to: CGPoint(x: w * 0.31, y: h * 0.53))
+                    path.addCurve(to: CGPoint(x: w * 0.69, y: h * 0.53),
+                                  control1: CGPoint(x: w * 0.31, y: h * 0.30),
+                                  control2: CGPoint(x: w * 0.69, y: h * 0.30))
+                }
+                .stroke(Color.white.opacity(0.82), style: StrokeStyle(lineWidth: line, lineCap: .round))
+                ForEach([0.30, 0.70], id: \.self) { x in
+                    RoundedRectangle(cornerRadius: w * 0.04, style: .continuous)
+                        .fill(Color(white: 0.93))
+                        .frame(width: w * 0.085, height: h * 0.16)
+                        .shadow(color: .black.opacity(0.35), radius: line)
+                        .position(x: w * x, y: h * 0.57)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+

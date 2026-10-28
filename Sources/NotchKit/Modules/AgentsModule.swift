@@ -740,6 +740,7 @@ private struct MainFigure: View {
 
     var body: some View {
         figure
+            .handleSquash()
             .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
                 .onChanged { value in
                     // Pulled down past the notch: the figure leaves it and follows the pointer.
@@ -802,10 +803,11 @@ private struct AgentsTrailingEar: View {
         } else {
             // The other agents as small figures peeking from the bottom edge, overlapping.
             HStack(spacing: -7) {
-                ForEach(others) { agent in
+                ForEach(Array(others.enumerated()), id: \.element.id) { index, agent in
                     AvatarView(character: module.character(of: agent), mood: module.avatarMood(of: agent),
                                height: peek ? 24 : 20, colorway: module.colorway(of: agent), sink: peek ? 0 : 0.25,
                                level: module.variantLevel(of: agent))
+                        .environment(\.figureOrder, 1 + index)
                 }
             }
             .overlay(alignment: .topTrailing) {

@@ -122,6 +122,7 @@ final class DictationModule: NotchModule {
     func leadingEar(peek: Bool) -> AnyView {
         AnyView(AvatarView(character: cast.main, mood: phaseIsListening ? .listening : .thinking,
                            height: peek ? 28 : 25, colorway: cast.colorway, sink: peek ? 0 : 0.25)
+            .handleSquash()
             .frame(height: 32, alignment: .bottom)
             .clipped())
     }

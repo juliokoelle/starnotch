@@ -19,6 +19,8 @@ final class MeetingCompanion: NSObject {
     private(set) var isOpen = false
     /// The meeting is running: the character listens.
     var listening = false
+    /// Goes up each time she is put down somewhere (not back in the notch): a little landing bounce.
+    private(set) var landings = 0
 
     @ObservationIgnored let cast: AvatarCast
     /// A click on a bubble opens the full card in the notch.
@@ -159,6 +161,7 @@ final class MeetingCompanion: NSObject {
             return
         }
         UserDefaults.standard.set([Double(frame.origin.x), Double(frame.origin.y)], forKey: Self.originKey)
+        landings += 1
     }
 }
 
@@ -170,6 +173,7 @@ private final class FreePanel: NSPanel {
 private struct CompanionView: View {
     let companion: MeetingCompanion
     @State private var hovering = false
+    @GestureState private var pressing = false
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
@@ -193,11 +197,17 @@ private struct CompanionView: View {
                 }
                 AvatarView(character: companion.cast.main, mood: companion.listening ? .listening : .idle,
                            height: 72, colorway: companion.cast.colorway, emergeOnAppear: false)
+                    .modifier(PressSquash(pressed: pressing))
+                    .modifier(LandingBounce(trigger: companion.landings))
                     .frame(width: 84, height: 80, alignment: .bottom)
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
                         .onChanged { _ in companion.drag() }
                         .onEnded { _ in companion.endDrag() })
+                    // Squashed while held still; picked up (moving) she springs back with a hop.
+                    .simultaneousGesture(DragGesture(minimumDistance: 0).updating($pressing) { value, state, _ in
+                        state = abs(value.translation.width) + abs(value.translation.height) < 3
+                    })
                     .help("Drag to move; let go at the notch to put it back")
             }
         }

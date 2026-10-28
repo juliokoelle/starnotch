@@ -80,6 +80,10 @@ private struct IslandPeekKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct MusicPlayingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var notch: NotchEnvironment {
         get { self[NotchEnvironmentKey.self] }
@@ -97,6 +101,12 @@ extension EnvironmentValues {
     var islandPeek: Bool {
         get { self[IslandPeekKey.self] }
         set { self[IslandPeekKey.self] = newValue }
+    }
+
+    /// Music plays: the main character wears headphones in whichever ear shows it.
+    var musicPlaying: Bool {
+        get { self[MusicPlayingKey.self] }
+        set { self[MusicPlayingKey.self] = newValue }
     }
 }
 

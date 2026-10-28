@@ -1,9 +1,11 @@
+import NotchCore
 import SwiftUI
 
 /// Small physical answers from the characters: a figure leans and bobs when the pointer touches it
 /// or the peek opens (staggered), Tara squashes while pressed and hops when let go, and lands with
-/// a little bounce when dropped. Transform only, springs that settle within about 200 ms, nothing
-/// with Reduce Motion, and never in the way of a click.
+/// a little bounce when dropped. Transform only, one quick move out and one low-bounce spring
+/// back (about 180 ms in all, the landing under 250 ms), nothing with Reduce Motion, and never in
+/// the way of a click.
 private struct FigureCueKey: EnvironmentKey {
     static let defaultValue = 0
 }
@@ -60,9 +62,9 @@ struct FigureNudge: ViewModifier {
         task = Task { @MainActor in
             if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
             guard !Task.isCancelled else { return }
-            withAnimation(.spring(duration: 0.09, bounce: 0)) { up = true }
-            try? await Task.sleep(for: .milliseconds(90))
-            withAnimation(.spring(duration: 0.18, bounce: 0.35)) { up = false }
+            withAnimation(.easeOut(duration: 0.06)) { up = true }
+            try? await Task.sleep(for: .milliseconds(60))
+            withAnimation(.spring(duration: 0.12, bounce: 0.2)) { up = false }
         }
     }
 }
@@ -82,9 +84,9 @@ struct PressSquash: ViewModifier {
             .onChange(of: pressed) { was, now in
                 guard was, !now, !reduceMotion else { return }
                 Task { @MainActor in
-                    withAnimation(.spring(duration: 0.1, bounce: 0)) { hop = true }
-                    try? await Task.sleep(for: .milliseconds(100))
-                    withAnimation(.spring(duration: 0.2, bounce: 0.4)) { hop = false }
+                    withAnimation(.easeOut(duration: 0.06)) { hop = true }
+                    try? await Task.sleep(for: .milliseconds(60))
+                    withAnimation(.spring(duration: 0.12, bounce: 0.2)) { hop = false }
                 }
             }
     }
@@ -111,9 +113,9 @@ struct LandingBounce: ViewModifier {
             .onChange(of: trigger) {
                 guard !reduceMotion else { return }
                 Task { @MainActor in
-                    withAnimation(.spring(duration: 0.07, bounce: 0)) { flat = true }
-                    try? await Task.sleep(for: .milliseconds(70))
-                    withAnimation(.spring(duration: 0.22, bounce: 0.45)) { flat = false }
+                    withAnimation(.easeOut(duration: 0.06)) { flat = true }
+                    try? await Task.sleep(for: .milliseconds(60))
+                    withAnimation(.spring(duration: 0.18, bounce: 0.2)) { flat = false }
                 }
             }
     }
@@ -122,4 +124,20 @@ struct LandingBounce: ViewModifier {
 extension View {
     /// Tara as the island's handle: squashes while the closed island is pressed.
     func handleSquash() -> some View { modifier(HandleSquash()) }
+}
+
+/// The main character in an ear: the island's handle (squashes with its press), headphones on
+/// while music plays.
+struct EarFigure: View {
+    let cast: AvatarCast
+    let mood: AvatarMood
+    let height: CGFloat
+    var sink: CGFloat = 0
+    @Environment(\.musicPlaying) private var musicPlaying
+
+    var body: some View {
+        AvatarView(character: cast.main, mood: mood, height: height, colorway: cast.colorway, sink: sink,
+                   headphones: musicPlaying)
+            .handleSquash()
+    }
 }

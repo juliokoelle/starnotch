@@ -204,12 +204,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wheel.onTapNotch = { [weak self] in self?.notch.tapNotch() }
         wheel.onPullDown = pull
         wheel.canPull = { [weak self] in self?.notch.canPullFigure(at: $0) ?? false }
-        // Strand polish: Tara squashes while the notch is pressed, and while music plays she sits
-        // in the leading ear and pulls out from there too.
+        // Strand polish: Tara squashes while the closed island is pressed (not the open panel's
+        // figure), wears headphones in any ear while music plays, and pulls out of the music ear too.
         wheel.onPress = { [weak self] down in
             guard let self, self.notchModel.handlePressed != down else { return }
+            guard !down || self.notchModel.interaction != .expanded else { return }
             self.notchModel.handlePressed = down
         }
+        notchModel.music = music
         music.onFigurePull = pull
         wheel.onWillOpen = { [weak self] in self?.notch.wheelWillOpen() }
         wheel.onDidClose = { [weak self] in self?.notch.wheelDidClose() }

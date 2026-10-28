@@ -277,7 +277,8 @@ private struct MusicFigure: View {
 
     var body: some View {
         AvatarView(character: module.cast.main, mood: module.isPlaying ? .music : .idle,
-                   height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: false)
+                   height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: false,
+                   headphones: module.isPlaying)
             .handleSquash()
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)

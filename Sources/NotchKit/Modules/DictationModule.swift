@@ -120,9 +120,8 @@ final class DictationModule: NotchModule {
 
     /// The main character puts its headphones on while listening.
     func leadingEar(peek: Bool) -> AnyView {
-        AnyView(AvatarView(character: cast.main, mood: phaseIsListening ? .listening : .thinking,
-                           height: peek ? 28 : 25, colorway: cast.colorway, sink: peek ? 0 : 0.25)
-            .handleSquash()
+        AnyView(EarFigure(cast: cast, mood: phaseIsListening ? .listening : .thinking,
+                          height: peek ? 28 : 25, sink: peek ? 0 : 0.25)
             .frame(height: 32, alignment: .bottom)
             .clipped())
     }

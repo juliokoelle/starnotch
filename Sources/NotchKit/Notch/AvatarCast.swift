@@ -374,13 +374,16 @@ struct AvatarView: View {
     var level: PerformanceLevel?
     /// Previews: draw this state, whatever the mood.
     var forcedState: String?
+    /// Music plays: headphones on (drawn when the pack has no listening picture of its own).
+    var headphones = false
 
     @State private var phase: CGFloat
     @State private var tilt: Double = 0
 
     init(character: String, mood: AvatarMood, height: CGFloat, colorway: Colorway = Colorway(),
          sink: CGFloat = 0, emerged: Bool = true, emergeOnAppear: Bool = true, alive: Bool = true,
-         level: PerformanceLevel? = nil, forcedState: String? = nil) {
+         level: PerformanceLevel? = nil, forcedState: String? = nil, headphones: Bool = false) {
+        self.headphones = headphones
         self.level = level
         self.forcedState = forcedState
         self.character = character
@@ -464,11 +467,12 @@ struct AvatarView: View {
 
     static let maxAspect: CGFloat = 1.6
 
-    /// Listening or music, and the pack maps its listening states to a plain face (the bundled
-    /// star has no headphones picture): the headphones are drawn on. Characters with their own
-    /// listening pictures, and those without any listening state, are left alone.
+    /// Asked for (`headphones`, only while music plays), and the pack maps its listening states
+    /// to a plain face (the bundled star has no headphones picture): the headphones are drawn on.
+    /// Characters with their own listening pictures, and those without any listening state, are
+    /// left alone.
     private var drawsHeadphones: Bool {
-        guard mood == .music || mood == .listening, forcedState == nil, let character = library.character(character) else { return false }
+        guard headphones, forcedState == nil, let character = library.character(character) else { return false }
         let listening = ["voice_listening", "music_playback", "music"].compactMap { character.states[$0]?.file }
         let plain = Set(["happy", "idle"].compactMap { character.states[$0]?.file })
         return !listening.isEmpty && listening.allSatisfy(plain.contains)
@@ -526,10 +530,10 @@ private struct Headphones: View {
                                   control1: CGPoint(x: w * 0.31, y: h * 0.30),
                                   control2: CGPoint(x: w * 0.69, y: h * 0.30))
                 }
-                .stroke(Color.white.opacity(0.82), style: StrokeStyle(lineWidth: line, lineCap: .round))
+                .stroke(Theme.textBody, style: StrokeStyle(lineWidth: line, lineCap: .round))
                 ForEach([0.30, 0.70], id: \.self) { x in
                     RoundedRectangle(cornerRadius: w * 0.04, style: .continuous)
-                        .fill(Color(white: 0.93))
+                        .fill(Theme.textPrimary)
                         .frame(width: w * 0.085, height: h * 0.16)
                         .shadow(color: .black.opacity(0.35), radius: line)
                         .position(x: w * x, y: h * 0.57)

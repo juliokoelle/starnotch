@@ -15,7 +15,7 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 | | Item | Notes |
 |---|---|---|
 | ✅ | One-click Claude usage connection | Setup page: "Claude plan limits and context" installs the status line bridge, with backup and Remove. Onboarding should lead there |
-| ✅ | First-run onboarding | Four skippable steps: Tara (character and colour), your agents (one-click setup), meetings and Tara's brain (Jamie, Claude subscription, API key or rules), tools |
+| ✅ | First-run onboarding | One card per step, each with why it asks and where the data stays: Tara (character and colour), your agents (one-click setup), calendar, music players, Jamie, Tara's brain (Claude subscription, API key, Apple Intelligence or rules), notes, tools; then Tara's welcome from the notch |
 | ✅ | Meeting Agent switch does nothing without setup | The agent ships in the app; keys and uv in Settings › Meeting agent |
 | ✅ | Watch mode toggle | Switching off now holds while a video or fullscreen app keeps it on |
 | ✅ | Calendar | Day before and after (arrows, ⌘← ⌘→, week strip), Today, open Calendar |

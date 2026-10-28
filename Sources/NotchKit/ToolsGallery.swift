@@ -143,6 +143,8 @@ struct ToolGallery: View {
 struct ToolRow: View {
     let item: ToolItem
     @Bindable var state: AppState
+    /// Onboarding's larger type.
+    @Environment(\.roomyRows) private var roomy
 
     var body: some View {
         let status = availability
@@ -155,9 +157,9 @@ struct ToolRow: View {
                 .background(Color.primary.opacity(on ? 0.09 : 0.05), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .animation(Theme.snappy, value: on)
             VStack(alignment: .leading, spacing: 2) {
-                Text(LocalizedStringKey(ToolInfo.title(item))).font(.system(size: 13, weight: .medium))
+                Text(LocalizedStringKey(ToolInfo.title(item))).font(.system(size: roomy ? 15 : 13, weight: .medium))
                 Text(LocalizedStringKey(status.available ? ToolInfo.line(item) : status.detail))
-                    .font(.system(size: 11.5))
+                    .font(.system(size: roomy ? 14 : 11.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)

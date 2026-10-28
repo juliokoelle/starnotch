@@ -11,11 +11,16 @@ import SwiftUI
 @Observable
 final class SetupCenter {
     enum Status: Equatable { case idle, running, done(String?), failed(String) }
+    /// What macOS answered for the players: allowed for at least one, refused, or not asked yet
+    /// (no player was running, so macOS asks the first time one plays).
+    enum MusicPermission: Equatable { case allowed, denied, later }
 
     let paths: SetupPaths
     private(set) var ledger: SetupLedger
     var selected: Set<SetupItem> = []
     private(set) var status: [SetupItem: Status] = [:]
+    /// The players' answer from this launch's click; nil until then.
+    private(set) var musicPermission: MusicPermission?
     /// Recordings: show the page, never act.
     var preview = false
     /// Recordings: the four other agent tools count as found (strand agents).
@@ -72,6 +77,14 @@ final class SetupCenter {
 
     /// The agents among what was found (onboarding's "Your agents"): the ones the setup connects.
     var foundAgents: [Found] { found.filter { (["Claude Code", "Codex"] + Self.moreAgents.map { $0.displayName }).contains($0.name) } }
+
+    /// The found agents the notch follows now: Claude Code and Codex always, the other tools once
+    /// their hooks or plugin are set up (their sessions and waiting come through those).
+    var trackedAgents: [Found] {
+        let items: [String: SetupItem] = [CursorProvider.displayName: .cursorHooks, CopilotProvider.displayName: .copilotHooks,
+                                          GeminiProvider.displayName: .geminiHooks, OpencodeProvider.displayName: .opencodePlugin]
+        return foundAgents.filter { found in items[found.name].map(isSetUp) ?? true }
+    }
 
     /// Agent tools beyond Claude Code and Codex, each with its own setup item.
     static let moreAgents: [any AgentProvider.Type] = [CursorProvider.self, CopilotProvider.self, GeminiProvider.self, OpencodeProvider.self]
@@ -133,9 +146,11 @@ final class SetupCenter {
     func setUp(_ items: Set<SetupItem>) {
         guard !preview else {
             for item in items { status[item] = .done(nil) }
+            if items.contains(.musicAutomation) { musicPermission = .allowed }
             return
         }
-        let order = offered.filter { items.contains($0) && !isSetUp($0) }
+        // The players can be asked again: a player that wasn't running then may be now.
+        let order = offered.filter { items.contains($0) && (!isSetUp($0) || $0 == .musicAutomation) }
         for item in order { status[item] = .running }
         // The MCP server runs from the agent's copy in the support folder.
         if order.contains(.mcpServer) { _ = MeetingAgentSetup.ensureInstalled() }
@@ -183,8 +198,19 @@ final class SetupCenter {
                     ledger.record(SetupLedger.Entry(item: .calendar, at: Date(), note: granted ? "Allowed" : "Not allowed"))
                     result = granted ? .done(nil) : .failed("Not allowed. You can turn it on in System Settings › Privacy & Security › Calendars.")
                 case .musicAutomation:
-                    result = .done(Self.askMusicPermission())
-                    ledger.record(SetupLedger.Entry(item: .musicAutomation, at: Date(), note: "Asked for running players"))
+                    let (answer, players) = Self.askMusicPermission()
+                    musicPermission = answer
+                    switch answer {
+                    case .allowed:
+                        ledger.record(SetupLedger.Entry(item: .musicAutomation, at: Date(), note: "Allowed for \(players)"))
+                        result = .done(String(format: Localization.string("Allowed for %@."), players))
+                    case .denied:
+                        ledger.record(SetupLedger.Entry(item: .musicAutomation, at: Date(), note: "Not allowed"))
+                        result = .failed(Localization.string("Not allowed. You can turn it on in System Settings › Privacy & Security › Automation."))
+                    case .later:
+                        // Nothing was asked: nothing goes into the ledger, and no check.
+                        result = .idle
+                    }
                 case .lidAwake:
                     continue
                 }
@@ -231,20 +257,33 @@ final class SetupCenter {
     }
 
     /// Asks macOS for permission to control the players that run now; the others are asked the
-    /// first time they play (an Apple event to a closed app would launch it).
-    static func askMusicPermission() -> String {
-        var asked: [String] = []
+    /// first time they play (an Apple event to a closed app would launch it). Allowed when macOS
+    /// said yes for at least one (with their names), denied when it refused, later when no
+    /// player was running and nothing was asked.
+    static func askMusicPermission() -> (MusicPermission, String) {
+        var allowed: [String] = []
+        var refused = false
         for (source, id) in PlayerBridge.bundleIDs where !NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty {
             var target = AEAddressDesc()
             let status = id.withCString { pointer in
                 AECreateDesc(typeApplicationBundleID, pointer, strlen(pointer), &target)
             }
             guard status == noErr else { continue }
-            _ = AEDeterminePermissionToAutomateTarget(&target, typeWildCard, typeWildCard, true)
+            let answer = AEDeterminePermissionToAutomateTarget(&target, typeWildCard, typeWildCard, true)
             AEDisposeDesc(&target)
-            asked.append(PlayerBridge.names[source] ?? id)
+            if answer == noErr {
+                allowed.append(PlayerBridge.names[source] ?? id)
+            } else if answer == OSStatus(errAEEventNotPermitted) {
+                refused = true
+            }
         }
-        return asked.isEmpty ? "macOS asks the first time a player plays." : "Asked for \(asked.joined(separator: " and "))."
+        if !allowed.isEmpty { return (.allowed, allowed.sorted().joined(separator: ", ")) }
+        return (refused ? .denied : .later, "")
+    }
+
+    /// Recordings: the players' step after macOS answered.
+    func previewMusic(_ answer: MusicPermission) {
+        musicPermission = answer
     }
 
     // MARK: Remove
@@ -374,12 +413,12 @@ struct SetupItemRow: View {
         let reason = center.unavailableReason(item)
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(LocalizedStringKey(item.title)).font(.system(size: 13, weight: .medium))
+                Text(LocalizedStringKey(item.title)).font(.system(size: 15, weight: .medium))
                 Text(LocalizedStringKey(reason ?? Self.summary(item)))
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .font(.system(size: 14)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if detailed {
-                    Text(item.detail(center.paths)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                    Text(item.detail(center.paths)).font(.system(size: 13.5)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
@@ -387,9 +426,9 @@ struct SetupItemRow: View {
                     switch status {
                     case .done(let note):
                         Label(note ?? Localization.string("Done"), systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 11.5)).foregroundStyle(Theme.ok)
+                            .font(.system(size: 13.5)).foregroundStyle(Theme.ok)
                     case .failed(let why):
-                        Label(why, systemImage: "exclamationmark.triangle.fill").font(.system(size: 11.5)).foregroundStyle(Theme.waiting)
+                        Label(why, systemImage: "exclamationmark.triangle.fill").font(.system(size: 13.5)).foregroundStyle(Theme.waiting)
                     case .running: ProgressView().controlSize(.mini)
                     case .idle: EmptyView()
                     }
@@ -397,7 +436,7 @@ struct SetupItemRow: View {
             }
             Spacer(minLength: 12)
             if setUp && center.status[item] == nil {
-                Label("Set up", systemImage: "checkmark").font(.system(size: 12)).foregroundStyle(.secondary)
+                Label("Set up", systemImage: "checkmark").font(.system(size: 13.5)).foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
             } else {
                 Toggle("", isOn: Binding(

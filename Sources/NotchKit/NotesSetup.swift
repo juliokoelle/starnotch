@@ -152,20 +152,16 @@ final class VaultSetup {
 /// Onboarding's row: pick the folder; then what was found in it.
 struct NotesRow: View {
     let state: AppState
-    @State private var setup: VaultSetup
-
-    init(state: AppState) {
-        self.state = state
-        _setup = State(initialValue: VaultSetup(persists: state.persists))
-    }
+    /// The window's picker, so the step sees the folder connected.
+    let setup: VaultSetup
 
     var body: some View {
         HStack(spacing: 12) {
             RowSymbol(name: "books.vertical", active: setup.isConnected)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Your notes").font(.system(size: 13, weight: .medium))
+                Text("Your notes").font(.system(size: 15, weight: .medium))
                 status
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 14))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -173,7 +169,7 @@ struct NotesRow: View {
             if setup.isConnected {
                 if !setup.isFromConfig {
                     Button("Change") { setup.chooseFolder() }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).font(.system(size: 12))
+                        .buttonStyle(.plain).foregroundStyle(.secondary).font(.system(size: 13.5))
                         .frame(minHeight: 28)
                 }
             } else {
@@ -192,7 +188,7 @@ struct NotesRow: View {
                   systemImage: "checkmark.circle.fill")
                 .foregroundStyle(Theme.ok)
         } else {
-            Text("An Obsidian vault or any Markdown folder: your tasks and today's note in the notch, and Tara reads along.")
+            Text("Pick the folder; the files in it are found by themselves.")
                 .foregroundStyle(.secondary)
         }
     }

@@ -2,6 +2,7 @@
 
 import datetime as dt
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -47,6 +48,18 @@ def test_a_bare_result_still_counts():
     assert call["model"] == "sonnet" and call["input_tokens"] == 900 and call["cost_usd"] is None
 
 
+def test_tokens_cover_every_turn_and_model_like_the_cost():
+    # A screenshot costs an extra Read turn and Claude Code may add a helper call on another model: modelUsage sums
+    # every turn of every model (as total_cost_usd does), the top-level usage only the main model's last request.
+    result = fixture("claude-code-ask-cached.json")
+    result["modelUsage"]["claude-haiku-5-5"] = {"inputTokens": 400, "outputTokens": 20, "cacheReadInputTokens": 0,
+                                                "cacheCreationInputTokens": 0, "canonicalModel": "claude-haiku-5-5"}
+    call = usage.from_claude_code(result)
+    assert call["model"] == "claude-sonnet-5-5"
+    assert call["input_tokens"] == 2 + 400 and call["output_tokens"] == 308 + 20
+    assert call["cache_read_input_tokens"] == 32025 and call["cache_creation_input_tokens"] == 1115
+
+
 def test_api_usage_is_priced():
     u = SimpleNamespace(input_tokens=1000, cache_creation_input_tokens=20_000, cache_read_input_tokens=0,
                         output_tokens=300, cache_creation=None)
@@ -82,6 +95,42 @@ def test_ledger_in_a_missing_folder(tmp_path):
     ledger = usage.Ledger(tmp_path / "new" / "usage.jsonl")
     ledger.record("ask", "api", {"input_tokens": 1}, now=NOW)
     assert (tmp_path / "new" / "usage.jsonl").exists()
+
+
+def test_a_prune_waits_for_an_append_in_another_agent(tmp_path):
+    # Another agent holds the lock (appending, or pruning): this one's prune and append wait, nothing is lost.
+    path = tmp_path / "usage.jsonl"
+    path.write_text(json.dumps({"time": "2026-07-01T10:00:00Z"}) + "\n", encoding="utf-8")
+    other, ledger = usage.Ledger(path), usage.Ledger(path)
+    with other._locked():
+        writer = threading.Thread(target=ledger.record, args=("ask", "api", {"input_tokens": 1}, NOW))
+        writer.start()
+        writer.join(0.3)
+        assert writer.is_alive()  # blocked on the lock
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"time": "2026-10-28T09:00:00Z", "feature": "meeting"}) + "\n")
+    writer.join(5)
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert [line.get("feature") for line in lines] == ["meeting", "ask"]
+
+
+def test_a_failed_rewrite_leaves_no_temp_file(tmp_path, monkeypatch):
+    path = tmp_path / "usage.jsonl"
+    path.write_text(json.dumps({"time": "2026-07-01T10:00:00Z"}) + "\n", encoding="utf-8")
+
+    def refuse(*_):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(usage.os, "replace", refuse)
+    usage.Ledger(path).prune(NOW)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["usage.jsonl", "usage.jsonl.lock"]
+
+
+def test_a_corrupt_byte_does_not_stop_the_prune(tmp_path):
+    path = tmp_path / "usage.jsonl"
+    path.write_bytes(b'{"time": "2026-07-01T10:00:00Z"}\n{"time": "2026-10-27T10:00:00Z", "feature": "\xff"}\n')
+    usage.Ledger(path).prune(NOW)
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 1
 
 
 class Spending:
@@ -126,3 +175,14 @@ def test_no_ledger_without_a_path(tmp_path, memory_dir):
     agent = Agent(Memory(memory_dir), Spending(), lambda _: None)
     agent.handle({"cmd": "ask", "question": "Welcher Preis?", "id": 1})
     assert agent.ledger is None
+
+
+def test_a_broken_ledger_does_not_cost_the_answer(tmp_path, memory_dir, monkeypatch):
+    def broken(*_args, **_kwargs):
+        raise ValueError("not a ledger")
+
+    monkeypatch.setattr(usage.Ledger, "record", broken)
+    said = []
+    agent = Agent(Memory(memory_dir), Spending(), said.append, usage=tmp_path / "usage.jsonl", brain="claude-code")
+    agent.handle({"cmd": "ask", "question": "Welcher Preis?", "id": 1})
+    assert any(event.get("type") == "answer" and event.get("text") == "30 Euro." for event in said)

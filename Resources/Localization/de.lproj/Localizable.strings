@@ -513,7 +513,7 @@
 "Couldn't take a picture of that window" = "Von diesem Fenster ließ sich kein Bild machen";
 /* Wave 3: Tara's usage in Settings */
 "Tara's usage" = "Taras Verbrauch";
-"What Tara's calls would cost at API prices. On a Claude plan they count against your plan's limits instead of costing money; with an API key this is what you pay." = "Was Taras Aufrufe zu API-Preisen kosten würden. Mit einem Claude-Abo zählen sie gegen die Limits deines Abos und kosten kein Geld; mit einem API-Schlüssel zahlst du genau das.";
+"What Tara's calls would cost at API prices. On a Claude plan they count against your plan's limits instead of costing money; with an API key this is what you pay. A + means some calls used a model without a known price." = "Was Taras Aufrufe zu API-Preisen kosten würden. Mit einem Claude-Abo zählen sie gegen die Limits deines Abos und kosten kein Geld; mit einem API-Schlüssel zahlst du genau das. Ein + heißt: Einige Aufrufe liefen über ein Modell ohne bekannten Preis.";
 "Last 7 days" = "Letzte 7 Tage";
 "Calls in 7 days" = "Aufrufe in 7 Tagen";
 "No calls" = "Keine Aufrufe";

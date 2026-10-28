@@ -62,7 +62,11 @@ ledger, `usage.jsonl` in the same folder (`--usage` points elsewhere, `--usage '
 `cache_read_input_tokens`, `output_tokens`, `duration_ms` and `cost_usd`, the call's price at API list prices
 (Claude Code's own `total_cost_usd`; for `api` computed from the price table in `usage.py`, `null` for a model not
 in it). On a Claude plan nothing is billed per call; the tokens count against the plan's limits. Lines older than
-90 days are dropped when an agent first writes after it starts. Settings shows today and the last 7 days.
+90 days are dropped when an agent first writes after it starts; appends and that prune hold a lock on
+`usage.jsonl.lock`, since Ask Tara's agent and the meeting's write the same file. The tokens are summed over
+every turn and model of a call. A call that times out or is ended by SIGTERM printed no result and is missing
+from the ledger, though it may have spent tokens. The app passes `--usage` with its own support folder and
+Settings shows today and the last 7 days.
 
 During a meeting the app reads `transcribe.py`'s stdout and writes each `utterance` line, unchanged, into
 `agent.py`'s stdin (it may show the line as a live caption on the way). For a test without the app:

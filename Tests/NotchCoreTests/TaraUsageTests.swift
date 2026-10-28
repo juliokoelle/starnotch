@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import TestSupport
 @testable import NotchCore
@@ -28,8 +29,23 @@ import TestSupport
         #expect(summary.today.byFeature == ["meeting": 1, "capture": 1, "ask": 1])
         #expect(summary.today.cachedTokens == 32358 + 32025)
         #expect(abs(summary.today.costUSD - (0.0104258 + 0.0107465)) < 1e-9)  // the unpriced call adds nothing
+        #expect(summary.today.unpricedCalls == 1 && TaraUsage.cost(summary.today) == "$0.02+")
+        #expect(summary.week.unpricedCalls == 1)
         // 2026-10-22 through today: the call of 2026-10-20 is older.
         #expect(summary.week.calls == 4 && summary.week.byFeature["ask"] == 2)
+    }
+
+    @Test func linesBeforeSinceAreSkippedUnparsed() {
+        let calls = TaraUsage.parse(ledger, since: UTC.date("2026-10-23 08:00"))
+        #expect(calls.map(\.time) == [UTC.date("2026-10-23 08:00"), UTC.date("2026-10-28 07:59"),
+                                      UTC.date("2026-10-28 08:30"), UTC.date("2026-10-28 08:31")])
+        // A line in another shape is parsed in full and left to the summary.
+        #expect(TaraUsage.parse(#"{"feature": "ask", "time": "2026-10-01T00:00:00Z"}"#, since: UTC.date("2026-10-23 08:00")).count == 1)
+    }
+
+    @Test func sidecarArgument() {
+        let folder = URL(fileURLWithPath: "/tmp/It's here")
+        #expect(TaraUsage.argument(folder: folder) == #" --usage '/tmp/It'\''s here/usage.jsonl'"#)
     }
 
     @Test func callsAfterNowDoNotCount() {
@@ -52,5 +68,12 @@ import TestSupport
         #expect(TaraUsage.dollars(0.004) == "< $0.01")
         #expect(TaraUsage.dollars(0.1327977) == "$0.13")
         #expect(TaraUsage.dollars(12.4) == "$12.40")
+        let german = Locale(identifier: "de_DE")
+        #expect(TaraUsage.compact(33_078, locale: german) == "33,1k" && TaraUsage.compact(12_000, locale: german) == "12k")
+        #expect(TaraUsage.dollars(12.4, locale: german) == "$12,40" && TaraUsage.dollars(0.004, locale: german) == "< $0,01")
+        var none = TaraUsage.Totals()
+        #expect(TaraUsage.cost(none) == "$0")
+        none.unpricedCalls = 1
+        #expect(TaraUsage.cost(none) == "$0+")
     }
 }

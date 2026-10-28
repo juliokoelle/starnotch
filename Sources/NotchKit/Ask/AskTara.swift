@@ -392,8 +392,8 @@ final class AskTara {
         let current = generation
         offlineReason = nil  // a new agent says again whether Claude is reachable
         // Sample data: the demo meetings, as the meeting module's demo, and none of the user's own material.
-        let command = demo ? "exec uv run python agent.py --memory demo/meetings --today 2026-10-26 --captures '' --connectors ''"
-                           : "exec uv run python agent.py"
+        let command = (demo ? "exec uv run python agent.py --memory demo/meetings --today 2026-10-26 --captures '' --connectors ''"
+                            : "exec uv run python agent.py") + TaraUsage.argument(folder: Brand.supportFolder)
         process = MeetingProcess(command: command, directory: directory, log: log, onLine: { [weak self] line in
             Task { @MainActor in self?.received(line) }
         }, onExit: { [weak self] in

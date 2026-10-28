@@ -218,9 +218,9 @@ final class MeetingModule: NotchModule {
 
     private func startAgent(demo: Bool) {
         try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let command = demo
+        let command = (demo
             ? "exec uv run python agent.py --memory demo/meetings --today 2026-10-26"
-            : "exec uv run python agent.py --watch-captures"
+            : "exec uv run python agent.py --watch-captures") + TaraUsage.argument(folder: Brand.supportFolder)
         agentGeneration += 1
         let generation = agentGeneration
         let process = MeetingProcess(command: command, directory: directory, log: log, onLine: { [weak self] line in

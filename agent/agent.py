@@ -515,7 +515,10 @@ class Agent:
         finally:
             spent = getattr(self.llm, "last_usage", None)
             if spent and self.ledger:
-                self.ledger.record(feature, self.brain, spent)
+                try:
+                    self.ledger.record(feature, self.brain, spent)
+                except Exception as error:  # a broken ledger must not cost Tara her answer
+                    print(f"usage ledger: {error}", file=sys.stderr)
 
     def _thinking(self) -> bool:
         return self.llm is not None and time.monotonic() >= self.resting_until

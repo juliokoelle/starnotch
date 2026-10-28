@@ -257,7 +257,7 @@ final class NotchController {
         panel.ignoresMouseEvents = !island.insetBy(dx: -4, dy: -4).contains(location)
             && !(model.interaction == .rest && inside)
 
-        if inside, dragging, model.interaction != .expanded, model.modules.contains(where: { $0.kind == .tools }), isFileDrag() {
+        if inside, dragging, model.interaction != .expanded, model.modules.contains(where: { $0.kind == .tools }), onFileDrag != nil, isFileDrag() {
             // A file over the notch: straight to the shelf, held open until the drop.
             pointerInside = true
             onFileDrag?()

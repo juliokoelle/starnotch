@@ -20,4 +20,12 @@ public final class IsolatedSettings {
     public func writeRaw(_ string: String) {
         defaults.set(Data(string.utf8), forKey: key)
     }
+
+    /// Changes the saved JSON in place, e.g. to look as if an older version saved it.
+    public func editSaved(_ change: (inout [String: Any]) -> Void) {
+        guard let data = defaults.data(forKey: key),
+              var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        change(&json)
+        if let edited = try? JSONSerialization.data(withJSONObject: json) { defaults.set(edited, forKey: key) }
+    }
 }

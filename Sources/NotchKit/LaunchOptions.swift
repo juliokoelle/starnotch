@@ -29,6 +29,9 @@ struct LaunchOptions {
     var tour = false
     /// Test mode: sample agents, calendar, Today and music, no permissions, nothing written.
     var sampleData = false
+    /// Open onboarding right after launch, even when it was done; `--onboarding-step 0…3` picks the step.
+    var onboarding = false
+    var onboardingStep: Int?
 
     init(arguments: [String] = CommandLine.arguments) {
         var iterator = arguments.dropFirst().makeIterator()
@@ -47,6 +50,10 @@ struct LaunchOptions {
             case "--preview": preview = iterator.next()
             case "--open-slot-picker": openSlotPicker = true
             case "--open-project-picker": openProjectPicker = true
+            case "--onboarding": onboarding = true
+            case "--onboarding-step":
+                onboarding = true
+                onboardingStep = iterator.next().flatMap(Int.init)
             default: break
             }
         }

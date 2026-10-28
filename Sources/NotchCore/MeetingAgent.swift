@@ -10,9 +10,9 @@ public enum MeetingLine: Equatable, Sendable {
     case card(MeetingCard)
     case status(state: String, message: String?)
     case error(String)
-    /// `jamie_sync.py`: one meeting stored, and the end of a sync.
+    /// `jamie_sync.py`: one meeting stored, and the end of a sync (`hint` e.g. "empty_account").
     case synced(title: String)
-    case syncDone(meetings: Int)
+    case syncDone(meetings: Int, hint: String? = nil)
 
     public static func parse(_ data: Data) -> MeetingLine? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -25,7 +25,7 @@ public enum MeetingLine: Equatable, Sendable {
             return .utterance(speaker: string(object["speaker"]) ?? "", text: text)
         case "status":
             let state = string(object["state"]) ?? ""
-            if state == "synced" { return .syncDone(meetings: object["meetings"] as? Int ?? 0) }
+            if state == "synced" { return .syncDone(meetings: object["meetings"] as? Int ?? 0, hint: string(object["hint"])) }
             // `login` carries the address the browser was sent to instead of a message.
             return .status(state: state, message: string(object["message"]) ?? string(object["url"]))
         case "synced":

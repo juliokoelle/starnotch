@@ -34,6 +34,8 @@ final class SystemModule: NotchModule {
     @ObservationIgnored var cast: AvatarCast?
     /// "Keep awake" holds the display on.
     var keepAwake = false
+    /// Keep awake is switched on in Settings › Tools.
+    var offersKeepAwake = true
     @ObservationIgnored var onToggleKeepAwake: (() -> Void)?
     /// Keep awake's second level on a laptop: also with the lid closed, until a time or until
     /// unplugged. `lidBusy` while macOS asks for the password or pmset runs.
@@ -795,11 +797,13 @@ private struct StatusChips: View {
             }
             Spacer(minLength: 0)
             HStack(spacing: 6) {
-                toggle(module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer", labels(module.keepAwake) ? "Keep awake" : nil, on: module.keepAwake,
-                       help: module.keepAwake ? "The display stays on until you switch this off" : "Keep the display and the Mac awake") {
-                    module.onToggleKeepAwake?()
+                if module.offersKeepAwake {
+                    toggle(module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer", labels(module.keepAwake) ? "Keep awake" : nil, on: module.keepAwake,
+                           help: module.keepAwake ? "The display stays on until you switch this off" : "Keep the display and the Mac awake") {
+                        module.onToggleKeepAwake?()
+                    }
                 }
-                if module.offersLidAwake {
+                if module.offersKeepAwake, module.offersLidAwake {
                     lidToggle(labels: labels(module.lidAwakeOn))
                         .transition(.opacity)
                 }

@@ -162,6 +162,14 @@ final class WheelController {
 
     // MARK: Showing and hiding
 
+    /// A slot as the wheel offers it: a tab only while the notch shows it (switched on, and what
+    /// it needs is on this Mac); otherwise the slot stays empty.
+    private func offered(at position: SlotPosition) -> SlotItem? {
+        let item = state.settings.wheelItem(at: position)
+        if case .module(let kind) = item, !ModuleAvailability.isShown(kind, settings: state.settings) { return nil }
+        return item
+    }
+
     /// Opens the wheel in click mode (keyboard shortcut, menu, `--open-wheel`).
     func openFromShortcut() {
         switch phase {
@@ -184,7 +192,7 @@ final class WheelController {
 
         model.mode = mode
         model.slots = Dictionary(uniqueKeysWithValues: SlotPosition.allCases.compactMap { position in
-            switch state.settings.item(at: position) {
+            switch offered(at: position) {
             case .module(let kind):
                 (position, WheelModel.Slot(name: kind.title, symbol: ModuleSymbols.symbol(kind)))
             case .app(let app):
@@ -229,7 +237,7 @@ final class WheelController {
             dy: location.y - wheelCenter.y,
             deadZone: WheelMetrics.hubRadius,
             maxDistance: phase == .clicking ? WheelMetrics.radius + 12 : nil,
-            assigned: state.settings.assignedSlots
+            assigned: Set(SlotPosition.allCases.filter { offered(at: $0) != nil })
         )
         guard slot != model.highlighted else { return }
         model.setHighlight(slot)
@@ -241,7 +249,7 @@ final class WheelController {
     func allowCapture() { panel.sharingType = .readOnly }
 
     private func commit() {
-        guard let slot = model.highlighted, let item = state.settings.item(at: slot) else {
+        guard let slot = model.highlighted, let item = offered(at: slot) else {
             cancel()
             return
         }

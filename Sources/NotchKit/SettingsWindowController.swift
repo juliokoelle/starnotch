@@ -9,18 +9,21 @@ final class SettingsWindowController {
     private let catalog = AppCatalog()
     private var window: NSWindow?
     private let setup: SetupCenter?
+    private let jamie: JamieConnect?
     private let openSetup: () -> Void
 
-    init(state: AppState, cast: AvatarCast, setup: SetupCenter? = nil, openSetup: @escaping () -> Void = {}) {
+    init(state: AppState, cast: AvatarCast, setup: SetupCenter? = nil, jamie: JamieConnect? = nil, openSetup: @escaping () -> Void = {}) {
         self.state = state
         self.cast = cast
         self.setup = setup
+        self.jamie = jamie
         self.openSetup = openSetup
     }
 
     func show() {
         if window == nil {
-            let hosting = NSHostingController(rootView: SettingsView(state: state, catalog: catalog, cast: cast, setup: setup, openSetup: openSetup))
+            let hosting = NSHostingController(rootView: SettingsView(state: state, catalog: catalog, cast: cast, setup: setup, jamie: jamie,
+                                                                  openSetup: openSetup))
             hosting.sizingOptions = [.preferredContentSize]
             let window = NSWindow(contentViewController: hosting)
             window.title = Brand.displayName

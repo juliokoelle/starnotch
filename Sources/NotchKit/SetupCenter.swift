@@ -58,6 +58,9 @@ final class SetupCenter {
         return list
     }
 
+    /// The agents among what was found (onboarding's "Your agents"): the ones the setup connects.
+    var foundAgents: [Found] { found.filter { ["Claude Code", "Codex"].contains($0.name) } }
+
     /// The items this Mac can use, in page order.
     var offered: [SetupItem] {
         SetupItem.allCases.filter { item in
@@ -277,109 +280,71 @@ final class SetupCenter {
     }
 }
 
-// MARK: - The consent page
+// MARK: - One item
 
-/// Exactly what will be set up, with one switch each; nothing happens before the click.
-struct SetupConsentView: View {
+/// One thing the setup can do: what it is in one line, a switch, and what happened. Onboarding
+/// lists them; `detailed` shows exactly what changes on disk.
+struct SetupItemRow: View {
     @Bindable var center: SetupCenter
-    var onClose: (() -> Void)?
+    let item: SetupItem
+    var detailed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Set up \(Brand.displayName)").font(.system(size: 22, weight: .semibold))
-                Text("Found on this Mac:").foregroundStyle(.secondary)
-                HStack(spacing: 6) {
-                    ForEach(center.found) { item in
-                        Label(item.name, systemImage: item.symbol)
-                            .font(.caption)
-                            .lineLimit(1)
-                            .fixedSize()
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.secondary.opacity(0.12), in: Capsule())
-                    }
-                }
-            }
-            Form {
-                Section {
-                    ForEach(center.offered, id: \.self) { item in row(item) }
-                } header: {
-                    Text("This will be set up")
-                } footer: {
-                    Text("Every change keeps a backup and can be removed in Settings › What's set up. Nothing leaves this Mac.")
-                        .foregroundStyle(.secondary)
-                }
-                if MeetingAgentSetup.bundled != nil {
-                    Section {
-                        MeetingAgentSettings(compact: true)
-                    } header: {
-                        Text("Meeting agent (optional)")
-                    } footer: {
-                        Text("Contradictions, open questions and promises from your meetings, live in the notch. The key stays on this Mac; Reson8 and more in Settings › Meeting agent.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .formStyle(.grouped)
-            .scrollDisabled(true)
-            if center.offered.contains(.codexHook) {
-                Label("One step stays with you: in Codex, type /hooks once and trust the Starnotch hook. Codex skips hooks you haven't trusted.",
-                      systemImage: "hand.point.right")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack {
-                Button("Not now") { onClose?() }
-                Spacer()
-                let pending = center.selected.filter { !center.isSetUp($0) }
-                let everything = Set(center.offered.filter { center.isAvailable($0) && !center.isSetUp($0) })
-                if center.status.values.contains(where: { if case .running = $0 { true } else { false } }) {
-                    ProgressView().controlSize(.small)
-                } else if !center.status.isEmpty, pending.allSatisfy({ center.status[$0] != nil }) {
-                    Button("Done") { onClose?() }.keyboardShortcut(.defaultAction)
-                } else {
-                    Button(pending == everything ? "Set up everything" : "Set up \(pending.count) selected") {
-                        center.setUp(pending)
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(pending.isEmpty)
-                }
-            }
-        }
-        .padding(22)
-        .frame(width: 560)
-    }
-
-    @ViewBuilder private func row(_ item: SetupItem) -> some View {
         let setUp = center.isSetUp(item)
         let reason = center.unavailableReason(item)
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                Text(reason ?? item.detail(center.paths)).font(.callout).foregroundStyle(.secondary)
+                Text(LocalizedStringKey(item.title)).font(.system(size: 13, weight: .medium))
+                Text(LocalizedStringKey(reason ?? Self.summary(item)))
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if detailed {
+                    Text(item.detail(center.paths)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
                 if let status = center.status[item] {
                     switch status {
-                    case .done(let note): Label(note ?? "Done", systemImage: "checkmark.circle.fill").font(.callout).foregroundStyle(.green)
-                    case .failed(let why): Label(why, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange)
+                    case .done(let note):
+                        Label(note ?? Localization.string("Done"), systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 11.5)).foregroundStyle(Theme.ok)
+                    case .failed(let why):
+                        Label(why, systemImage: "exclamationmark.triangle.fill").font(.system(size: 11.5)).foregroundStyle(Theme.waiting)
                     case .running: ProgressView().controlSize(.mini)
                     case .idle: EmptyView()
                     }
                 }
             }
-            Spacer()
+            Spacer(minLength: 12)
             if setUp && center.status[item] == nil {
-                Label("Set up", systemImage: "checkmark").font(.callout).foregroundStyle(.secondary).labelStyle(.titleAndIcon)
+                Label("Set up", systemImage: "checkmark").font(.system(size: 12)).foregroundStyle(.secondary)
+                    .labelStyle(.titleAndIcon)
             } else {
                 Toggle("", isOn: Binding(
                     get: { center.selected.contains(item) },
                     set: { on in if on { center.selected.insert(item) } else { center.selected.remove(item) } }))
                 .labelsHidden()
                 .toggleStyle(.switch)
+                .tint(Theme.accent)
                 .disabled(reason != nil || center.status[item] != nil)
             }
+        }
+        .padding(.vertical, 3)
+        .animation(Theme.snappy, value: detailed)
+    }
+
+    /// What the user gets, in one line; `SetupItem.detail` says exactly what changes.
+    static func summary(_ item: SetupItem) -> String {
+        switch item {
+        case .claudePlugin: "Approve Claude Code's requests from the notch"
+        case .codexHook: "Approve Codex from the notch; trust it once in Codex with /hooks"
+        case .statusLine: "Plan limits and context in the notch; your status line keeps running"
+        case .mcpServer: "Any agent can show you a line or ask you yes or no"
+        case .shellHook: "Terminal commands that run 30 s or longer show in the notch"
+        case .launchAtLogin: "Starts with your Mac"
+        case .calendar: "macOS asks once: your next meeting, its countdown and Join"
+        case .musicAutomation: "macOS asks once per player: play, pause and skip"
+        case .lidAwake: "Your Mac stays awake with the lid closed while it is plugged in"
         }
     }
 }
@@ -463,35 +428,5 @@ enum SetupLedgerWindow {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
-    }
-}
-
-@MainActor
-final class SetupWindowController {
-    private let center: SetupCenter
-    private var window: NSWindow?
-    var onClose: (() -> Void)?
-
-    init(center: SetupCenter) { self.center = center }
-
-    func show() {
-        if window == nil {
-            let hosting = NSHostingController(rootView: SetupConsentView(center: center) { [weak self] in self?.close() })
-            hosting.sizingOptions = [.preferredContentSize]
-            let window = NSWindow(contentViewController: hosting)
-            window.title = Brand.displayName
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            self.window = window
-        }
-        NSApp.activate()
-        window?.makeKeyAndOrderFront(nil)
-        window?.orderFrontRegardless()
-    }
-
-    func close() {
-        window?.close()
-        onClose?()
     }
 }

@@ -103,8 +103,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         watchItem.state = watching() ? .on : .off
         awakeItem.state = keepingAwake() ? .on : .off
-        inboxItem.isHidden = CaptureInbox.markdownFile == nil
+        // Only the tools switched on in Settings › Tools.
+        awakeItem.isHidden = !ToolSwitches.isOn(.keepAwake, in: state.settings)
+        inboxItem.isHidden = CaptureInbox.markdownFile == nil || !ToolSwitches.isOn(.quickCapture, in: state.settings)
         meetingNotesItem.isHidden = !FileManager.default.fileExists(atPath: Self.meetingNotesFile.path)
+            || state.settings.disabledModules.contains(.meeting)
         state.refreshRunningApps()
         if let slot = state.activeSlot, let app = state.settings[slot] {
             activeItem.title = "Active: \(app.name)"

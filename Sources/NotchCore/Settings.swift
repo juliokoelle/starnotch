@@ -103,8 +103,16 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public var didOnboard: Bool
     /// Which display the island lives on.
     public var islandDisplay: IslandDisplay
-    /// Modules the user switched off (onboarding or Settings).
+    /// Tabs the user switched off (onboarding or Settings › Tools); a fresh install starts with
+    /// all but the core off (`ToolSwitches`).
     public var disabledModules: [ModuleKind]
+    /// Small tools switched off (clipboard, timers, keep awake …), off on a fresh install.
+    public var disabledFeatures: [ToolFeature]
+    /// The tabs and small tools this version knows (`ToolSwitches.known`), saved with the switches:
+    /// one added later is off on load instead of on.
+    public private(set) var knownTools: [String]
+    /// How the meeting agent thinks (onboarding or Settings › Meeting agent).
+    public var brain: TaraBrain
     /// The open panel stays until a click outside (or Esc), not when the pointer leaves.
     public var keepOpenUntilClick: Bool
     /// Figures beside the notch at rest.
@@ -136,7 +144,9 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         colourScale: [PerformanceLevel: String] = PerformanceLevel.defaultScale,
         didOnboard: Bool = false,
         islandDisplay: IslandDisplay = .automatic,
-        disabledModules: [ModuleKind] = [],
+        disabledModules: [ModuleKind] = ToolSwitches.offModules,
+        disabledFeatures: [ToolFeature] = ToolSwitches.offFeatures,
+        brain: TaraBrain = .auto,
         keepOpenUntilClick: Bool = false,
         earsMode: EarsMode = .attention,
         watchAutomatic: Bool = true,
@@ -161,6 +171,9 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         self.didOnboard = didOnboard
         self.islandDisplay = islandDisplay
         self.disabledModules = disabledModules
+        self.disabledFeatures = disabledFeatures
+        self.knownTools = ToolSwitches.known
+        self.brain = brain
         self.keepOpenUntilClick = keepOpenUntilClick
         self.earsMode = earsMode
         self.watchAutomatic = watchAutomatic
@@ -191,6 +204,16 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public func item(at slot: SlotPosition) -> SlotItem? {
         if let module = modules[slot.rawValue] { return .module(module) }
         return slots[slot.rawValue].map(SlotItem.app)
+    }
+
+    /// What the wheel offers in a slot: its item, unless that is a tab switched off in Tools.
+    public func wheelItem(at slot: SlotPosition) -> SlotItem? {
+        if case .module(let kind) = item(at: slot), !ToolSwitches.isOn(.module(kind), in: self) { return nil }
+        return item(at: slot)
+    }
+
+    public var wheelSlots: Set<SlotPosition> {
+        Set(SlotPosition.allCases.filter { wheelItem(at: $0) != nil })
     }
 
     public func position(of module: ModuleKind) -> SlotPosition? {
@@ -246,7 +269,10 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             // Saved settings without the key come from before onboarding existed: don't show it.
             didOnboard: try c.decodeIfPresent(Bool.self, forKey: .didOnboard) ?? true,
             islandDisplay: (try? c.decodeIfPresent(IslandDisplay.self, forKey: .islandDisplay)) ?? .automatic,
+            // Saved before the Tools gallery: every tool the user had stays on.
             disabledModules: (try? c.decodeIfPresent([ModuleKind].self, forKey: .disabledModules)) ?? [],
+            disabledFeatures: (try? c.decodeIfPresent([ToolFeature].self, forKey: .disabledFeatures)) ?? [],
+            brain: (try? c.decodeIfPresent(TaraBrain.self, forKey: .brain)) ?? .auto,
             keepOpenUntilClick: (try? c.decodeIfPresent(Bool.self, forKey: .keepOpenUntilClick)) ?? false,
             earsMode: (try? c.decodeIfPresent(EarsMode.self, forKey: .earsMode)) ?? .attention,
             watchAutomatic: (try? c.decodeIfPresent(Bool.self, forKey: .watchAutomatic)) ?? true,
@@ -255,6 +281,11 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             remindersInToday: (try? c.decodeIfPresent(Bool.self, forKey: .remindersInToday)) ?? false,
             moduleOrder: (try? c.decodeIfPresent([ModuleKind].self, forKey: .moduleOrder)) ?? []
         )
+        // Saved by an older version: tools added since start off. Without the stamp the settings
+        // come from before it, and every tool of this version counts as known.
+        if let known = try? c.decodeIfPresent([String].self, forKey: .knownTools) {
+            ToolSwitches.switchOffNew(since: known, in: &self)
+        }
     }
 }
 

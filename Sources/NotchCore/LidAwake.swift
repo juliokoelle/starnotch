@@ -3,51 +3,79 @@ import Foundation
 // "Keep awake with the lid closed": macOS allows it only through `pmset -a disablesleep 1`, which
 // needs root. The setup installs one sudoers rule for exactly the two pmset commands (macOS asks
 // for the password once); after that the switch runs them through `sudo -n`, which never prompts.
-// It runs only on the power adapter, ends after the chosen time, and Starnotch switches it off
-// when it quits or, after a crash, at the next launch (a marker in the support folder says that
-// Starnotch was the one who switched it on).
+// It runs on the power adapter and on battery. It ends after the chosen time, on battery when the
+// charge reaches the floor, and when the Mac gets too hot; plugging in or out changes nothing.
+// Starnotch switches it off when it quits; after a crash or a forced quit a small watchdog it
+// started does, or else the next launch (a marker in the support folder says that Starnotch was
+// the one who switched it on). A hung Starnotch is not covered: the watchdog waits while it runs.
 
 /// How long the Mac stays awake with the lid closed.
 public enum LidAwakeLimit: String, CaseIterable, Codable, Sendable {
-    case oneHour, threeHours, untilUnplugged
+    case oneHour, threeHours, untilOff
 
-    /// Nil: until the power adapter comes off.
+    /// Nil: until the user switches it off (the battery floor and the heat still end it).
     public var duration: TimeInterval? {
         switch self {
         case .oneHour: 3600
         case .threeHours: 3 * 3600
-        case .untilUnplugged: nil
+        case .untilOff: nil
         }
     }
 }
 
+/// What the Mac says right now, for the safety checks.
+public struct LidAwakeReadings: Equatable, Sendable {
+    /// The charge in percent while on battery; nil on the power adapter (or without a battery).
+    /// 0 on battery when the charge can't be read: the floor stops it rather than let it drain unseen.
+    public var batteryPercent: Int?
+    public var thermal: ProcessInfo.ThermalState
+
+    public init(batteryPercent: Int?, thermal: ProcessInfo.ThermalState) {
+        self.batteryPercent = batteryPercent
+        self.thermal = thermal
+    }
+
+    /// From the power source as IOKit reports it: the floor counts only off the power adapter.
+    /// `onBattery`: the Mac runs on its battery (IOKit's providing power source), also when the
+    /// battery's own description says otherwise or can't be read.
+    public init(battery: BatteryState?, onBattery: Bool, thermal: ProcessInfo.ThermalState) {
+        let percent: Int? = if let battery { battery.pluggedIn && !onBattery ? nil : battery.percent } else { onBattery ? 0 : nil }
+        self.init(batteryPercent: percent, thermal: thermal)
+    }
+
+    /// `.serious` and `.critical`: macOS already slows the Mac down to cool it.
+    public var tooHot: Bool { thermal == .serious || thermal == .critical }
+}
+
 /// The switch as a state machine: every event goes through `handle`, which says what to run.
 public struct LidAwake: Equatable, Sendable {
+    /// The charges to stop at on battery, in percent.
+    public static let floors = [10, 20, 30, 50]
+    public static let defaultFloor = 20
+
     public enum State: Equatable, Sendable {
         case off
-        /// `until` nil: until unplugged.
+        /// `until` nil: until switched off.
         case on(since: Date, until: Date?)
     }
 
     public enum Event: Equatable, Sendable {
-        /// The user picked a time. `ruleInstalled`: `sudo -n` may run pmset.
-        case switchOn(LidAwakeLimit, onPower: Bool, ruleInstalled: Bool)
+        /// The user picked a time and a floor. `ruleInstalled`: `sudo -n` may run pmset.
+        case switchOn(LidAwakeLimit, floor: Int, readings: LidAwakeReadings, ruleInstalled: Bool)
         case switchOff
-        /// The power source changed.
-        case power(onPower: Bool)
-        /// A moment to check the time limit (the timer fired).
-        case tick
+        /// A moment to look again: the timer fired, the power source or the heat changed.
+        case check(LidAwakeReadings)
         case quit
         /// pmset didn't run: back to off without running anything.
         case failed
     }
 
-    public enum Reason: String, Equatable, Sendable { case user, unplugged, timeUp, quit }
+    public enum Reason: String, Equatable, Sendable { case user, timeUp, batteryLow, tooHot, quit }
 
     public enum Action: Equatable, Sendable {
         case none
-        /// Not on the power adapter: say so, change nothing.
-        case needsPower
+        /// Not switched on (`batteryLow` or `tooHot`): say why, change nothing.
+        case refused(Reason)
         /// Ask for the password once and install the rule, then send `switchOn` again.
         case installRule
         /// Run `pmset -a disablesleep 1`, then write the marker.
@@ -57,8 +85,13 @@ public struct LidAwake: Equatable, Sendable {
     }
 
     public private(set) var state: State = .off
+    /// The charge it stops at on battery, set with each switch-on.
+    public private(set) var floor = LidAwake.defaultFloor
 
-    public init(state: State = .off) { self.state = state }
+    public init(state: State = .off, floor: Int = LidAwake.defaultFloor) {
+        self.state = state
+        self.floor = floor
+    }
 
     public var isOn: Bool { state != .off }
 
@@ -69,18 +102,19 @@ public struct LidAwake: Equatable, Sendable {
 
     public mutating func handle(_ event: Event, now: Date) -> Action {
         switch event {
-        case .switchOn(let limit, let onPower, let ruleInstalled):
-            guard onPower else { return .needsPower }
+        case .switchOn(let limit, let floor, let readings, let ruleInstalled):
+            // While on, a reason not to run ends it, as a check would.
+            if let reason = Self.refusal(floor: floor, readings) { return isOn ? turnOff(reason) : .refused(reason) }
             guard ruleInstalled else { return .installRule }
             let wasOn = isOn
+            self.floor = floor
             state = .on(since: now, until: limit.duration.map { now.addingTimeInterval($0) })
             // Another time while on only moves the end; pmset already runs.
             return wasOn ? .none : .enable
         case .switchOff:
             return turnOff(.user)
-        case .power(let onPower):
-            return onPower ? .none : turnOff(.unplugged)
-        case .tick:
+        case .check(let readings):
+            if let reason = Self.refusal(floor: floor, readings) { return turnOff(reason) }
             guard let until, now >= until else { return .none }
             return turnOff(.timeUp)
         case .quit:
@@ -95,6 +129,14 @@ public struct LidAwake: Equatable, Sendable {
         guard isOn else { return .none }
         state = .off
         return .disable(reason)
+    }
+
+    /// Why it may not run now, nil when it may: too hot first, then on battery a charge at or
+    /// under the floor (switching on right at the floor would only end it at once).
+    public static func refusal(floor: Int, _ readings: LidAwakeReadings) -> Reason? {
+        if readings.tooHot { return .tooHot }
+        if let percent = readings.batteryPercent, percent <= floor { return .batteryLow }
+        return nil
     }
 
     /// Seconds until the limit, nil without one (or while off).
@@ -183,6 +225,26 @@ public enum LidAwakeCommands {
         var message = text.range(of: "execution error: ").map { String(text[$0.upperBound...]) } ?? text
         if let code = message.range(of: #" \(-?\d+\)$"#, options: .regularExpression) { message.removeSubrange(code) }
         return message.isEmpty ? unknownFailure : message
+    }
+
+    /// `/bin/sh` arguments for the watchdog that brings sleep back when Starnotch is gone without
+    /// switching it on again (a crash, a forced quit). In the background, so the shell returns at
+    /// once, it waits while the process `pid` runs and the marker exists. When the marker still
+    /// holds that pid, it runs `disablesleep 0`, removes the marker and, when the lid is closed and
+    /// closing it would put the Mac to sleep (no external display on power), sleeps the Mac.
+    /// A quit or a switch-off removes the marker first, so the watchdog then does nothing.
+    public static func watchdogArguments(pid: Int32, marker: String) -> [String] {
+        let restore = ([sudo] + sudoArguments(false)).joined(separator: " ")
+        let script = """
+        (while /bin/kill -0 "$1" 2>/dev/null && [ -f "$2" ]; do /bin/sleep 5; done
+        [ "$(/bin/cat "$2" 2>/dev/null)" = "$1" ] || exit 0
+        \(restore) || exit 0
+        /bin/rm -f "$2"
+        s=$(/usr/sbin/ioreg -r -k AppleClamshellState -d 1)
+        case "$s" in *'"AppleClamshellState" = Yes'*) case "$s" in *'"AppleClamshellCausesSleep" = Yes'*) \(pmset) sleepnow ;; esac ;; esac
+        ) >/dev/null 2>&1 &
+        """
+        return ["-c", script, "sh", String(pid), marker]
     }
 
     /// `SleepDisabled` from `pmset -g`; nil when the line is missing.

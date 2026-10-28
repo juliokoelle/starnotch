@@ -35,7 +35,7 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 | ✅ | File shelf | Tools module: drop in the panel, drag out, AirDrop; drop on the closed notch next |
 | ✅ | Image converter | Shelf: PNG, JPEG, HEIC, TIFF next to the original |
 | ✅ | Sound | Output device switch and volume (with music); per-app volume later |
-| ✅ | Quick toggles | System tab: keep awake (on laptops also with the lid closed, 1 h, 3 h or until unplugged), dark mode, hide desktop icons |
+| ✅ | Quick toggles | System tab: keep awake (on laptops also with the lid closed, on power or on battery, 1 h, 3 h or until switched off), dark mode, hide desktop icons |
 | ✅ | System monitor | CPU, GPU, memory and network speed, top apps by CPU or memory |
 | 🔧 | Reminders in the notch | Shown in Today; tick off and create from quick capture next |
 

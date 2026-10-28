@@ -398,7 +398,7 @@ final class PreviewDirector {
             return
         }
         if name.hasPrefix("lid-awake") {
-            // lid-awake | lid-awake:unplugged | :offer | :picker | :battery | :compact | :peek
+            // lid-awake | lid-awake:until-off | :offer | :picker | :battery | :compact | :peek
             // | :agents (compact while agents work and a loop failed: the lid keeps the ears)
             let parts = name.split(separator: ":").map(String.init)
             let state = parts.count > 1 ? parts[1] : "on"
@@ -418,7 +418,7 @@ final class PreviewDirector {
             switch state {
             case "offer": system?.usePreviewLid(.off)
             case "picker", "battery": system?.usePreviewLid(.off, picker: true)
-            case "unplugged": system?.usePreviewLid(.on(since: since, until: nil))
+            case "until-off": system?.usePreviewLid(.on(since: since, until: nil))
             default: system?.usePreviewLid(.on(since: since, until: since.addingTimeInterval(3 * 3600)))
             }
             Task {

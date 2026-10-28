@@ -63,6 +63,21 @@ final class AskTara {
     @ObservationIgnored private var previewing = false
     /// The picture sent with the pending question, deleted once it's answered.
     @ObservationIgnored private var sentImage: URL?
+    /// The recognizer's words still count: from the start of listening until its final result, or
+    /// a short wait after the microphone stops (the last words arrive after it).
+    @ObservationIgnored private var collectingSpeech = false
+    /// Counts listening sessions, so a late result or deadline of an earlier one changes nothing.
+    @ObservationIgnored private var speechSession = 0
+    /// The question goes out once the last words are in.
+    @ObservationIgnored private var sendAfterSpeech = false
+    /// Listening was asked for and not called off while macOS asks for permission.
+    @ObservationIgnored private var listenWanted = false
+    /// `--sample-data` and `--preview`: the demo meetings instead of the user's, no captures or
+    /// connectors, and no permission prompts.
+    @ObservationIgnored private let demo: Bool
+
+    /// Where window pictures are written; the brain folder, next to Claude Code's prompt files.
+    private static var shotFolder: URL { Brand.supportFolder.appending(path: "brain") }
 
     /// The agent ends this long after the last question, so the next one within it is quick.
     private static let idleLife: Duration = .seconds(300)
@@ -77,6 +92,11 @@ final class AskTara {
     }
 
     var isListening: Bool { phase == .listening }
+
+    init(demo: Bool = false) {
+        self.demo = demo
+        AskWindowShot.removeLeftovers(in: Self.shotFolder)  // a crash or force quit left them
+    }
 
     /// Tara's face while the bubble is open.
     var mood: AvatarMood? {
@@ -110,7 +130,7 @@ final class AskTara {
     func close() {
         guard isOpen else { return }
         holdTask?.cancel()
-        speech.cancel()
+        cancelSpeech()
         timeout?.cancel()
         pending = nil
         withAnimation(Theme.reduceMotion ? nil : Theme.close) {
@@ -145,9 +165,11 @@ final class AskTara {
 
     /// The app quits.
     func shutdown() {
-        speech.cancel()
+        cancelSpeech()
         process?.terminate()
         process = nil
+        removeAttachment()
+        removeSentImage()
     }
 
     // MARK: ⌃⌥T
@@ -180,25 +202,39 @@ final class AskTara {
 
     func startListening() {
         guard !isListening, !isThinking else { return }
-        if AskSpeech.isDenied {
+        // Sample data never brings up a permission prompt (a recorded demo); speaking works if it's allowed.
+        if AskSpeech.isDenied || (demo && !AskSpeech.isAuthorized) {
             fail("Tara needs speech recognition and the microphone: System Settings › Privacy & Security")
             return
         }
+        listenWanted = true
         AskSpeech.authorize { [weak self] granted in
-            guard let self, self.isOpen else { return }
+            // The keys let go while macOS asked: no listening without them.
+            guard let self, self.isOpen, self.listenWanted else { return }
+            self.listenWanted = false
             guard granted else {
                 self.fail("Tara needs speech recognition and the microphone: System Settings › Privacy & Security")
                 return
             }
             self.typedBeforeSpeaking = self.text.trimmingCharacters(in: .whitespaces)
+            self.speechSession += 1
+            let session = self.speechSession
+            self.collectingSpeech = true
+            self.sendAfterSpeech = false
             let started = self.speech.start(onText: { [weak self] words in
-                guard let self, self.isListening else { return }
+                guard let self, self.collectingSpeech, self.speechSession == session else { return }
                 self.text = self.typedBeforeSpeaking.isEmpty ? words : self.typedBeforeSpeaking + " " + words
             }, onEnd: { [weak self] in
-                guard let self, self.isListening else { return }
-                self.stopListening(andSend: false)
+                // The final result (it came through onText just before) or an error.
+                guard let self, self.speechSession == session else { return }
+                if self.isListening {
+                    self.speech.stop()
+                    withAnimation(Theme.snappy) { self.phase = self.answer == nil ? .idle : .answered }
+                }
+                self.finishSpeech(session)
             })
             guard started else {
+                self.collectingSpeech = false
                 self.fail("Speech recognition isn't available for this language right now")
                 return
             }
@@ -208,23 +244,44 @@ final class AskTara {
     }
 
     func stopListening(andSend send: Bool) {
+        listenWanted = false
         let wasListening = isListening
         speech.stop()
         if wasListening { withAnimation(Theme.snappy) { phase = answer == nil ? .idle : .answered } }
         guard send else { return }
-        // The last words arrive a moment after the microphone stops.
+        guard collectingSpeech else { return self.send() }
+        // The last words and the recognizer's corrected text arrive a moment after the microphone
+        // stops: the question goes with its final result, or after a short wait at most.
+        sendAfterSpeech = true
+        let session = speechSession
         Task { [weak self] in
-            if wasListening { try? await Task.sleep(for: .milliseconds(450)) }
-            self?.send()
+            try? await Task.sleep(for: .milliseconds(450))
+            self?.finishSpeech(session)
         }
+    }
+
+    private func finishSpeech(_ session: Int) {
+        guard session == speechSession, collectingSpeech else { return }
+        collectingSpeech = false
+        guard sendAfterSpeech else { return }
+        sendAfterSpeech = false
+        send()
+    }
+
+    private func cancelSpeech() {
+        listenWanted = false
+        collectingSpeech = false
+        sendAfterSpeech = false
+        speech.cancel()
     }
 
     // MARK: Asking
 
     func send() {
+        // Return while speaking: the question goes once the last words are in.
+        if isListening || collectingSpeech { return stopListening(andSend: true) }
         let question = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty, !isThinking else { return }
-        if isListening { speech.stop() }
         if previewing { return }
         guard startAgent(), let process else { return }
         nextID += 1
@@ -256,8 +313,10 @@ final class AskTara {
     /// with the next question. Only then, so moving her around never takes pictures.
     func droppedOnWindow(at point: CGPoint) {
         guard isOpen, !isThinking, !capturing, !previewing, let target = AskWindowShot.window(at: point) else { return }
+        // The rules can't see pictures; sample data never brings up the Screen Recording prompt.
+        guard MeetingAgentSetup.brain != .rules, !demo || CGPreflightScreenCaptureAccess() else { return }
         withAnimation(Theme.snappy) { capturing = true }
-        let folder = Brand.supportFolder.appending(path: "brain")
+        let folder = Self.shotFolder
         Task { [weak self] in
             do {
                 let url = try await AskWindowShot.capture(target, into: folder)
@@ -309,7 +368,7 @@ final class AskTara {
     private func fail(_ message: String) {
         timeout?.cancel()
         removeSentImage()
-        speech.cancel()
+        cancelSpeech()
         withAnimation(Theme.snappy) { phase = .failed(Localization.string(message)) }
     }
 
@@ -331,7 +390,11 @@ final class AskTara {
         try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
         generation += 1
         let current = generation
-        process = MeetingProcess(command: "exec uv run python agent.py", directory: directory, log: log, onLine: { [weak self] line in
+        offlineReason = nil  // a new agent says again whether Claude is reachable
+        // Sample data: the demo meetings, as the meeting module's demo, and none of the user's own material.
+        let command = demo ? "exec uv run python agent.py --memory demo/meetings --today 2026-10-26 --captures '' --connectors ''"
+                           : "exec uv run python agent.py"
+        process = MeetingProcess(command: command, directory: directory, log: log, onLine: { [weak self] line in
             Task { @MainActor in self?.received(line) }
         }, onExit: { [weak self] in
             Task { @MainActor in self?.agentEnded(current) }
@@ -372,6 +435,7 @@ final class AskTara {
             pending = nil
             timeout?.cancel()
             removeSentImage()
+            if !answer.onRules { offlineReason = nil }  // Claude answered: it's reachable again
             conversation.append(question: answer.question, answer: answer.text)
             Haptics.tick()
             withAnimation(Theme.snappy) {
@@ -398,7 +462,8 @@ final class AskTara {
 
     /// `--preview ask-empty | ask-typed | ask-listening | ask-thinking | ask-answer | ask-long | ask-rules | ask-window | ask-failed`
     /// show made-up states.
-    /// `ask-send:<question>` is live: the real agent and brain answer it (for recordings and checks).
+    /// `ask-send:<question>` is live: the real agent and brain answer it from the demo meetings (for
+    /// recordings and checks).
     func preview(_ name: String) {
         if name.hasPrefix("ask-send:") {
             Task { [weak self] in

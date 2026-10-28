@@ -34,6 +34,17 @@ enum AskWindowShot {
 
     enum Failure: Error { case noPermission, gone, unwritable }
 
+    /// Not the agent's `starnotch-image-*`: its sweep would delete a picture still attached.
+    static let prefix = "starnotch-window-"
+
+    /// Deletes pictures a crash or force quit left behind (also those of builds that used the agent's prefix).
+    static func removeLeftovers(in folder: URL) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        for name in names where name.hasPrefix(prefix) || name.hasPrefix("starnotch-image-window-") {
+            try? FileManager.default.removeItem(at: folder.appending(path: name))
+        }
+    }
+
     /// A JPEG of the window (at most 1600 px on its long side) in `folder`; the caller deletes it.
     nonisolated static func capture(_ target: Target, into folder: URL) async throws -> URL {
         let content: SCShareableContent
@@ -52,7 +63,7 @@ enum AskWindowShot {
         let image = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: window),
                                                                configuration: config)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appending(path: "starnotch-image-window-\(UUID().uuidString).jpg")
+        let url = folder.appending(path: "\(prefix)\(UUID().uuidString).jpg")
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw Failure.unwritable
         }

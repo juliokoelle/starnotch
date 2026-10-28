@@ -30,6 +30,11 @@ final class AskSpeech {
         }
     }
 
+    /// Both already allowed, so starting asks nothing.
+    static var isAuthorized: Bool {
+        SFSpeechRecognizer.authorizationStatus() == .authorized && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+    }
+
     static var isDenied: Bool {
         SFSpeechRecognizer.authorizationStatus() == .denied || AVCaptureDevice.authorizationStatus(for: .audio) == .denied
     }

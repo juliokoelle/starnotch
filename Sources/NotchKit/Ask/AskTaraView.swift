@@ -219,7 +219,8 @@ private struct Thinking: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 20, paused: reduceMotion)) { context in
+        // With Reduce Motion the dots stand still, and the seconds still count.
+        TimelineView(.periodic(from: since, by: reduceMotion ? 1 : 1 / 20)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             let elapsed = Int(context.date.timeIntervalSince(since))
             HStack(spacing: 8) {

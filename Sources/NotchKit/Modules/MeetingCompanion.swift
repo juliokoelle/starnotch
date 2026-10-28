@@ -131,11 +131,15 @@ final class MeetingCompanion: NSObject {
     func hideAsk() {
         guard let panel else { return }
         panel.acceptsKey = false
-        panel.resignKey()
         if outForAsk {
             outForAsk = false
             close()
             return
+        }
+        // resignKey() only notifies; out and back in hands the keyboard back to the app in front.
+        if panel.isKeyWindow {
+            panel.orderOut(nil)
+            panel.orderFrontRegardless()
         }
         if let origin = originBeforeAsk {
             panel.setFrame(CGRect(origin: origin, size: Self.size), display: true)

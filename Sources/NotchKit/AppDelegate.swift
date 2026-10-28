@@ -190,8 +190,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agents.onFigurePull = pull
         meeting.onListening = { companion.listening = $0 }
         // MARK: Ask Tara (strand ask): ⌃⌥T (see applyAskTara) or a click on the floating Tara opens
-        // a question bubble beside her; the answer comes from an agent.py of its own.
-        let ask = AskTara()
+        // a question bubble beside her; the answer comes from an agent.py of its own (on the demo
+        // meetings with sample data or a preview).
+        let ask = AskTara(demo: sample)
         self.ask = ask
         companion.ask = ask
         ask.onOpen = { companion.showAsk() }

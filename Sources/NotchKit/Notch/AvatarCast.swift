@@ -374,16 +374,16 @@ struct AvatarView: View {
     var level: PerformanceLevel?
     /// Previews: draw this state, whatever the mood.
     var forcedState: String?
-    /// Music plays: headphones on (drawn when the pack has no listening picture of its own).
-    var headphones = false
+    /// Music plays: a small note beside the figure (when the pack has no listening picture of its own).
+    var musicNote = false
 
     @State private var phase: CGFloat
     @State private var tilt: Double = 0
 
     init(character: String, mood: AvatarMood, height: CGFloat, colorway: Colorway = Colorway(),
          sink: CGFloat = 0, emerged: Bool = true, emergeOnAppear: Bool = true, alive: Bool = true,
-         level: PerformanceLevel? = nil, forcedState: String? = nil, headphones: Bool = false) {
-        self.headphones = headphones
+         level: PerformanceLevel? = nil, forcedState: String? = nil, musicNote: Bool = false) {
+        self.musicNote = musicNote
         self.level = level
         self.forcedState = forcedState
         self.character = character
@@ -420,7 +420,7 @@ struct AvatarView: View {
                 SpriteLayerView(image: image, colorway: colorway, mood: mood, alive: alive,
                                 glow: glow, highlight: library.character(character)?.finish?.highlight ?? 0)
                     .aspectRatio(image.size.width / max(1, image.size.height), contentMode: .fit)
-                    .overlay { if drawsHeadphones { Headphones() } }
+                    .overlay(alignment: .topTrailing) { if drawsNote { MusicNote() } }
                     .frame(height: height, alignment: .bottom)
                     // One view for every state: the sprite layer cross-fades between pictures.
             }
@@ -467,12 +467,13 @@ struct AvatarView: View {
 
     static let maxAspect: CGFloat = 1.6
 
-    /// Asked for (`headphones`, only while music plays), and the pack maps its listening states
-    /// to a plain face (the bundled star has no headphones picture): the headphones are drawn on.
+    /// Asked for (`musicNote`, only while music plays), and the pack maps its listening states
+    /// to a plain face (the bundled star has no music picture): a note is drawn beside it.
     /// Characters with their own listening pictures, and those without any listening state, are
-    /// left alone.
-    private var drawsHeadphones: Bool {
-        guard headphones, forcedState == nil, let character = library.character(character) else { return false }
+    /// left alone, and so are figures in an ear at rest: there the note would be cut off (the cover
+    /// in the other ear shows the music).
+    private var drawsNote: Bool {
+        guard musicNote, forcedState == nil, height >= 28, let character = library.character(character) else { return false }
         let listening = ["voice_listening", "music_playback", "music"].compactMap { character.states[$0]?.file }
         let plain = Set(["happy", "idle"].compactMap { character.states[$0]?.file })
         return !listening.isEmpty && listening.allSatisfy(plain.contains)
@@ -516,29 +517,16 @@ struct AvatarView: View {
     }
 }
 
-/// Headphones over the star's face: a band over the top of the face and a cup at each side, in
-/// the figure's own proportions, so they move, tilt and squash with it.
-private struct Headphones: View {
+/// A small note beside the figure while music plays, at its upper corner and outside the face, in
+/// the figure's own proportions, so it moves and tilts with it.
+private struct MusicNote: View {
     var body: some View {
         GeometryReader { proxy in
-            let w = proxy.size.width, h = proxy.size.height
-            let line = max(1, h * 0.045)
-            ZStack {
-                Path { path in
-                    path.move(to: CGPoint(x: w * 0.31, y: h * 0.53))
-                    path.addCurve(to: CGPoint(x: w * 0.69, y: h * 0.53),
-                                  control1: CGPoint(x: w * 0.31, y: h * 0.30),
-                                  control2: CGPoint(x: w * 0.69, y: h * 0.30))
-                }
-                .stroke(Theme.textBody, style: StrokeStyle(lineWidth: line, lineCap: .round))
-                ForEach([0.30, 0.70], id: \.self) { x in
-                    RoundedRectangle(cornerRadius: w * 0.04, style: .continuous)
-                        .fill(Theme.textPrimary)
-                        .frame(width: w * 0.085, height: h * 0.16)
-                        .shadow(color: .black.opacity(0.35), radius: line)
-                        .position(x: w * x, y: h * 0.57)
-                }
-            }
+            let size = min(16, max(8, proxy.size.height * 0.22))  // a hint, never a second figure
+            Image(systemName: "music.note")
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .position(x: proxy.size.width + size * 0.15, y: size * 0.35)
         }
         .allowsHitTesting(false)
     }

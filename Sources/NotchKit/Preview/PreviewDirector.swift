@@ -433,7 +433,7 @@ final class PreviewDirector {
         }
         if name == "music-agents" || name == "crowded-sneak" {
             // music-agents: agents working and waiting while music plays, ears as by default: the
-            // agents' figure wears the headphones. crowded-sneak: a status item right beside the
+            // agents' figure gets the note. crowded-sneak: a status item right beside the
             // notch on the left; a sneak stays out of it and drops its right ear.
             agents.usePreview(Self.snapshot(agentsActive: true))
             music.start()
@@ -451,7 +451,7 @@ final class PreviewDirector {
             return
         }
         if name == "music-compact" || name == "music-peek" || name == "ears-crowded" || name == "sizes" {
-            // music-compact | music-peek: Tara with headphones in the leading ear, the cover in the
+            // music-compact | music-peek: Tara with her note in the leading ear, the cover in the
             // trailing one. ears-crowded: agents' ears with a long status item right beside the
             // notch on the left (as macOS places one when the right side is full): no ears there.
             // sizes: the large Calendar panel, then the compact Music panel, then back.

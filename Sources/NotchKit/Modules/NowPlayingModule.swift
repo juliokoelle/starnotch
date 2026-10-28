@@ -357,7 +357,7 @@ final class NowPlayingModule: NotchModule {
         return true
     }
 
-    /// Tara listens along with her headphones on; she stays the handle to pull out of the notch.
+    /// Tara listens along with a note beside her; she stays the handle to pull out of the notch.
     func leadingEar(peek: Bool) -> AnyView {
         guard track != nil else { return AnyView(EmptyView()) }
         return AnyView(MusicEarFigure(module: self, peek: peek))
@@ -378,7 +378,7 @@ final class NowPlayingModule: NotchModule {
     /// progress. No artist, no other controls.
     func peekLine() -> AnyView {
         AnyView(HStack(alignment: .bottom, spacing: 10) {
-            // Tara moves down from the ear into the line, bigger, headphones on.
+            // Tara moves down from the ear into the line, bigger, with her note.
             if track != nil {
                 MusicFigure(module: self, height: 34)
                     .frame(width: 38, height: 38, alignment: .bottom)
@@ -436,7 +436,7 @@ final class NowPlayingModule: NotchModule {
     func primaryAction() { togglePlay() }
 }
 
-/// Tara in the leading ear while music plays, headphones on; in the peek she sits in the line.
+/// Tara in the leading ear while music plays, a note beside her; in the peek she sits in the line.
 private struct MusicEarFigure: View {
     let module: NowPlayingModule
     let peek: Bool
@@ -474,7 +474,7 @@ private struct MusicFigure: View {
     var body: some View {
         AvatarView(character: module.cast.main, mood: module.isPlaying ? .music : .idle,
                    height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: false,
-                   headphones: module.isPlaying)
+                   musicNote: module.isPlaying)
             .handleSquash()
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)

@@ -103,7 +103,7 @@ extension EnvironmentValues {
         set { self[IslandPeekKey.self] = newValue }
     }
 
-    /// Music plays: the main character wears headphones in whichever ear shows it.
+    /// Music plays: the main character gets a note beside it in whichever ear shows it.
     var musicPlaying: Bool {
         get { self[MusicPlayingKey.self] }
         set { self[MusicPlayingKey.self] = newValue }

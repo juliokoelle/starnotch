@@ -126,7 +126,7 @@ extension View {
     func handleSquash() -> some View { modifier(HandleSquash()) }
 }
 
-/// The main character in an ear: the island's handle (squashes with its press), headphones on
+/// The main character in an ear: the island's handle (squashes with its press), a note beside it
 /// while music plays.
 struct EarFigure: View {
     let cast: AvatarCast
@@ -137,7 +137,7 @@ struct EarFigure: View {
 
     var body: some View {
         AvatarView(character: cast.main, mood: mood, height: height, colorway: cast.colorway, sink: sink,
-                   headphones: musicPlaying)
+                   musicNote: musicPlaying)
             .handleSquash()
     }
 }

@@ -817,11 +817,11 @@ private struct MainFigure: View {
             let character = module.character(of: main)
             AvatarView(character: character, mood: module.avatarMood(of: main), height: height,
                        colorway: module.colorway(of: main), sink: sink, emergeOnAppear: emergeOnAppear,
-                       level: module.variantLevel(of: main), headphones: musicPlaying)
+                       level: module.variantLevel(of: main), musicNote: musicPlaying)
         } else {
             AvatarView(character: module.cast.main, mood: module.failedLoops.isEmpty ? .idle : .failed,
                        height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: emergeOnAppear,
-                       headphones: musicPlaying)
+                       musicNote: musicPlaying)
         }
     }
 }

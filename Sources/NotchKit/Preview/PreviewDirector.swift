@@ -343,7 +343,7 @@ final class PreviewDirector {
             Task {
                 await pause(0.8)
                 switch state {
-                case "compact": break
+                case "compact", "agents": break
                 case "peek": notch.tourPeek()
                 default: notch.expand(.system, pinned: true)
                 }
@@ -367,14 +367,18 @@ final class PreviewDirector {
         }
         if name.hasPrefix("lid-awake") {
             // lid-awake | lid-awake:unplugged | :offer | :picker | :battery | :compact | :peek
+            // | :agents (compact while agents work and a loop failed: the lid keeps the ears)
             let parts = name.split(separator: ":").map(String.init)
             let state = parts.count > 1 ? parts[1] : "on"
             useSystemSample(tight: false)
-            // Nothing waiting and no failed loop: the first tab would keep the ears at rest.
-            var snapshot = Self.snapshot(agentsActive: false)
-            snapshot.agents = []
-            snapshot.loops = []
-            agents.usePreview(snapshot)
+            if state == "agents" {
+                agents.usePreview(Self.snapshot(agentsActive: true))
+            } else {
+                var snapshot = Self.snapshot(agentsActive: false)
+                snapshot.agents = []
+                snapshot.loops = []
+                agents.usePreview(snapshot)
+            }
             let plugged = state != "battery"
             system?.battery = BatteryState(percent: plugged ? 82 : 64, charging: plugged, pluggedIn: plugged, minutesLeft: plugged ? 35 : 240)
             system?.keepAwake = true
@@ -388,7 +392,7 @@ final class PreviewDirector {
             Task {
                 await pause(0.8)
                 switch state {
-                case "compact": break
+                case "compact", "agents": break
                 case "peek": notch.tourPeek()
                 default: notch.expand(.system, pinned: true)
                 }

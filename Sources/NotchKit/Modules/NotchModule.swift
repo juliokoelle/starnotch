@@ -41,6 +41,10 @@ protocol NotchModule: AnyObject {
     /// Something here needs the user (waiting for them, a failure, a meeting about to start,
     /// dictation listening): only then do the ears show at rest by default.
     var needsAttention: Bool { get }
+    /// A state the user must see for as long as it lasts (the Mac awake with the lid closed): it
+    /// takes the ears at rest and in the peek over the first tab and over the ears setting, and
+    /// yields only to something urgent (`NotchModel.urgentPriority`).
+    var holdsEars: Bool { get }
 }
 
 extension NotchModule {
@@ -52,6 +56,7 @@ extension NotchModule {
     func handleKey(_ press: KeyPress) -> Bool { false }
     var holdsOpen: Bool { false }
     var needsAttention: Bool { false }
+    var holdsEars: Bool { false }
 }
 
 /// Shared between the shell and modules: the namespace for figures that travel between the

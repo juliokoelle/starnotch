@@ -221,6 +221,9 @@ final class SystemModule: NotchModule {
 
     var lidAwakeOn: Bool { lidAwake != .off }
 
+    /// The lid state stays in the ears while it lasts, also when agents work in the first tab.
+    var holdsEars: Bool { lidAwakeOn }
+
     /// Laptops only (a battery means a lid); shown as keep awake's second level.
     var offersLidAwake: Bool { battery != nil && (keepAwake || lidAwakeOn) }
 

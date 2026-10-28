@@ -68,11 +68,23 @@ final class NotchModel {
 
     /// The module whose ears show; at rest by default only one that needs the user.
     var ambient: NotchModule? {
+        if let held { return held }
         let pool = interaction == .rest && earsMode != .always ? active.filter(\.needsAttention) : active
         // At rest the first tab is the one in focus: it shows whenever it has something, even
         // when another module calls louder.
         if interaction == .rest, !pool.isEmpty, let first = modules.first, first.ambientPriority > 0 { return first }
         return pool.max { $0.ambientPriority < $1.ambientPriority }
+    }
+
+    /// From this priority on a module that needs the user beats one that holds the ears: a
+    /// meeting about to start or recording, dictation listening.
+    static let urgentPriority = 30
+
+    /// A module that holds the ears (`holdsEars`), unless something urgent needs the user.
+    private var held: NotchModule? {
+        guard interaction == .rest || interaction == .peek, let held = modules.first(where: \.holdsEars) else { return nil }
+        let urgent = active.contains { $0 !== held && $0.needsAttention && $0.ambientPriority >= Self.urgentPriority }
+        return urgent ? nil : held
     }
 
     /// The module whose ears and peek line show while not expanded.
@@ -84,7 +96,7 @@ final class NotchModel {
         switch interaction {
         case .rest:
             sneak != nil ? .sneak
-                : Quiet.showsEars(ambientLevel, mode: earsMode, watching: watching) && ambient != nil ? .compact : .closed
+                : ambient != nil && (held != nil && !watching || Quiet.showsEars(ambientLevel, mode: earsMode, watching: watching)) ? .compact : .closed
         case .peek: .peek
         case .expanded: .expanded
         case .capture: .capture

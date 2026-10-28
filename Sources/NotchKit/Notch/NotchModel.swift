@@ -137,6 +137,9 @@ struct NotchLayout: Equatable {
     static let panelHeight: CGFloat = PanelSize.large.height
     /// An ear narrower than this shows nothing rather than a sliver of a figure.
     static let minEarWidth: CGFloat = 14
+    /// Ears without room in the menu bar: the island dips this far below the notch instead, with
+    /// a small mark, so something waiting still shows at rest.
+    static let cueDip: CGFloat = 6
     /// Compact ears stay inside the gap between the hardware notch and the first menu extra
     /// (about 30 pt on a 14" MacBook Pro: measured 21.10.); with the 6 pt flare, 24 pt fits.
     static let earWidth: CGFloat = 24
@@ -181,7 +184,9 @@ struct NotchLayout: Equatable {
         switch presentation {
         case .closed: notch.width
         case .compact: notch.width + 2 * compactEarWidth
-        case .peek, .sneak: notch.width + 2 * besideNotch
+        case .peek: notch.width + 2 * besideNotch
+        // A sneak is unasked for: like the ears it stays out of the icons beside the notch.
+        case .sneak: notch.width + 2 * min(besideNotch, earRoom)
         // The straight sides are what runs through the icons; the flares only touch the top rows.
         case .expanded:
             MenuBarFit.width(preferred: panel.width, in: panel.widthRange, items: menuBarItems)
@@ -193,18 +198,27 @@ struct NotchLayout: Equatable {
     /// Room for content beside the notch: the menu bar room minus the curved corner.
     var besideNotch: CGFloat { max(0, menuBarRoom - topRadius) }
 
-    /// Each ear at rest: as wide as the module asks, within the menu bar room, and never over an
-    /// icon that sits closer to the notch (macOS puts a long status item right beside it when the
-    /// right side is full). Too little room hides the ears; the peek line still has it all.
+    /// Room beside the notch, per side, that covers no menu bar icon: the menu bar room, less
+    /// where an icon sits closer to the notch (macOS puts a long status item right beside it when
+    /// the right side is full), minus the curved corner.
+    var earRoom: CGFloat {
+        max(0, MenuBarFit.earRoom(halfNotch: notch.width / 2, limit: menuBarRoom, items: menuBarItems) - topRadius)
+    }
+
+    /// Each ear at rest: as wide as the module asks, within `earRoom`. Too little room hides the
+    /// ears (the island shows `cueDip` instead); the peek line still has it all.
     var compactEarWidth: CGFloat {
-        let room = MenuBarFit.earRoom(halfNotch: notch.width / 2, limit: menuBarRoom, items: menuBarItems) - topRadius
-        let width = min(earWidth, room)
+        let width = min(earWidth, earRoom)
         return width < Self.minEarWidth ? 0 : width
     }
 
+    /// Compact without room for ears: the island shows the dip with its mark.
+    var showsCue: Bool { presentation == .compact && compactEarWidth == 0 }
+
     var height: CGFloat {
         switch presentation {
-        case .closed, .compact: notch.height
+        case .closed: notch.height
+        case .compact: showsCue ? notch.height + Self.cueDip : notch.height
         case .peek: notch.height + 40
         case .sneak: notch.height + 36
         case .expanded: notch.height + Self.bodyTop + min(bodyHeight, panel.height) + Self.bodyBottom

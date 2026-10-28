@@ -75,8 +75,9 @@ struct NotchRootView: View {
                         // The sneak line carries the figure; the left ear stays empty meanwhile.
                         Color.clear.frame(maxWidth: .infinity)
                         Color.clear.frame(width: notch.width)
-                        // Watch mode: the breakthrough line alone, no ear beside it.
-                        if model.watching {
+                        // Watch mode: the breakthrough line alone, no ear beside it; nor where an
+                        // icon sits next to the notch.
+                        if model.watching || layout.earRoom < NotchLayout.minEarWidth {
                             Color.clear.frame(maxWidth: .infinity)
                         } else {
                             model.earModule.trailingEar(peek: false).frame(maxWidth: .infinity)
@@ -93,6 +94,14 @@ struct NotchRootView: View {
                 }
                 .padding(.horizontal, layout.topRadius)
                 .transition(.blurSlide(scale: 0.9))
+            case .compact where layout.showsCue:
+                // No room for ears beside the notch: a short mark under it instead.
+                Capsule()
+                    .fill(model.earModule.needsAttention ? Theme.waiting : Theme.textSecondary)
+                    .frame(width: 18, height: 3)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 2)
+                    .transition(.opacity)
             case .compact, .peek:
                 let ears = model.earModule
                 let isPeek = layout.presentation == .peek

@@ -113,6 +113,7 @@ final class NotchController {
         panel.contentView = hosting
         menuBar.onChange = { [weak self] in self?.fitToMenuBar() }
         place()
+        watchEars()
         panel.orderFrontRegardless()
 
         NotificationCenter.default.addObserver(
@@ -181,6 +182,34 @@ final class NotchController {
             withAnimation(Theme.snappy) { model.menuBarItems = items }
         } else {
             model.menuBarItems = items
+        }
+    }
+
+    // MARK: Strand polish: menu bar icons that move while the island rests
+
+    private var earsWatch: Task<Void, Never>?
+
+    /// While the ears or a sneak show at rest, the icons beside the notch can change under them (a
+    /// status item appears, or its text grows, and macOS moves it next to the notch): re-read
+    /// where they sit when the ears appear and every 20 s while they stay (only the apps known to
+    /// have icons, about 10 ms off the main thread).
+    private func watchEars() {
+        let atRest = model.presentation == .compact || model.presentation == .sneak
+        if atRest, earsWatch == nil {
+            menuBar.refresh()
+            earsWatch = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(20))
+                    guard !Task.isCancelled else { return }
+                    self?.menuBar.refresh()
+                }
+            }
+        } else if !atRest {
+            earsWatch?.cancel()
+            earsWatch = nil
+        }
+        withObservationTracking { _ = model.presentation } onChange: { [weak self] in
+            Task { @MainActor in self?.watchEars() }
         }
     }
 

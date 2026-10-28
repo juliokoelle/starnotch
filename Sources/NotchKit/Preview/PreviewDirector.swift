@@ -11,6 +11,7 @@ import SwiftUI
 ///     --preview loops-strip | loops-timeline | loops-sneak
 ///     --preview quota | quota-warn
 ///     --preview music-compact | music-peek | ears-crowded | sizes
+///     --preview music-agents | crowded-sneak
 ///
 /// Nothing here runs without a flag. All names and titles are made up.
 @MainActor
@@ -20,7 +21,8 @@ final class PreviewDirector {
                         "loops-strip", "loops-timeline", "loops-sneak", "quota", "quota-warn",
                         "watch-peek", "watch-sneak", "watch-summary", "providers", "approval-codex", "extras", "media-compact", "media-peek", "limit-sneak", "shell-sneak",
                         "battery-sneak", "capture-event", "setup-consent", "setup-done",
-                        "music-compact", "music-peek", "ears-crowded", "sizes"]
+                        "music-compact", "music-peek", "ears-crowded", "sizes",
+                        "music-agents", "crowded-sneak"]
 
     let notch: NotchController
     let agents: AgentsModule
@@ -397,6 +399,25 @@ final class PreviewDirector {
                 case "compact", "agents": break
                 case "peek": notch.tourPeek()
                 default: notch.expand(.system, pinned: true)
+                }
+            }
+            return
+        }
+        if name == "music-agents" || name == "crowded-sneak" {
+            // music-agents: agents working and waiting while music plays, ears as by default: the
+            // agents' figure wears the headphones. crowded-sneak: a status item right beside the
+            // notch on the left; a sneak stays out of it and drops its right ear.
+            agents.usePreview(Self.snapshot(agentsActive: true))
+            music.start()
+            if name == "crowded-sneak" {
+                let half = notch.model.notchSize.width / 2
+                notch.simulatedMenuBarItems = [-(half + 262) ... -(half + 8), half + 180 ... half + 204]
+            }
+            Task {
+                await pause(1.0)
+                if name == "crowded-sneak" {
+                    notch.sneak(Sneak(visual: .symbol("checkmark.circle", tint: .ok), title: "npm run build",
+                                      detail: "2 m 14 s", duration: 30), key: "shell")
                 }
             }
             return

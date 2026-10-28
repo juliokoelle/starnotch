@@ -148,6 +148,17 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if Runtime.vault != nil {
+                Section {
+                    NotesSettings(state: state)
+                } header: {
+                    Text("Notes")
+                } footer: {
+                    Text("An Obsidian vault or any Markdown folder. Tasks are checkboxes (- [ ]) with an optional due date (📅 2026-10-28 or [due:: 2026-10-28]); ticking one off in the notch writes - [x] into its line. Tara reads your tasks and today's note on this Mac.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section {
                 LoopsLogSettings()
             } header: {

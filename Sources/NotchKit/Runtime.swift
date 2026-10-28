@@ -17,6 +17,11 @@ enum Runtime {
         let (user, error) = NotchConfig.load(from: configURL)
         if let error { Log.app.error("\(error.description, privacy: .public)") }
         config.merge(user)
+        // The notes vault's run log feeds the loops unless [connectors.runlog] names its own.
+        if config.connector(RunLogConnector.id).string("file") == nil,
+           let loops = VaultConnector(config: config.connector(VaultConnector.id)).loopsFile {
+            config.sections["connectors.\(RunLogConnector.id)", default: [:]]["file"] = .string(loops.path)
+        }
         self.config = config
         let enabled = config["connectors"].strings("enabled")
         connectors = types
@@ -25,7 +30,11 @@ enum Runtime {
         Log.app.info("Connectors: \(connectors.map { type(of: $0).id }.joined(separator: ", "), privacy: .public)")
     }
 
-    static func first<T>(_ type: T.Type) -> T? { connectors.lazy.compactMap { $0 as? T }.first }
+    /// The first connector offering `type` that is set up.
+    static func first<T>(_ type: T.Type) -> T? { connectors.lazy.filter(\.isConfigured).compactMap { $0 as? T }.first }
+
+    /// The notes connector, set up or not (Settings and onboarding pick its folder).
+    static var vault: VaultConnector? { connectors.lazy.compactMap { $0 as? VaultConnector }.first }
 
     static var today: (any TodayProvider)? { first((any TodayProvider).self) }
     static var jobs: (any JobsProvider)? { first((any JobsProvider).self) }
@@ -75,11 +84,14 @@ enum Runtime {
     /// Port of the local status API.
     static var apiPort: UInt16 { UInt16(clamping: config["api"].int("port", default: 47789)) }
 
-    /// Quick capture without an inbox connector appends here as Markdown tasks: `Inbox.md` in the
-    /// app's folder unless config.toml names another file; `""` keeps only the local queue.
+    /// Quick capture without an inbox connector appends here as Markdown tasks: the file config.toml
+    /// names (`""` keeps only the local queue), else the notes vault's inbox, else `Inbox.md` in
+    /// the app's folder.
     static var captureMarkdownFile: URL? {
         let section = config["capture"]
-        guard let raw = section.string("markdown_file") else { return Brand.supportFolder.appending(path: "Inbox.md") }
+        guard let raw = section.string("markdown_file") else {
+            return vault?.inboxFile ?? Brand.supportFolder.appending(path: "Inbox.md")
+        }
         return raw.trimmingCharacters(in: .whitespaces).isEmpty ? nil : section.path("markdown_file")
     }
 
@@ -146,6 +158,15 @@ enum ConfigTemplate {
     [connectors]
     # Connector ids to run; leave out to run every connector linked into this build.
     # enabled = []
+
+    # Your notes (an Obsidian vault or any Markdown folder); Settings › Notes picks the same.
+    # Paths are relative to the folder.
+    # [connectors.vault]
+    # folder = "~/notes"
+    # tasks = "Tasks.md"              # a file or a folder with "- [ ]" tasks
+    # daily = "Daily/YYYY-MM-DD.md"   # the daily note
+    # inbox = "Inbox.md"              # quick capture appends here
+    # loops = "loops/RUNLOG.md"       # the loops' run log
     """
 
     static func writeIfMissing(at url: URL) {

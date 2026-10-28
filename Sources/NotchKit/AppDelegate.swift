@@ -41,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shell: ShellMonitor?
     private let updater = Updater()
     private var approvals: ApprovalCenter?
+    /// Notes (vault strand): watches the notes folder, keeps Tara's snapshot and Today current.
+    private var vaultLive: VaultLive?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -61,13 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The agenda (day band, briefing) shows `CalendarModule`'s events; `CalendarModule` stays
         // the EventKit source (focus blocks, call links, reminder, ⌃⌥J).
         let samples: SampleConnector? = sample ? SampleConnector() : nil
-        let agendaPreview: AgendaPreview? = AgendaPreview.handles(options.preview) ? AgendaPreview() : nil
+        let agendaPreview: AgendaPreview? = AgendaPreview.handles(options.preview)
+            ? AgendaPreview(vault: options.preview?.contains("vault") == true) : nil
         self.agendaPreview = agendaPreview
         let people: (any PeopleProvider)? = samples ?? Runtime.people
         let agenda = agendaPreview?.agenda ?? AgendaModule(variant: .b, people: people, source: sample ? nil : calendar)
         // Today: the connector's list, Apple Reminders when switched on, or both.
         let reminders = RemindersSource()
-        reminders.base = Runtime.today
+        reminders.base = { Runtime.today }
         reminders.enabled = { [weak self] in self?.state.settings.remindersInToday ?? false }
         let todayProvider: (any TodayProvider)? = samples ?? reminders
         let today = agendaPreview?.today ?? todayProvider.map { TodayModule(provider: $0, agenda: agenda) }
@@ -83,6 +86,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ToolSwitches.set(.module(.meeting), on: true, in: &self.state.settings)
         }
         state.onBrainChanged = { [weak meeting] in meeting?.brainChanged() }
+        // MARK: Notes (vault strand)
+        // The notes folder is watched (no polling): a changed note rewrites Tara's snapshot and
+        // reloads Today; a folder picked in Settings makes Today available at once. Previews show
+        // a made-up vault and write nothing.
+        if preview { VaultSetup.preview = VaultSamples.connector(empty: !(options.preview ?? "").contains("notes")) }
+        if !sample, let vault = Runtime.vault {
+            let live = VaultLive(connector: vault)
+            live.onChange = { [weak today] in today?.reload() }
+            live.onReconfigure = { [weak self] in self?.state.onModulesChanged?() }
+            live.start()
+            vaultLive = live
+        }
+        // MARK: -
+
         let tools = ToolsModule()
         self.tools = tools
         allModules = [agents, agenda, music, system, dictation, meeting, tools]
@@ -314,6 +331,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agents.onLoopFinished = { [weak self] loop in self?.loopFinished(loop) }
         if let name = options.preview, let agendaPreview {
             agendaPreview.run(name, notch: notch, agents: agents)
+        } else if options.preview == "notes-settings" {
+            NotesSettingsPreview.show(state: state)   // Notes (vault strand)
         } else if let name = options.preview, name == "setup-consent" || name == "setup-done" || name.hasPrefix("onboarding") {
             // The setup pages with nothing behind them (the center is in preview mode).
             agents.usePreview(PreviewDirector.snapshot(agentsActive: false))

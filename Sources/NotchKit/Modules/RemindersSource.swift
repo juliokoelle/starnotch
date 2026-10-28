@@ -5,14 +5,15 @@ import NotchCore
 /// Apple Reminders as a Today source (optional, Settings › Modules): open reminders due today or
 /// overdue. Asked for access only when the user switches it on. Cached; EventKit's change
 /// notification refreshes it, so `today(now:)` stays instant.
-final class RemindersSource: NotchConnector, TodayProvider, @unchecked Sendable {
+final class RemindersSource: NotchConnector, TodayCompleting, @unchecked Sendable {
     static let id = "reminders"
     static let displayName = "Reminders"
 
     /// The user's switch.
     var enabled: () -> Bool = { false }
-    /// A connector's Today, with the reminders added to its list.
-    var base: (any TodayProvider)?
+    /// A connector's Today, with the reminders added to its list (asked each time: a notes
+    /// folder picked in Settings counts at once).
+    var base: () -> (any TodayProvider)? = { nil }
     private let store = EKEventStore()
     private let lock = NSLock()
     private var cached: [TodayItem] = []
@@ -60,12 +61,16 @@ final class RemindersSource: NotchConnector, TodayProvider, @unchecked Sendable 
     func today(now: Date) -> TodayFeed {
         refresh()
         let reminders = lock.withLock { cached }
-        guard var feed = base?.today(now: now) else {
+        guard var feed = base()?.today(now: now) else {
             return TodayFeed(now: reminders, nowTitle: "Reminders", emptyText: "No reminders due today.")
         }
         feed.now += reminders.filter { reminder in !feed.now.contains { $0.title == reminder.title } }
         return feed
     }
+
+    /// The connector's tasks tick off where they live; reminders open in Reminders.
+    func canComplete(_ id: String) -> Bool { (base() as? any TodayCompleting)?.canComplete(id) ?? false }
+    func complete(_ id: String) -> Bool { (base() as? any TodayCompleting)?.complete(id) ?? false }
 }
 
 /// Writes one event from quick capture.

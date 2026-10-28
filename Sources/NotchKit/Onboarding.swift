@@ -425,6 +425,12 @@ private struct MeetingsStep: View {
                     }
                 }
             }
+            if Runtime.vault != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    OnboardingLabel("Notes")
+                    CardList(items: [0]) { _ in NotesRow(state: model.state) }
+                }
+            }
             VStack(alignment: .leading, spacing: 8) {
                 OnboardingLabel("How Tara thinks")
                 CardList(items: [TaraBrain.claudeCode, .api, .rules]) { brain in

@@ -28,7 +28,7 @@ class FakeLLM:
 
 def make(memory_dir, llm):
     out = []
-    return Agent(Memory(memory_dir), llm, out.append, TODAY), out
+    return Agent(Memory(memory_dir), llm, out.append, TODAY, gap=0), out  # every batch asks: these tests are about the analysis
 
 
 def utter(speaker, text, t=0.0):

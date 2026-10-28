@@ -63,12 +63,24 @@ at one (`CLAUDE_CODE_MAX_RETRIES=1`), so an overloaded or throttled API fails in
 timeout. The system prompt file sits in the brain folder and is deleted after the call (also when the app ends the
 agent with SIGTERM; one left by a hard kill is swept on the next start). stderr logs each call's tokens and duration.
 
-The meeting memory in the system prompt is at most 60,000 characters: the summary, decisions and commitments of every
-meeting always, then notes and transcripts in equal parts per meeting (what a short one doesn't need goes to the
-others); a longer transcript keeps its lines with numbers first, then its earliest, with `…` for the gaps. The up to
-six transcript lines that share the most words with what was just said (or with a question) come along in the
-prompt, so the parts the excerpt left out still count. The system prompt only changes when the memory does, so it
-stays cacheable.
+For Ask Tara the meeting memory in the system prompt is at most 60,000 characters: the summary, decisions and
+commitments of every meeting always, then notes and transcripts in equal parts per meeting (what a short one doesn't
+need goes to the others); a longer transcript keeps its lines with numbers first, then its earliest, with `…` for the
+gaps. The up to six transcript lines that share the most words with the question come along in the prompt, so the
+parts the excerpt left out still count.
+
+The live analysis is the cost driver (one call per batch while people talk), so it sends less, and less often. Its
+system prompt carries only the facts of every meeting (summary, decisions, commitments with their quotes) and the
+quick captures: about 1,100 characters of facts for the demo meetings; for a memory at the full 60,000-character
+budget the whole system prompt is about 9,600 characters instead of 59,000. The transcripts come per batch: for each
+new utterance up to eight earlier lines that share its words, stop words left out, numbers counted double, and a
+figure in the same unit the more the closer it is ("25 Euro" finds the "30 Euro" decision before "4 Euro" support
+costs); at most 16 lines and 4,000 characters per batch. Notes stay out: the agent only reports a contradiction whose
+earlier words it finds in a transcript, decision or commitment, so one quoted from notes alone was dropped before too.
+And Claude is asked at most once every 25 seconds (`STARNOTCH_MEETING_GAP` or `--meeting-gap`; `0` asks for every
+batch): what is said in between waits and goes with the next call, a quiet stretch sends what waits once the gap is
+over, and saving or ending the meeting analyses the rest first. The rules, Ask Tara and captured questions aren't
+held back. Both system prompts only change when the memory does, so they stay cacheable.
 
 ## Ask Tara
 

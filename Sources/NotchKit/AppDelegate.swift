@@ -405,6 +405,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !on { self?.lidAwake?.switchOff() }
         }
         system.onToggleKeepAwake = { [weak self] in self?.keepAwake.toggle() }
+        system.onDarkModeDenied = { [weak self] in
+            self?.notch.sneak(Sneak(visual: .symbol("moon", tint: .waiting),
+                                    title: Localization.string("Dark mode needs permission to control System Events"),
+                                    detail: Localization.string("System Settings › Privacy & Security › Automation"), duration: 4.4),
+                              key: "dark-mode")
+        }
         startLidAwake(system)
         let shell = ShellMonitor(folder: setup.paths.shellActivity)
         shell.onChange = { [weak system] running in system?.longCommands = running }

@@ -61,6 +61,8 @@ On first launch a setup page lists what it found (Claude Code, Codex, calendars,
 | Calendars | The calendar module | The module hides |
 | Automation (Spotify, Music) | Now playing, asked the first time music plays | The module stays quiet |
 | Accessibility (optional) | Escape cancels the wheel while you hold the notch over other apps; the open island ends between two menu bar icons instead of cutting one | Release in the center to cancel; the island keeps its fixed width |
+| Automation (System Events, optional) | The dark mode switch in the System tab, asked the first time you use it | The switch flips back and the notch points to System Settings › Privacy & Security › Automation |
+| Administrator password (once, optional) | Keep awake with the lid closed: installs `/etc/sudoers.d/starnotch-pmset`, which lets you run only `pmset -a disablesleep 1` and `0` without a password (checked by visudo first). Settings › What's set up removes it | Keep awake works only with the lid open |
 
 ## Privacy
 

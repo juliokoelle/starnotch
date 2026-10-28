@@ -62,7 +62,9 @@
 "Dark mode" = "Dunkelmodus";
 "Switch the whole Mac between light and dark" = "Den ganzen Mac zwischen hell und dunkel umschalten";
 "Hide icons" = "Icons ausblenden";
-"Hide the icons on the desktop (Finder restarts to apply it)" = "Die Icons auf dem Schreibtisch ausblenden (Finder startet dafür neu)";
+"Hide the icons on the desktop. Finder restarts to apply it, which stops a copy in progress" = "Die Icons auf dem Schreibtisch ausblenden. Finder startet dafür neu und bricht dabei ein laufendes Kopieren ab";
+"Dark mode needs permission to control System Events" = "Dunkelmodus braucht die Erlaubnis, System Events zu steuern";
+"System Settings › Privacy & Security › Automation" = "Systemeinstellungen › Datenschutz & Sicherheit › Automation";
 
 /* Keep awake with the lid closed */
 "Lid closed" = "Deckel zu";

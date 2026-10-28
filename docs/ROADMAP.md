@@ -35,6 +35,8 @@ Legend: ✅ exists today · 🔧 exists, needs fixing · ⬜ missing
 | ✅ | File shelf | Tools module: drop in the panel, drag out, AirDrop; drop on the closed notch next |
 | ✅ | Image converter | Shelf: PNG, JPEG, HEIC, TIFF next to the original |
 | ✅ | Sound | Output device switch and volume (with music); per-app volume later |
+| ✅ | Quick toggles | System tab: keep awake (on laptops also with the lid closed, 1 h, 3 h or until unplugged), dark mode, hide desktop icons |
+| ✅ | System monitor | CPU, GPU, memory and network speed, top apps by CPU or memory |
 | 🔧 | Reminders in the notch | Shown in Today; tick off and create from quick capture next |
 
 ### Shape
@@ -79,9 +81,8 @@ Feature level only: Vorssaint is GPL-3.0, so none of its code comes into Starnot
 - Per-app volume mixer (boost past 100 %, favourites), without an audio driver
 - App switcher with window previews; Dock hover previews; quit an app when its last window closes
 - Mouse and keyboard: natural scrolling per device, mouse button shortcuts, trackpad middle click
-- Quick toggles: dark mode, hide desktop icons, keep awake, do not disturb, hidden files
+- Quick toggles: do not disturb, hidden files (dark mode, hide desktop icons and keep awake shipped in Wave 1)
 - Permissions page: the status of every permission the app uses, with buttons to revoke or uninstall cleanly
-- System: network up and down next to CPU, GPU and memory
 - Music: synced lyrics and the play queue
 - Agents: OpenCode and GitHub Copilot next to Claude Code and Codex, with plan limits, tokens and the API value of a session
 - A Tools gallery in Settings: each tool with one line and a switch, off by default; the notch shows only the ones switched on

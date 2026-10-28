@@ -165,13 +165,19 @@ enum DarkMode {
                                kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? String == "Dark"
     }
 
-    /// Calls back on the main actor with the state the Mac ended up in.
-    static func set(_ dark: Bool, done: @escaping @MainActor @Sendable (Bool) -> Void) {
+    /// Calls back on the main actor with the state the Mac ended up in, and whether osascript
+    /// failed (mostly: Automation for System Events was denied, and macOS never asks again).
+    static func set(_ dark: Bool, done: @escaping @MainActor @Sendable (_ isOn: Bool, _ failed: Bool) -> Void) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", "tell application \"System Events\" to tell appearance preferences to set dark mode to \(dark)"]
-        process.terminationHandler = { _ in Task { @MainActor in done(isOn) } }
-        do { try process.run() } catch { done(isOn) }
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { process in
+            let failed = process.terminationStatus != 0
+            Task { @MainActor in done(isOn, failed) }
+        }
+        do { try process.run() } catch { done(isOn, true) }
     }
 }
 

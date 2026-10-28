@@ -66,10 +66,14 @@ public enum ToolSwitches {
         ModuleKind.allCases.map { "module.\($0.rawValue)" } + ToolFeature.allCases.map { "feature.\($0.rawValue)" }
     }
 
-    /// Settings from before the stamp (`knownTools`) keep every tool the gallery started with;
-    /// tools added after it start off for them too (lyrics ask a web service).
-    public static var knownBeforeStamp: [String] { known.filter { !addedAfterStamp.contains($0) } }
-    static let addedAfterStamp: Set<String> = ["feature.lyrics", "feature.lyricsOnHover", "feature.appVolume"]
+    /// Settings from before the stamp (`knownTools`) keep every tool the gallery started with, as
+    /// it was then; any tool added since starts off for them too. Frozen: never add to it.
+    public static let knownBeforeStamp: [String] = [
+        "module.agents", "module.today", "module.dictation", "module.calendar", "module.nowPlaying",
+        "module.system", "module.meeting", "module.tools",
+        "feature.clipboard", "feature.timers", "feature.shelf", "feature.imageConverter",
+        "feature.keepAwake", "feature.quickCapture",
+    ]
 
     /// Settings saved by a version that knew only `known`: what came since starts off.
     public static func switchOffNew(since known: [String], in settings: inout SwitcherSettings) {

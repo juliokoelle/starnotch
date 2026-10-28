@@ -129,4 +129,13 @@ import TestSupport
         ToolSwitches.set(.module(.nowPlaying), on: false, in: &settings)
         #expect(!ToolSwitches.isOn(.lyrics, in: settings))
     }
+
+    @Test func theStampIsTheFirstGalleryOnly() {
+        // Frozen: a tool any later version adds isn't in it, so it starts off for older settings.
+        let known = Set(ToolSwitches.known)
+        for name in ToolSwitches.knownBeforeStamp { #expect(known.contains(name)) }
+        for feature in [ToolFeature.lyrics, .lyricsOnHover, .appVolume] {
+            #expect(!ToolSwitches.knownBeforeStamp.contains("feature.\(feature.rawValue)"))
+        }
+    }
 }

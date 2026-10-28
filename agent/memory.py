@@ -8,7 +8,8 @@ Schema of a meeting file (all keys optional except id):
       "date": "2026-10-12",                       # ISO date
       "participants": ["Max", "Lisa"],
       "transcript": [{"speaker": "Max", "t": 12.5, "text": "..."}],   # t: seconds from start
-      "summary": "...",
+      "summary": "...",                           # short, shown on the prep card
+      "notes": "...",                             # a source's full notes (Jamie's whole summary) when longer
       "decisions": [{"text": "Price is 30 Euro", "quote": "...", "speaker": "Lisa", "t": 80.0}],
       "commitments": [{"who": "Max", "what": "send numbers", "due": "2026-10-16",
                        "quote": "...", "status": "open"}]          # status: open | done
@@ -62,6 +63,7 @@ class Meeting:
     summary: str = ""
     decisions: list[Decision] = field(default_factory=list)
     commitments: list[Commitment] = field(default_factory=list)
+    notes: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Meeting":
@@ -76,6 +78,7 @@ class Meeting:
             summary=str(data.get("summary") or ""),
             decisions=[_decision(x) for x in data.get("decisions") or []],
             commitments=[_commitment(x) for x in data.get("commitments") or []],
+            notes=str(data.get("notes") or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -165,11 +168,15 @@ class Memory:
     def get(self, meeting_id: str) -> Meeting | None:
         return next((m for m in self.meetings if m.id == meeting_id), None)
 
+    def path_for(self, meeting_id: str) -> Path:
+        """<folder>/<id>.json, with the id made safe for a file name."""
+        safe = re.sub(r"[^\w.-]+", "-", meeting_id).strip("-") or "meeting"
+        return self.folder / f"{safe}.json"
+
     def save(self, meeting: Meeting) -> Path:
         """Writes atomically to <folder>/<id>.json and updates the in-memory list."""
         self.folder.mkdir(parents=True, exist_ok=True)
-        safe = re.sub(r"[^\w.-]+", "-", meeting.id).strip("-") or "meeting"
-        path = self.folder / f"{safe}.json"
+        path = self.path_for(meeting.id)
         fd, tmp = tempfile.mkstemp(dir=self.folder, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(meeting.to_dict(), handle, ensure_ascii=False, indent=2)
@@ -227,22 +234,71 @@ class Memory:
         return None
 
     def as_context(self, max_chars: int = 60_000) -> str:
-        """Compact text of every meeting for a prompt, newest first, cut at max_chars."""
-        blocks = []
-        for m in reversed(self.meetings):
-            parts = [f"## Meeting id={m.id} | {m.title} | {m.date} | participants: {', '.join(m.participants)}"]
-            if m.summary:
-                parts.append(f"Summary: {m.summary}")
-            for d in m.decisions:
-                parts.append(f"Decision: {d.text}" + (f' — quote: "{d.quote}"' if d.quote else ""))
-            for c in m.commitments:
-                due = f" (due {c.due})" if c.due else ""
-                parts.append(f"Commitment [{c.status}]: {c.who}: {c.what}{due}" + (f' — quote: "{c.quote}"' if c.quote else ""))
-            parts.append("Transcript:")
-            parts += [f"[{_clock(line.t)}] {line.speaker}: {line.text}" for line in m.transcript]
-            blocks.append("\n".join(parts))
-        text = "\n\n".join(blocks)
-        return text[:max_chars]
+        """Compact text of every meeting for a prompt, newest first, in at most max_chars.
+
+        The facts of every meeting (summary, decisions, commitments) always come along, so an old decision can
+        still be contradicted. Notes and transcripts share the rest: an equal part per meeting, and what a short
+        one leaves over goes to the others. One longer than its part keeps its notes and the lines with numbers
+        first (that's what contradictions turn on), then the earliest lines, in their order with "…" for the gaps.
+        """
+        newest = list(reversed(self.meetings))
+        facts = [_facts(m) for m in newest]
+        details = [_details(m) for m in newest]
+        room = max_chars - sum(len(f) + 2 for f in facts)
+        shares = _shares([sum(len(text) + 1 for _, text in rows) for rows in details], room)
+        blocks = ["\n".join([f, *_excerpt(rows, share)]) for f, rows, share in zip(facts, details, shares)]
+        return "\n\n".join(blocks)[:max_chars]
+
+
+def _facts(m: Meeting) -> str:
+    parts = [f"## Meeting id={m.id} | {m.title} | {m.date} | participants: {', '.join(m.participants)}"]
+    if m.summary:
+        parts.append(f"Summary: {m.summary}")
+    for d in m.decisions:
+        parts.append(f"Decision: {d.text}" + (f' — quote: "{d.quote}"' if d.quote else ""))
+    for c in m.commitments:
+        due = f" (due {c.due})" if c.due else ""
+        parts.append(f"Commitment [{c.status}]: {c.who}: {c.what}{due}" + (f' — quote: "{c.quote}"' if c.quote else ""))
+    return "\n".join(parts)
+
+
+def _details(m: Meeting) -> list[tuple[int, str]]:
+    """(rank, line) of a meeting's notes and transcript; rank 0 is kept first, 2 last."""
+    rows = [(0, "Notes:")] + [(0, line) for line in m.notes.splitlines() if line.strip()] if m.notes.strip() else []
+    if m.transcript:
+        rows.append((0, "Transcript:"))
+        for line in m.transcript:
+            rows.append((1 if re.search(r"\d", line.text) else 2, f"[{_clock(line.t)}] {line.speaker}: {line.text}"))
+    return rows
+
+
+def _shares(sizes: list[int], room: int) -> list[int]:
+    """Splits room into equal parts, smallest size first, so what one doesn't need goes to the rest."""
+    shares, left = [0] * len(sizes), max(room, 0)
+    order = sorted(range(len(sizes)), key=lambda i: sizes[i])
+    for n, i in enumerate(order):
+        shares[i] = min(sizes[i], left // (len(order) - n))
+        left -= shares[i]
+    return shares
+
+
+def _excerpt(rows: list[tuple[int, str]], room: int) -> list[str]:
+    """All lines if they fit in room chars, else the best-ranked that do, in their order, "…" where lines are left out."""
+    if sum(len(text) + 1 for _, text in rows) <= room:
+        return [text for _, text in rows]
+    keep, used = set(), 0
+    for i in sorted(range(len(rows)), key=lambda i: (rows[i][0], i)):
+        cost = len(rows[i][1]) + 3  # the line, its break and a possible "…" after it
+        if used + cost <= room:
+            keep.add(i)
+            used += cost
+    out: list[str] = []
+    for i, (_, text) in enumerate(rows):
+        if i in keep:
+            out.append(text)
+        elif out[-1:] != ["…"]:
+            out.append("…")
+    return out if keep else []
 
 
 def _clock(seconds: float) -> str:

@@ -10,7 +10,7 @@ The Swift app starts these programs and reads their JSON lines; [PROTOCOL.md](PR
 |---|---|
 | `memory.py` | The meeting memory: one JSON file per meeting, in `~/Library/Application Support/Starnotch/memory/` |
 | `agent.py` | The agent: utterances and commands on stdin, contradictions, questions, commitments, prep cards and answers on stdout |
-| `claude.py` | The Claude call (Claude Sonnet 5.5, effort `low`, structured outputs, server-side fallback on refusals) |
+| `claude.py` | The Claude call: through the user's Claude Code on their Claude plan, or the Anthropic API (Claude Sonnet 5.5, effort `low`, structured outputs, server-side fallback on refusals) |
 | `jamie_sync.py` | Pulls meetings from [Jamie](https://meetjamie.ai) over its MCP server (OAuth login in the browser) into the memory |
 | `transcribe.py` | Live transcription with Reson8 Realtime, from the microphone or an audio file streamed in real time |
 | `captures.py` | Reads Starnotch's quick-capture queue, so the agent knows the user's own tasks, questions and notes |
@@ -25,11 +25,49 @@ Python 3.12 and [uv](https://docs.astral.sh/uv/):
 ```sh
 cd agent
 uv sync                 # add --extra mic for the microphone
-export ANTHROPIC_API_KEY=...   # for agent.py
 export RESON8_API_KEY=...      # for transcribe.py
 ```
 
-Keys are read from the environment only. Without `ANTHROPIC_API_KEY` the agent runs on simple built-in rules.
+Keys are read from the environment only.
+
+## Tara's brain
+
+`agent.py` thinks with whatever `STARNOTCH_BRAIN` names (the app sets it from Settings and onboarding):
+
+| `STARNOTCH_BRAIN` | Thinks with | Costs |
+|---|---|---|
+| `auto` (default) | Claude Code if a `claude` binary is found, else the API if `ANTHROPIC_API_KEY` is set, else rules | |
+| `claude-code` | The user's Claude Code CLI, headless (`claude -p`), model alias `sonnet`, effort `low` | counts against their Claude plan |
+| `api` | The Anthropic API with `ANTHROPIC_API_KEY` | API credits |
+| `rules` | Simple built-in rules, no model (same as `--offline`) | nothing |
+
+The claude binary is looked up on `PATH`, then in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`.
+Claude Code never bills an API by surprise: before the first call the agent runs `claude auth status` and only goes
+on with a Claude plan login (`claude.ai`, or a `claude setup-token` token); otherwise, also when it isn't signed
+in, it uses rules, never the API. Every call runs without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+`ANTHROPIC_BASE_URL` and the Bedrock/Vertex/Foundry switches in its environment (with a key there, Claude Code
+silently bills the key).
+
+Each call is a bare session so it reads little: an empty folder of its own
+(`~/Library/Application Support/Starnotch/brain`, so no CLAUDE.md or project loads), no tools (`--tools ""`), no
+MCP servers (`--strict-mcp-config` with an empty config), no user or project settings (`--setting-sources ""`: no
+hooks, plugins, memory or `apiKeyHelper`), no slash commands, no saved transcript (`--no-session-persistence`); the
+system prompt comes from a file (`--system-prompt-file`), the prompt on stdin, the answer as `--output-format json`
+validated against `--json-schema`. That is about 1,100 tokens of Claude Code's own on top of our prompt (a plain
+`claude -p` loads about 220,000 here); a live analysis of the demo meetings reads about 3,000. `--bare` would trim
+further but reads only `ANTHROPIC_API_KEY`, never the plan login, so it isn't used. A call that takes longer than
+30 seconds, fails or is refused falls back to rules for those lines, and the next minute stays on rules before
+Claude is asked again; a lost login switches the rest of the session to rules. Claude Code's own retries are capped
+at one (`CLAUDE_CODE_MAX_RETRIES=1`), so an overloaded or throttled API fails in seconds rather than after the
+timeout. The system prompt file sits in the brain folder and is deleted after the call (also when the app ends the
+agent with SIGTERM; one left by a hard kill is swept on the next start). stderr logs each call's tokens and duration.
+
+The meeting memory in the system prompt is at most 60,000 characters: the summary, decisions and commitments of every
+meeting always, then notes and transcripts in equal parts per meeting (what a short one doesn't need goes to the
+others); a longer transcript keeps its lines with numbers first, then its earliest, with `…` for the gaps. The up to
+six transcript lines that share the most words with what was just said (or with a question) come along in the
+prompt, so the parts the excerpt left out still count. The system prompt only changes when the memory does, so it
+stays cacheable.
 
 ## Demo
 
@@ -61,7 +99,8 @@ Jamie:
 
 ```sh
 uv run python jamie_sync.py --list-tools   # first run opens the Jamie login
-uv run python jamie_sync.py --limit 20
+uv run python jamie_sync.py --limit 200    # pages through Jamie; full transcripts; unchanged meetings are skipped
+uv run python jamie_sync.py --logout       # forget the login (sign out at app.meetjamie.ai to switch accounts)
 ```
 
 ## Tests
@@ -70,7 +109,7 @@ uv run python jamie_sync.py --limit 20
 uv run pytest
 ```
 
-Claude, Jamie and Reson8 are replaced by fakes: a fake Anthropic client, an in-process MCP server with Jamie's
+Claude, Jamie and Reson8 are replaced by fakes: a fake Anthropic client, a fake `claude` binary on `PATH`, an in-process MCP server with Jamie's
 tool names, and a local WebSocket server.
 
 ## MCP server: any agent reaches you in the notch

@@ -15,8 +15,13 @@ Shared rules:
 - stdout carries only protocol lines. stderr is free-text logging; show it in a debug log, don't parse it.
 - Ignore fields and `type`s you don't know. New fields may appear; existing ones keep their meaning.
 - Dates are `YYYY-MM-DD`. `t` is seconds from the start of the meeting (a number).
-- Keys come from the environment the app starts the process with: `ANTHROPIC_API_KEY` for `agent.py`,
-  `RESON8_API_KEY` for `transcribe.py`. Jamie needs no key (browser login, see below).
+- Keys come from the environment the app starts the process with: `ANTHROPIC_API_KEY` for `agent.py` (only with
+  `STARNOTCH_BRAIN=api`, or `auto` without Claude Code), `RESON8_API_KEY` for `transcribe.py`. Jamie needs no key
+  (browser login, see below).
+- `STARNOTCH_BRAIN` picks what `agent.py` thinks with: `auto` (default), `claude-code`, `api` or `rules`
+  (see [README.md](README.md#taras-brain)). `auto` is Claude Code when a `claude` binary is found (`PATH`,
+  `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), else the API when `ANTHROPIC_API_KEY` is set, else rules.
+  Claude Code that isn't signed in to a Claude plan falls back to rules, never to the API.
 
 ## Starting
 
@@ -26,7 +31,8 @@ Run everything from the `agent/` folder with uv (it creates the environment on f
 cd agent
 uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captures FILE] [--watch-captures]
 uv run python transcribe.py (--file AUDIO [--speed N] | --mic) [--names Max,Lisa]
-uv run python jamie_sync.py [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--query TEXT]
+uv run python jamie_sync.py [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--query TEXT] [--force]
+uv run python jamie_sync.py --logout
 ```
 
 `DIR` defaults to `~/Library/Application Support/Starnotch/memory/`, one JSON file per meeting
@@ -48,11 +54,14 @@ During a meeting the app reads `transcribe.py`'s stdout and writes each `utteran
 ### First line
 
 ```json
-{"type": "ready", "meetings": 2, "memory": "/Users/…/memory", "model": "claude-sonnet-5-5", "errors": []}
+{"type": "ready", "meetings": 2, "memory": "/Users/…/memory", "brain": "claude-code", "model": "sonnet", "errors": []}
 ```
 
-`model` is `null` when the agent runs on rules only (no key, or `--offline`). `errors` lists meeting files
-that couldn't be read. Wait for `ready` before sending commands.
+`brain` is what the agent thinks with: `claude-code` (the user's Claude plan, `model` is Claude Code's alias
+`sonnet`), `api` (`model` is the API model id, e.g. `claude-sonnet-5-5`) or `rules` (`model` is `null`: `--offline`,
+`STARNOTCH_BRAIN=rules`, no Claude Code and no key, or Claude Code not signed in; the reason comes as a `status`
+`offline` line just before `ready`). `errors` lists meeting files that couldn't be read. Wait for `ready` before
+sending commands.
 
 ### stdin
 
@@ -173,7 +182,7 @@ today. `captures` are quick-capture tasks and questions that tag or name a parti
 
 | `state` | Extra fields | When |
 |---|---|---|
-| `offline` | `message` | Claude isn't reachable; the agent continues on rules (sent once) |
+| `offline` | `message` | Claude isn't reachable (no key, Claude Code not signed in or not on a Claude plan, a timeout, an error); the agent continues on rules (sent once) |
 | `saved` | `meeting_id`, `path` | after `save` |
 | `reset` | | after `reset` |
 | `reloaded` | `meetings` | after `reload` |
@@ -216,12 +225,54 @@ stdout:
 ```json
 {"type": "status", "state": "login", "url": "https://…"}
 {"type": "synced", "meeting_id": "jamie-abc", "title": "Weekly", "date": "2026-10-19", "lines": 120, "path": "/Users/…/jamie-abc.json"}
+{"type": "synced", "meeting_id": "jamie-def", "title": "Kickoff", "date": "2026-10-12", "lines": 88, "path": "/Users/…/jamie-def.json", "unchanged": true}
 {"type": "status", "state": "warning", "message": "get_meeting abc: …"}
-{"type": "status", "state": "synced", "meetings": 12}
+{"type": "status", "state": "synced", "meetings": 12, "updated": 1, "unchanged": 11}
 {"type": "error", "message": "jamie sync: …"}
 ```
 
-`login` appears only when no valid token is stored: the script has opened the browser at `url` and waits
-(up to 5 minutes) for the redirect to `http://127.0.0.1:47791/callback`. Tokens are kept in
-`~/Library/Application Support/Starnotch/jamie-oauth.json` (mode 0600). Exit code 0 on success, 1 on error.
+One `synced` line per meeting, in the order they finish (several are fetched at once). `unchanged: true`: Jamie
+reports nothing new for it since the last sync, so the file wasn't touched. `partial: true`: only the start of
+the transcript could be read (get_meeting cuts long ones; the full read failed); the next sync tries again.
+`stale: true`: Jamie couldn't give the whole meeting this time (`get_meeting` or `list_tasks` failed), so the stored
+copy stays as it was. `warning` lines don't stop the sync.
+
+The last line counts the meetings that are now in the memory (`meetings`), how many were written (`updated`),
+skipped (`unchanged`) and kept from last time (`stale`, only when there are some): `meetings` is their sum. When an unfiltered sync (no `--since`, no `--query`) finds no meetings at all, it says so,
+so the app can offer to sign in with another Jamie account:
+
+```json
+{"type": "status", "state": "synced", "meetings": 0, "hint": "empty_account"}
+```
+
+What is fetched: `list_meetings` page by page (`cursor`/`nextCursor`) until `--limit` meetings (default 50, newest
+first); for each, `get_meeting`, and when its `transcriptInfo.truncated` is true, every page of
+`get_meeting_transcript` until `isFinal`. `list_tasks` page by page, all of them (a task belongs to its meeting's
+fingerprint, so a cut list would rewrite older meetings without their tasks). Re-syncs are fast: Jamie has no
+`updatedAt`, so each meeting's `get_meeting` answer (summary, participants, tasks, transcript size) is
+fingerprinted into `<memory>/jamie-sync.state`; an unchanged meeting costs one `get_meeting` and no transcript
+pages. `--force` writes every meeting again.
+
+How Jamie's meeting becomes a memory file: Jamie's transcript blocks (`Speaker 0`, `###### 00:00 - 00:08`, text)
+become one line each with `speaker` and `t`; a speaker label becomes the participant's name when Jamie knows it,
+`Speaker -1` (no speaker detected) becomes `""`. `participants` are the named participants and calendar
+attendees, without unnamed voices (`Speaker 2`) and without the Jamie user. `summary` is the summary's
+"Executive Summary" (or "Summary", "Overview", "Zusammenfassung") section, else Jamie's short summary, else the
+whole summary; it is what the prep card shows. `notes` keeps Jamie's whole summary as Markdown (Full Summary and its
+topic sections) whenever `summary` is only part of it: the memory is the only copy, and Claude reads the notes.
+`decisions` come from a "Decisions"/"Key Decisions"/"Entscheidungen" section, `commitments` from Jamie's tasks
+(assignee, due date, done), or, when the meeting has none, from an "Action Items"/"Next
+Steps"/"Aufgaben" section (`**Lisa**: …`, `[x] …`, an ISO date as `due`). Jamie's default summary template has
+neither section, so most meetings carry none.
+
+`login` appears only when no valid token is stored and it can't be refreshed: the script has opened the browser at
+`url` and waits (up to 5 minutes) for the redirect to `http://127.0.0.1:47791/callback`. Tokens are kept in
+`~/Library/Application Support/Starnotch/jamie-oauth.json` (mode 0600) with the time they run out, so an expired
+access token is refreshed without the browser. Each sync first reads the authorization server's metadata (two small
+GETs), so a token that runs out during a long sync is refreshed at Jamie's `/oauth/token` too. Exit code 0 on success, 1 on error.
 Send `{"cmd": "reload"}` to a running `agent.py` afterwards.
+
+`--logout` deletes that file and prints `{"type": "status", "state": "logged_out", "removed": true}` (`false` when
+there was none); it doesn't connect. The next sync opens the login again. Which account it signs in to is decided
+by the Jamie session in the browser: to switch accounts, sign out at app.meetjamie.ai first. Meetings already
+synced stay in the memory.

@@ -13,6 +13,7 @@ import datetime as dt
 import json
 import queue
 import re
+import signal
 import sys
 import threading
 import time
@@ -24,6 +25,8 @@ import captures as quick
 from memory import Commitment, Line, Meeting, Memory
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
+RECALL = 6  # earlier transcript lines that share words with the new ones, for transcripts the memory had to shorten
+REST = 60  # seconds on the rules after a failed Claude call: better a rule now than Claude late, batch after batch
 
 SYSTEM = """You listen along to a live meeting and compare it with the team's meeting memory below.
 Report, as JSON, only what helps the people in the meeting right now:
@@ -167,6 +170,7 @@ class Agent:
         self.reported: set[str] = set()
         self.reported_text: list[str] = []
         self.warned = False
+        self.resting_until = 0.0  # time.monotonic() until which Claude isn't asked
 
     # Commands
 
@@ -243,9 +247,11 @@ class Agent:
         if not question.strip():
             return {"type": "error", "message": "ask: empty question"}
         result = None
-        if self.llm is not None:
+        if self._thinking():
+            recall = self._recall(question)
+            prompt = question + ("\n\n# Earlier lines with the same words\n" + "\n".join(recall) if recall else "")
             try:
-                result = self.llm.json(ASK_SYSTEM.format(memory=self.context()), question, ASK_SCHEMA, 2000)
+                result = self.llm.json(ASK_SYSTEM.format(memory=self.context()), prompt, ASK_SCHEMA, 2000)
             except Exception as error:
                 self._warn(error)
         if result is None:
@@ -294,7 +300,7 @@ class Agent:
         before = self.live[-WINDOW:]
         self.live += new
         result = None
-        if self.llm is not None:
+        if self._thinking():
             try:
                 result = self.llm.json(SYSTEM.format(memory=self.context()),
                                        self._analysis_prompt(before, new), ANALYSIS_SCHEMA)
@@ -309,6 +315,9 @@ class Agent:
         lines = [f"Today is {today.strftime('%A')}, {today.isoformat()}.", "", "# Live meeting so far"]
         lines += [f"{u.speaker}: {u.text}" for u in before] or ["(nothing yet)"]
         lines += ["", "# New utterances"] + [f"{u.speaker}: {u.text}" for u in new]
+        recall = self._recall(" ".join(u.text for u in new))
+        if recall:
+            lines += ["", "# Earlier lines with the same words"] + recall
         lines += ["", "# Already reported"] + (self.reported_text[-20:] or ["(nothing)"])
         return "\n".join(lines)
 
@@ -374,9 +383,20 @@ class Agent:
     def _source(meeting: Meeting) -> dict[str, Any]:
         return {"meeting": meeting.title or meeting.id, "meeting_id": meeting.id, "date": meeting.date}
 
+    def _recall(self, text: str) -> list[str]:
+        """Transcript lines from the memory sharing two or more words with `text`: the system prompt may only
+        carry an excerpt of a long transcript, so the lines that matter now come along in the prompt."""
+        return [f"[{h.meeting.id} | {h.meeting.date}] {h.line.speaker}: {h.line.text}"
+                for h in self.memory.search(text, RECALL) if h.score >= 2]
+
+    def _thinking(self) -> bool:
+        return self.llm is not None and time.monotonic() >= self.resting_until
+
     def _warn(self, error: Exception) -> None:
-        if type(error).__name__ in ("AuthenticationError", "PermissionDeniedError", "TypeError"):
+        if type(error).__name__ in ("AuthenticationError", "PermissionDeniedError", "TypeError", "ClaudeCodeUnavailable"):
             self.llm = None  # no or bad credentials: stop waiting on Claude for every line
+        else:  # slow, overloaded or throttled: the rules for a while, then Claude again
+            self.resting_until = time.monotonic() + REST
         if not self.warned:
             self.emit({"type": "status", "state": "offline", "message": f"Claude unavailable, using rules: {error}"})
             self.warned = True
@@ -496,28 +516,29 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Starnotch meeting agent (JSON lines on stdin/stdout)")
     parser.add_argument("--memory", help="folder of meeting JSON files (default: ~/Library/Application Support/Starnotch/memory)")
     parser.add_argument("--today", help="date to resolve 'bis Freitag' against, YYYY-MM-DD (default: today)")
-    parser.add_argument("--offline", action="store_true", help="no Claude, only the built-in rules")
+    parser.add_argument("--offline", action="store_true", help="no Claude, only the built-in rules (as STARNOTCH_BRAIN=rules)")
     parser.add_argument("--captures", default=str(quick.QUEUE),
                         help="Starnotch's quick-capture queue (default: capture-queue.jsonl in its folder); '' to ignore")
     parser.add_argument("--watch-captures", action="store_true",
                         help="answer questions typed into quick capture as they arrive")
     args = parser.parse_args(argv)
 
+    # The app ends a meeting with SIGTERM; as an exception it lets a running Claude call clean up its prompt file.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
     emit = make_emit(sys.stdout)
     memory = Memory(args.memory)
-    llm = None
+    brain, llm = "rules", None
     if not args.offline:
-        from claude import Claude
+        from claude import make_brain
 
-        try:
-            llm = Claude()
-        except Exception as error:  # no credentials: keep going on rules
-            emit({"type": "status", "state": "offline", "message": f"Claude unavailable, using rules: {error}"})
+        brain, llm, why = make_brain()
+        if why:  # no login or no key: keep going on rules
+            emit({"type": "status", "state": "offline", "message": why})
     today = dt.date.fromisoformat(args.today) if args.today else None
     captures = Path(args.captures).expanduser() if args.captures else None
     agent = Agent(memory, llm, emit, today, captures)
     emit({"type": "ready", "meetings": len(memory.meetings), "memory": str(memory.folder),
-          "model": getattr(llm, "model", None), "errors": memory.errors})
+          "brain": brain, "model": getattr(llm, "model", None), "errors": memory.errors})
     run(agent, sys.stdin, captures if args.watch_captures else None)
     return 0
 

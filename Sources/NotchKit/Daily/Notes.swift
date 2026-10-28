@@ -193,6 +193,25 @@ final class NotesStore {
         }
     }
 
+    /// A finished note from elsewhere (an answer from Ask Tara): a file of its own named after its
+    /// first line, at the top of the list; the open note stays as it is. Previews write nothing.
+    func add(_ text: String) -> Bool {
+        guard persists else { return true }
+        let base = NoteNaming.safeName(NoteNaming.title(of: text))
+        let name = NoteNaming.unique(base.isEmpty ? NoteNaming.placeholder(created: Date()) : base, taken: takenNames)
+        let url = folder.appending(path: "\(name).\(NoteNaming.fileExtension)")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Self.write(text, to: url)
+        } catch {
+            Log.app.error("Couldn't save the answer as a note: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        let title = NoteNaming.title(of: text)
+        notes.insert(Note(url: url, title: title.isEmpty ? name : title, preview: NoteNaming.preview(of: text), modified: Date()), at: 0)
+        return true
+    }
+
     /// Done with the open note: saved, named after its first line if it still has its dated
     /// name, or gone if it was left empty.
     func settle() {

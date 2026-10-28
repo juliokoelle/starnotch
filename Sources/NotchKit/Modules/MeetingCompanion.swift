@@ -37,8 +37,14 @@ final class MeetingCompanion: NSObject {
     @ObservationIgnored private var panel: FreePanel?
     private static let originKey = "meetingCompanionOrigin"
     private static let size = CGSize(width: 300, height: 260)
-    /// With the question bubble: room for her answer and its sources beside her.
-    private static let askSize = CGSize(width: 420, height: 460)
+    /// With the question bubble: room beside her for the bubble, whose answer card grows up to
+    /// about 60 % of the screen's height before it scrolls (plus the field below it).
+    private static func askSize(on screen: NSScreen?) -> CGSize {
+        let height = (screen ?? NSScreen.main)?.visibleFrame.height ?? 900
+        return CGSize(width: AskTaraView.width + 128, height: (height * 0.6).rounded() + 120)
+    }
+    /// Less room above her than this, and she moves down for the bubble instead of it shrinking.
+    private static let askMinHeight: CGFloat = 420
     /// The figure's center, from the window's bottom right corner (padding 8, figure 84 × 80).
     private static let figure = CGPoint(x: 50, y: 48)
 
@@ -124,8 +130,8 @@ final class MeetingCompanion: NSObject {
             outForAsk = true
         }
         guard let panel else { return }
-        if panel.frame.size != Self.askSize { originBeforeAsk = panel.frame.origin }
-        resize(panel, to: Self.askSize)
+        if panel.frame.size == Self.size { originBeforeAsk = panel.frame.origin }
+        resize(panel, to: Self.askSize(on: panel.screen))
         panel.acceptsKey = true
         panel.makeKeyAndOrderFront(nil)
     }
@@ -155,10 +161,12 @@ final class MeetingCompanion: NSObject {
         let frame = panel.frame
         guard frame.size != size else { return }
         // The figure sits at the bottom right: keep that corner where it is, unless the bigger window
-        // would leave the screen at the top or the left; then she moves in just as far.
+        // would leave the screen at the top or the left. At the top the bubble takes the room there
+        // is (at least `askMinHeight`, else she moves down just as far); at the left she moves in.
         var target = CGRect(x: frame.maxX - size.width, y: frame.minY, width: size.width, height: size.height)
         if size.width > frame.width || size.height > frame.height,
            let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            if size != Self.size { target.size.height = min(size.height, max(Self.askMinHeight, visible.maxY - target.minY)) }
             target.origin.y -= max(0, target.maxY - visible.maxY)
             target.origin.x += max(0, visible.minX - target.minX)
         }
@@ -211,7 +219,7 @@ final class MeetingCompanion: NSObject {
         originBeforeAsk = nil  // moved by hand: she stays where she was put
         guard let panel else { return }
         // Saved as if the bubble were closed: the next time she comes out at the same place.
-        let frame = panel.frame.size == Self.askSize
+        let frame = panel.frame.size != Self.size
             ? CGRect(x: panel.frame.maxX - Self.size.width, y: panel.frame.minY, width: Self.size.width, height: Self.size.height)
             : panel.frame
         // Let go up at the notch (the pointer in the menu bar, near the middle): back into it.
@@ -262,6 +270,7 @@ private struct CompanionView: View {
                         .transition(Theme.reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
                 }
             }
+            // Ahead of the spacer, so the answer card can take all the height the window has.
             HStack(alignment: .bottom, spacing: 4) {
                 if let ask = companion.ask, asking {
                     AskTaraView(ask: ask)
@@ -298,6 +307,7 @@ private struct CompanionView: View {
                     .help(Localization.string(companion.onTapFigure == nil ? "Drag to move; let go at the notch to put it back"
                                                                            : "Click to ask Tara; drag to move, let go at the notch to put it back"))
             }
+            .layoutPriority(1)
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

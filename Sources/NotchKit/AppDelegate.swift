@@ -231,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.ask = ask
         companion.ask = ask
         ask.wispr = dictation  // the mic dictates with Wispr Flow while it runs
+        ask.notes = daily.notes  // "Save to notes" without a notes vault
         // Opening Ask Tara syncs an old Jamie sync in the background; new meetings reach her agent at once.
         ask.onOpen = { [weak meeting] in
             companion.showAsk()

@@ -45,6 +45,17 @@ public struct AskAnswer: Equatable, Sendable {
 
     /// No model answered: the closest line the rules found, or what Tara can do without a brain.
     public var onRules: Bool { brain == "rules" }
+
+    /// The answer saved as a Markdown note: the question as its title, the answer, and a line
+    /// naming where it came from ("Sources: Kickoff (2026-10-12), Pricing").
+    public func note(asked: String? = nil, sourcesLabel: String = "Sources") -> String {
+        let title = (asked ?? question).split(whereSeparator: \.isNewline).joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        var parts = [title.isEmpty ? "" : "# \(title)", text.trimmingCharacters(in: .whitespacesAndNewlines)]
+        let named = sources.map { source in source.date.map { "\(source.title) (\($0))" } ?? source.title }
+        if !named.isEmpty { parts.append("\(sourcesLabel): " + named.joined(separator: ", ")) }
+        return parts.filter { !$0.isEmpty }.joined(separator: "\n\n") + "\n"
+    }
 }
 
 /// What `agent.py` says back to Ask Tara. Lines it doesn't care about give `nil`.

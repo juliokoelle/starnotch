@@ -42,6 +42,11 @@ final class AskTara {
     private(set) var attachment: Attachment?
     /// The window's picture is being taken.
     private(set) var capturing = false
+    /// The answer went to the clipboard a moment ago.
+    private(set) var copied = false
+    /// Where "Save to notes" put the answer, or that it couldn't.
+    enum Saved: Equatable { case notepad, inbox, failed }
+    private(set) var saved: Saved?
 
     /// The bubble opens beside Tara: the companion comes out if needed and takes the keyboard.
     @ObservationIgnored var onOpen: () -> Void = {}
@@ -50,6 +55,9 @@ final class AskTara {
     @ObservationIgnored var wispr: DictationModule?
     /// The mic started Wispr Flow from here (its own state says whether it still listens).
     private var dictatingHere = false
+    /// The notepad, where "Save to notes" writes when no notes vault is connected.
+    @ObservationIgnored var notes: NotesStore?
+    @ObservationIgnored private var copiedReset: Task<Void, Never>?
 
     @ObservationIgnored private var process: MeetingProcess?
     @ObservationIgnored private var processBrain: TaraBrain?
@@ -156,6 +164,7 @@ final class AskTara {
             expanded = nil
             phase = .idle
         }
+        resetActions()
         conversation.clear()
         removeAttachment()
         removeSentImage()
@@ -174,6 +183,7 @@ final class AskTara {
             expanded = nil
             phase = .idle
         }
+        resetActions()
         conversation.clear()
         focusRequest += 1
     }
@@ -348,6 +358,51 @@ final class AskTara {
         }
     }
 
+    // MARK: Copy and save
+
+    func copyAnswer() {
+        guard let answer else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(answer.text, forType: .string)
+        Haptics.tick()
+        copied = true
+        copiedReset?.cancel()
+        copiedReset = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.6))
+            guard !Task.isCancelled else { return }
+            self?.copied = false
+        }
+    }
+
+    /// The question and answer go to the notes: a line in the vault's inbox when a notes vault is
+    /// connected, else a note of their own in the notepad. Once per answer.
+    func saveAnswer() {
+        guard let answer, saved == nil || saved == .failed else { return }
+        let question = asked ?? answer.question
+        let result: Saved
+        if previewing {
+            result = Self.savesToInbox ? .inbox : .notepad
+        } else if Self.savesToInbox, let inbox = CaptureInbox.markdownFile {
+            let capture = Capture(text: question + " " + answer.text, route: .note)
+            result = CaptureInbox.appendMarkdown(capture, to: inbox) ? .inbox : .failed
+        } else if let notes, notes.add(answer.note(asked: question, sourcesLabel: Localization.string("Sources"))) {
+            result = .notepad
+        } else {
+            result = .failed
+        }
+        result == .failed ? Haptics.tick() : Haptics.confirm()
+        saved = result
+    }
+
+    /// A notes vault is connected and its inbox takes Markdown: saved answers go there.
+    static var savesToInbox: Bool { Runtime.vault?.isConfigured == true && CaptureInbox.markdownFile != nil }
+
+    private func resetActions() {
+        copiedReset?.cancel()
+        copied = false
+        saved = nil
+    }
+
     // MARK: Dropped on a window
 
     /// Tara let go over another app's window while the bubble is open: a picture of that window goes
@@ -479,6 +534,7 @@ final class AskTara {
             if !answer.onRules { offlineReason = nil }  // Claude answered: it's reachable again
             conversation.append(question: answer.question, answer: answer.text)
             Haptics.tick()
+            resetActions()
             withAnimation(Theme.snappy) {
                 self.answer = answer
                 phase = .answered
@@ -500,6 +556,17 @@ final class AskTara {
     }
 
     // MARK: Previews
+
+    /// Long enough to scroll in the answer card.
+    private static let longAnswer = """
+        Beim Preis habt ihr euch auf 30 Euro im Monat festgelegt. Im Kickoff am 12. Oktober lagen zwei Vorschläge auf dem Tisch: 25 Euro, um schneller Nutzer zu gewinnen, und 30 Euro, weil die Kosten pro Nutzer sonst kaum gedeckt wären. Jonas hat sich für 30 Euro ausgesprochen, und niemand hat widersprochen.
+
+        Im Weekly eine Woche später kam das Thema noch einmal auf, weil Max einen Rabatt für Jahresabos vorgeschlagen hat. Der Rabatt ist noch offen: Max rechnet bis Freitag durch, was zwei Monate gratis im Jahresabo kosten würden. Am Monatspreis ändert das nichts, die 30 Euro bleiben.
+
+        Offen ist außerdem, ob es einen günstigeren Tarif für Studierende gibt. Das wurde nur kurz erwähnt und auf die Zeit nach dem Launch verschoben. Für die Launch-Seite heißt das: ein Preis, 30 Euro im Monat, und der Hinweis auf das Jahresabo erst, wenn Max' Rechnung steht.
+
+        Nächster Schritt laut deinen Notizen: Preis mit Max klären, bevor die Seite live geht.
+        """
 
     /// `--preview ask-empty | ask-typed | ask-listening | ask-thinking | ask-answer | ask-long | ask-rules | ask-window | ask-failed`
     /// show made-up states.
@@ -541,7 +608,7 @@ final class AskTara {
                 self.phase = .answered
             case "ask-long":
                 self.asked = question
-                self.answer = AskAnswer(question: question, text: String(repeating: "Im Kickoff wurden 30 Euro im Monat beschlossen und 25 Euro verworfen. ", count: 5), sources: [
+                self.answer = AskAnswer(question: question, text: Self.longAnswer, sources: [
                     AskSource(id: "0", kind: .meeting, title: "Kickoff Lumen-Abo", quote: "Das Lumen-Abo kostet 30 Euro im Monat.", speaker: "Jonas", date: "2026-10-12"),
                     AskSource(id: "1", kind: .capture, title: "Preis mit Max klären", quote: "Preis mit Max klären", date: "2026-10-24"),
                 ], brain: "claude-code")

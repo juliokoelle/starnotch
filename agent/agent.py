@@ -96,7 +96,8 @@ ANALYSIS_SCHEMA = {
 
 ASK_SYSTEM = """You are Tara, the user's assistant in the Mac's notch. You know their meetings, what they noted with quick
 capture, and snapshots from their other tools (notes, tasks), all below. Answer their question from that, in the
-language of the question, in at most three short sentences: it shows in a small speech bubble. Lead with the answer.
+language of the question, in at most three short sentences (under 300 characters): it shows in a small speech
+bubble. Lead with the answer.
 
 Back every fact from the material below with a source: kind "meeting" with the meeting id and the exact words from
 that meeting, kind "capture" with the capture id and its text, or kind "note" with the item id in brackets (e.g.

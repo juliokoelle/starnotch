@@ -59,4 +59,16 @@ import TestSupport
         #expect(parsed.environment["A"] == "b=c")
         #expect(Processes.parseProcArgs([1, 0]) == nil)
     }
+
+    @Test func aScanReadsOnlyWhatItNeeds() throws {
+        let bytes = ProcArgsSample.bytes(arguments: ["node", "/opt/copilot/index.js", "--yolo", "fix it"],
+                                         environment: ["WEZTERM_PANE=7", "SECRET_TOKEN=abc"])
+        // The process scan: the first arguments, no environment.
+        let leading = try #require(Processes.parseProcArgs(bytes[...], maxArguments: 3))
+        #expect(leading.arguments == ["node", "/opt/copilot/index.js", "--yolo"])
+        #expect(leading.environment.isEmpty)
+        // A jump: only the terminal's variables.
+        let jump = try #require(Processes.parseProcArgs(bytes[...], environmentKeys: TerminalJump.environmentKeys))
+        #expect(jump.environment == ["WEZTERM_PANE": "7"])
+    }
 }

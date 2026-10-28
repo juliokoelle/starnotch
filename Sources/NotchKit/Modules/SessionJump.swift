@@ -12,7 +12,7 @@ enum SessionJump {
     /// True when something came to the front.
     static func open(_ agent: AgentSnapshot.Agent) -> Bool {
         guard let pid = agent.pid else { return false }
-        let environment = Processes.arguments(of: pid)?.environment ?? [:]
+        let environment = Processes.arguments(of: pid, environmentKeys: TerminalJump.environmentKeys)?.environment ?? [:]
         var tty = agent.tty ?? Processes.tty(of: pid)
         var hostPID = pid
         var hostEnvironment = environment
@@ -20,7 +20,7 @@ enum SessionJump {
         if let tmux = tmuxBinary(), let client = selectTmuxPane(tmux, environment: environment, tty: tty, pid: pid) {
             hostPID = client.pid
             tty = client.tty
-            hostEnvironment = Processes.arguments(of: client.pid)?.environment ?? [:]
+            hostEnvironment = Processes.arguments(of: client.pid, environmentKeys: TerminalJump.environmentKeys)?.environment ?? [:]
         }
         guard let app = AgentsModule.hostApp(of: hostPID) else { return false }
         let context = TerminalJump.Context(bundleID: app.bundleIdentifier ?? "", tty: tty, cwd: agent.cwd, environment: hostEnvironment)

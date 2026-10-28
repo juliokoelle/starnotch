@@ -98,6 +98,10 @@ extension TerminalJump {
     public static let editors: Set<String> = ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium",
                                               "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf"]
 
+    /// The only variables of a process's environment a jump reads (no keys or tokens are kept).
+    public static let environmentKeys: Set<String> = ["ITERM_SESSION_ID", "WEZTERM_PANE", "WEZTERM_UNIX_SOCKET", "KITTY_WINDOW_ID",
+                                                      "KITTY_LISTEN_ON", "TMUX", "TMUX_PANE"]
+
     /// What the session's process tells about its terminal (its environment), the terminal's
     /// bundle id, the terminal device and the folder.
     public struct Context: Equatable, Sendable {

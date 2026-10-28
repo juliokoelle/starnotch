@@ -51,9 +51,16 @@ final class CaptureInbox {
     /// The Markdown file captures land in, when no connector takes them.
     nonisolated static var markdownFile: URL? { Runtime.inbox == nil ? Runtime.captureMarkdownFile : nil }
 
-    /// Opens the Markdown inbox in its default app, creating it first so the click always lands somewhere.
+    /// Opens the Markdown inbox in its default app, creating it first so the click always lands
+    /// somewhere. An inbox in the notes vault opens there (in Obsidian for an Obsidian vault), and
+    /// a missing one opens the vault instead of being created in it.
     static func openMarkdown(_ file: URL) {
         let fm = FileManager.default
+        if let vault = Runtime.vault, vault.isConfigured, let folder = vault.folder,
+           file.standardizedFileURL.path.hasPrefix(folder.standardizedFileURL.path + "/") {
+            NSWorkspace.shared.open(vault.link(to: fm.fileExists(atPath: file.path) ? file : folder))
+            return
+        }
         if !fm.fileExists(atPath: file.path) {
             try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             fm.createFile(atPath: file.path, contents: Data("# Inbox\n\n".utf8))

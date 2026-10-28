@@ -4,8 +4,9 @@ import Observation
 import SwiftUI
 
 /// Today from a `TodayProvider` connector: one hero item ("Up next", or the next meeting), the
-/// main list, follow-ups, confirmations, a brief and a few counters. Read only: nothing is checked
-/// off in the notch; every row opens its place in the connector's own app.
+/// main list, follow-ups, confirmations, a brief and a few counters. A task ticks off in the notch
+/// when its source can write it back (`TodayCompleting`); every row opens its place in the
+/// connector's own app.
 @MainActor
 @Observable
 final class TodayModule: NotchModule {
@@ -58,6 +59,10 @@ final class TodayModule: NotchModule {
     private(set) var followUps: [Item] = []
     private(set) var confirmations: [Item] = []
     var selectedID: String?
+    /// Ticked off, shown done until the list reloads without them.
+    private(set) var doneIDs: Set<String> = []
+    /// Couldn't be ticked off, and why; the row and the detail card say so for a moment.
+    private(set) var failure: (id: String, result: TodayCompletion)?
     /// Ear priority in the preview.
     var ambientOverride = 0
     /// "Prepare" switches to the calendar.
@@ -123,6 +128,48 @@ final class TodayModule: NotchModule {
     }
 
     var holdsOpen: Bool { detail != nil }
+
+    // MARK: Ticking off
+
+    private var completer: (any TodayCompleting)? { provider as? any TodayCompleting }
+
+    func canComplete(_ item: Item) -> Bool {
+        item.kind == .task && completer?.canComplete(item.id) == true
+    }
+
+    /// Why `item` wasn't ticked off, while that note shows.
+    func failureText(_ item: Item) -> LocalizedStringKey? {
+        guard let failure, failure.id == item.id else { return nil }
+        return failure.result == .changed ? "Changed elsewhere, not ticked off" : "Couldn't write to the file"
+    }
+
+    /// Shows the task done at once, writes it back off the main thread, then lets it go; when the
+    /// write wasn't safe the row comes back with a short note.
+    func complete(_ item: Item) {
+        guard let completer, canComplete(item), !doneIDs.contains(item.id) else { return }
+        let id = item.id
+        Haptics.confirm()
+        withAnimation(Theme.snappy) { doneIDs.insert(id) }
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) { completer.complete(id) }.value
+            guard let self else { return }
+            if result == .done {
+                try? await Task.sleep(for: .milliseconds(420))
+                withAnimation(Theme.snappy) {
+                    if self.detail?.id == id { self.detail = nil }
+                    self.load()
+                    self.doneIDs.remove(id)
+                }
+            } else {
+                withAnimation(Theme.snappy) {
+                    self.doneIDs.remove(id)
+                    self.failure = (id, result)
+                }
+                try? await Task.sleep(for: .seconds(4))
+                if self.failure?.id == id { withAnimation(Theme.snappy) { self.failure = nil } }
+            }
+        }
+    }
 
     func handleBack() -> Bool {
         guard detail != nil else { return false }
@@ -190,9 +237,13 @@ final class TodayModule: NotchModule {
         if let item = actionable.first(where: { $0.id == selectedID }) ?? actionable.first { open(item) }
     }
 
-    /// ↑↓ walk the rows.
+    /// ↑↓ walk the rows; Space ticks off the selected task.
     func handleKey(_ press: KeyPress) -> Bool {
         switch press.key {
+        case .space:
+            guard let item = actionable.first(where: { $0.id == selectedID }), canComplete(item) else { return false }
+            complete(item)
+            return true
         case .upArrow, .downArrow:
             let list = actionable
             guard !list.isEmpty else { return true }
@@ -257,7 +308,7 @@ private struct TodayBody: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if let brief = module.feed.brief { BriefCard(brief: brief) }
                         VStack(alignment: .leading, spacing: 4) {
-                            SectionLabel(title: module.feed.followUpTitle)
+                            if !module.followUps.isEmpty { SectionLabel(title: module.feed.followUpTitle) }
                             ForEach(module.followUps) { item in
                                 ItemRow(module: module, item: item, compact: true)
                                     .transition(.blurSlide(y: -4, scale: 0.98))
@@ -371,8 +422,27 @@ private struct TodayDetailCard: View {
                             if !item.group.isEmpty { Text(item.group).foregroundStyle(Theme.textSecondary) }
                         }
                         .font(Theme.font(12))
+                        if let failure = module.failureText(item) {
+                            Text(failure).font(Theme.font(12)).foregroundStyle(Theme.waiting)
+                        }
                     }
                     Spacer(minLength: 8)
+                    if module.canComplete(item) {
+                        let done = module.doneIDs.contains(item.id)
+                        Button { module.complete(item) } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: done ? "checkmark.circle.fill" : "checkmark").font(.system(size: 10.5, weight: .semibold))
+                                Text("Mark done")
+                            }
+                            .font(Theme.font(12.5, .semibold))
+                            .foregroundStyle(Theme.textBody)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .buttonStyle(PressScale())
+                        .help("Tick it off in your notes (Space)")
+                    }
                     if item.url != nil || module.feed.home != nil {
                         Button { module.openExternally(item) } label: {
                             HStack(spacing: 4) {
@@ -469,21 +539,31 @@ private struct ItemRow: View {
     var body: some View {
         let selected = module.selectedID == item.id
         let soon = item.date.map { R5Clock.isSoon($0, today: module.today) } ?? false
+        let checkable = !compact && module.canComplete(item)
+        let done = module.doneIDs.contains(item.id)
         Button { module.open(item) } label: {
             HStack(spacing: 8) {
+                if checkable {
+                    // Room for the checkbox; the box itself sits on top as its own button.
+                    Color.clear.frame(width: 16, height: 16)
+                }
                 if item.kind == .followUp, let person = item.people.first {
                     InitialsAvatar(name: person, size: 18)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.title)
                         .font(Theme.font(compact ? 12 : 12.5, .medium))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(done ? Theme.textSecondary : Theme.textPrimary)
+                        .strikethrough(done, color: Theme.textSecondary)
                     if compact, item.kind == .confirm {
                         Text(item.detail).font(Theme.font(11)).foregroundStyle(Theme.textTertiary)
                     }
                 }
                 Spacer(minLength: 4)
-                if let date = item.date {
+                if let failure = module.failureText(item) {
+                    Text(failure)
+                        .font(Theme.font(11.5)).foregroundStyle(Theme.waiting)
+                } else if let date = item.date {
                     Text(R5Clock.due(date, today: module.today))
                         .font(Theme.font(11.5).monospacedDigit())
                         .foregroundStyle(soon ? Theme.waiting : Theme.textSecondary)
@@ -505,9 +585,43 @@ private struct ItemRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScale())
+        .overlay(alignment: .leading) {
+            if checkable { CheckBox(done: done) { module.complete(item) } }
+        }
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
         .help(item.help)
+    }
+}
+
+/// The round box in front of a task: a 28 pt target around a 14 pt circle.
+private struct CheckBox: View {
+    let done: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .strokeBorder(hovering ? Theme.textBody : Theme.textTertiary, lineWidth: 1.5)
+                    .opacity(done ? 0 : 1)
+                Circle().fill(Theme.accent).opacity(done ? 1 : 0)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+                    .opacity(done ? 1 : 0)
+                    .scaleEffect(done || Theme.reduceMotion ? 1 : 0.6)
+            }
+            .frame(width: 14, height: 14)
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovering)
+        .animation(Theme.snappy, value: done)
+        .help("Tick off")
     }
 }
 

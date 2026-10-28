@@ -6,6 +6,7 @@ import SwiftUI
 ///
 ///     --preview cal | cal:compact | cal:peek | cal:keys | cal:note | cal:week | cal:month
 ///     --preview today | today:compact | today:peek | today:hover
+///     --preview today:vault | today:vault-tick | today:vault-detail   Today from a made-up notes vault
 ///     --preview agenda-tour    both, about 26 s, then quits
 ///
 /// The clock reads 12:18 (the design review is at 12:30). Nothing is read or written; without
@@ -21,11 +22,12 @@ final class AgendaPreview {
     let today: TodayModule
     private(set) var notch: NotchController?
 
-    init() {
+    /// `vault`: Today reads a made-up notes vault in a temporary folder (ticking off writes there).
+    init(vault: Bool = false) {
         R5Clock.set(hour: 12, minute: 18)
         let samples = SampleConnector()
         agenda = AgendaModule(variant: .b, people: samples)
-        today = TodayModule(provider: samples, agenda: agenda)
+        today = TodayModule(provider: vault ? VaultSamples.connector() : samples, agenda: agenda)
     }
 
     func run(_ name: String, notch: NotchController, agents: AgentsModule) {
@@ -56,6 +58,11 @@ final class AgendaPreview {
             }
         case "compact": break
         case "peek": notch.tourPeek()
+        case "vault-tick", "vault-detail":
+            notch.expand(module, pinned: true)
+            await pause(1.0)
+            guard let first = today.tasks.first else { break }
+            if state == "vault-tick" { today.complete(first) } else { today.open(first) }
         case "week", "month":
             notch.expand(module, pinned: true)
             await pause(0.6)

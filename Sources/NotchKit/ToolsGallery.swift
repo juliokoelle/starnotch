@@ -27,7 +27,8 @@ enum ModuleAvailability {
             if EKEventStore.authorizationStatus(for: .reminder) == .denied {
                 return Status(available: false, detail: "Reminders access is off in System Settings")
             }
-            return Status(available: false, detail: "Needs Apple Reminders or a connector")
+            return Status(available: false, detail: Runtime.vault != nil ? "Needs your notes folder (Settings › Notes) or Apple Reminders"
+                                                                         : "Needs Apple Reminders or a connector")
         case .calendar:
             switch EKEventStore.authorizationStatus(for: .event) {
             case .fullAccess: return Status(available: true, detail: "Your calendars, next meeting and Join")

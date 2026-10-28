@@ -60,12 +60,18 @@ final class JamieConnect {
 
     private var directory: URL { Runtime.meetingAgentDir }
     private var log: URL { Brand.supportFolder.appending(path: "meeting-agent.log") }
-    // Where jamie_sync.py keeps its login and the fingerprints it writes at the end of each sync.
+    // Where jamie_sync.py keeps its login and the fingerprints it writes at the end of each sync. The sidecar
+    // always uses Application Support/Starnotch, so a build with another SUPPORT_FOLDER won't find them.
     private var tokenFile: URL { Brand.supportFolder.appending(path: "jamie-oauth.json") }
     private var stateFile: URL { Brand.supportFolder.appending(path: "memory/jamie-sync.state") }
 
-    /// A Jamie login is saved (Connect has worked once and nobody signed out).
-    var hasLogin: Bool { FileManager.default.fileExists(atPath: tokenFile.path) }
+    /// A Jamie login is saved (Connect has worked once and nobody signed out). The file alone isn't one:
+    /// registering the client writes it before the browser login, which may never have finished.
+    var hasLogin: Bool {
+        guard let data = try? Data(contentsOf: tokenFile),
+              let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return saved["tokens"] is [String: Any]
+    }
 
     enum Blocker { case noAgent, noUV }
 
@@ -115,13 +121,14 @@ final class JamieConnect {
         }
     }
 
-    /// Syncs in the background when the schedule says so (one sync at a time, never the browser).
+    /// Syncs in the background when the schedule says so (one sync at a time, never the browser). Only the
+    /// newest ten meetings: an unchanged one still costs a request, and the buttons sync the full 50.
     func syncIfDue(_ trigger: JamieSyncSchedule.Trigger) {
         guard ticker != nil else { return }
         schedule.connected = !loginLost && hasLogin
         schedule.meetingEnds = meetingEnds()
         guard schedule.shouldSync(trigger, now: Date()) else { return }
-        run("exec uv run python jamie_sync.py --no-login", automatic: true)
+        run("exec uv run python jamie_sync.py --no-login --limit 10", automatic: true)
     }
 
     func openLogin() {

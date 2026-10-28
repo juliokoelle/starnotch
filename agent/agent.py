@@ -285,8 +285,9 @@ class Agent:
     def ask_system(self, notes: list[linked.Item]) -> str:
         """Tara's instructions with today's date, when Jamie last synced the meetings, and the material."""
         synced = last_synced(self.memory.folder)
-        line = (f" Jamie last synced the meetings at {synced:%Y-%m-%d %H:%M}. A meeting that ended after that is not "
-                f"in the memory yet: asked about one, say when Jamie last synced instead of guessing." if synced else "")
+        line = (f" Jamie last synced the meetings at {synced:%Y-%m-%d %H:%M}; meetings Jamie had not finished by then "
+                f"are not in the memory yet. Asked about a meeting from today that isn't below, say when Jamie last "
+                f"synced instead of guessing." if synced else "")
         return ASK_SYSTEM.format(today=f"{self.today:%A}, {self.today.isoformat()}", synced=line,
                                  memory=self.ask_context(notes))
 

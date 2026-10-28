@@ -620,6 +620,18 @@ def login_required(error: BaseException) -> bool:
     return cause is not None and login_required(cause)
 
 
+def reason(error: BaseException) -> str:
+    """What went wrong, for the app: the first error inside the task groups the MCP client raises from, and a short
+    sentence when Jamie can't be reached at all (offline, or the network not back after a wake)."""
+    import httpx2
+
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    if isinstance(error, (httpx2.NetworkError, httpx2.ConnectTimeout)):
+        return "Jamie isn't reachable; check your internet connection"
+    return str(error)
+
+
 def oauth_provider(url: str, port: int = CALLBACK_PORT, interactive: bool = True):
     from mcp.client.auth import OAuthClientProvider
     from mcp.shared.auth import OAuthClientMetadata
@@ -699,7 +711,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.logout:
         print(json.dumps({"type": "status", "state": "logged_out", "removed": logout()}), flush=True)
         return 0
-    if args.no_login and not TOKEN_FILE.exists():
+    if args.no_login and not FileTokenStorage()._read().get("tokens"):  # registering the client alone writes the file
         print(json.dumps({"type": "status", "state": "login_required"}), flush=True)
         return 2
 
@@ -716,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         if login_required(error):  # its status line went out already
             return 2
-        print(json.dumps({"type": "error", "message": f"jamie sync: {error}"}), flush=True)
+        print(json.dumps({"type": "error", "message": f"jamie sync: {reason(error)}"}), flush=True)
         return 1
     return 0
 

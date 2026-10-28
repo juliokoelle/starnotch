@@ -417,7 +417,7 @@ async def test_no_login_never_opens_the_browser(monkeypatch, capsys):
 
 def test_an_expired_login_ends_quietly_with_its_own_exit_code(tmp_path, monkeypatch, capsys):
     token = tmp_path / "jamie-oauth.json"
-    token.write_text("{}")
+    token.write_text(json.dumps({"tokens": {"access_token": "a", "token_type": "Bearer"}}))
     monkeypatch.setattr(jamie_sync, "TOKEN_FILE", token)
 
     async def wrapped(*args, **kwargs):  # the MCP client raises from its task groups
@@ -436,3 +436,35 @@ def test_an_expired_login_ends_quietly_with_its_own_exit_code(tmp_path, monkeypa
     monkeypatch.setattr(jamie_sync, "connect_and_run", offline)
     assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 1
     assert json.loads(capsys.readouterr().out)["message"] == "jamie sync: offline"
+
+
+def test_a_login_abandoned_in_the_browser_is_no_saved_login(tmp_path, monkeypatch, capsys):
+    token = tmp_path / "jamie-oauth.json"
+    token.write_text(json.dumps({"client": {"client_id": "c1"}}))  # registered, but the browser login never finished
+    monkeypatch.setattr(jamie_sync, "TOKEN_FILE", token)
+    monkeypatch.setattr(jamie_sync, "connect_and_run", lambda *a, **k: pytest.fail("must not connect"))
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 2
+    assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "login_required"}
+
+
+def test_offline_says_jamie_isnt_reachable(tmp_path, monkeypatch, capsys):
+    import httpx2
+
+    token = tmp_path / "jamie-oauth.json"
+    token.write_text(json.dumps({"tokens": {"access_token": "a", "token_type": "Bearer"}}))
+    monkeypatch.setattr(jamie_sync, "TOKEN_FILE", token)
+
+    async def offline(*args, **kwargs):  # the MCP client raises from its task groups
+        raise ExceptionGroup("unhandled errors in a TaskGroup", [httpx2.ConnectError("nodename nor servname provided")])
+
+    monkeypatch.setattr(jamie_sync, "connect_and_run", offline)
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 1
+    assert json.loads(capsys.readouterr().out)["message"] == \
+        "jamie sync: Jamie isn't reachable; check your internet connection"
+
+    async def broken(*args, **kwargs):
+        raise ExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("Jamie has no list_meetings tool")])
+
+    monkeypatch.setattr(jamie_sync, "connect_and_run", broken)
+    assert jamie_sync.main(["--no-login", "--memory", str(tmp_path / "memory")]) == 1
+    assert json.loads(capsys.readouterr().out)["message"] == "jamie sync: Jamie has no list_meetings tool"

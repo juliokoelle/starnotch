@@ -63,6 +63,8 @@ final class MeetingModule: NotchModule {
     @ObservationIgnored private var agentGeneration = 0
     @ObservationIgnored private var source: MeetingProcess?
     @ObservationIgnored private var nextID = 0
+    /// The line a failed Jamie sync put up, so a sync of its own that works takes it back down.
+    @ObservationIgnored private var jamieFailure: String?
 
     init() {
         jamie.onPhase = { [weak self] phase in self?.jamieChanged(phase) }
@@ -201,7 +203,12 @@ final class MeetingModule: NotchModule {
                 agent?.write(MeetingCommand.reload)
                 onMemoryChanged()
             }
-            if jamie.automatic { break }
+            if jamie.automatic {
+                if let jamieFailure, message == jamieFailure { message = nil }
+                jamieFailure = nil
+                break
+            }
+            jamieFailure = nil
             if phase.isEmpty {
                 message = "Jamie: no meetings in this account"
             } else if case .done(let meetings, _) = phase {
@@ -209,7 +216,10 @@ final class MeetingModule: NotchModule {
                 onJamieSynced(meetings)
             }
         case .failed(let why):
+            // A sync of its own doesn't talk over a meeting or a save; the Jamie row in Settings still says why.
+            if jamie.automatic, isRunning || self.phase == .saving { break }
             message = Localization.string(why)
+            jamieFailure = message
         }
     }
 

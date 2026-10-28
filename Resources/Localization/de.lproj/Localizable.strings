@@ -519,3 +519,4 @@
 "%@ · %lld new meetings" = "%@ · %lld neue Meetings";
 "Sync now" = "Jetzt abgleichen";
 "Jamie signed you out; connect again to keep your meetings in sync" = "Jamie hat dich abgemeldet; verbinde dich erneut, damit deine Meetings abgeglichen bleiben";
+"Jamie isn't reachable; check your internet connection" = "Jamie ist nicht erreichbar; prüfe deine Internetverbindung";

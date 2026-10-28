@@ -220,7 +220,8 @@ def test_ask_knows_today_and_when_jamie_last_synced(tmp_path, memory_dir):
     synced = dt.datetime(2026, 10, 26, 10, 17).timestamp()
     os.utime(state, (synced, synced))
     agent.handle({"cmd": "ask", "question": "What was my meeting today about?"})
-    assert "Jamie last synced the meetings at 2026-10-26 10:17." in llm.calls[1].system
+    assert "Jamie last synced the meetings at 2026-10-26 10:17;" in llm.calls[1].system
+    assert "a meeting from today that isn't below" in llm.calls[1].system
 
 
 def test_without_a_given_date_the_agent_follows_the_clock(memory_dir):

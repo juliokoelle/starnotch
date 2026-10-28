@@ -178,3 +178,36 @@ public struct AskHotKeyGesture: Equatable, Sendable {
         return wasOpen ? .close : .nothing
     }
 }
+
+/// Whether Apple's on-device model can think for Tara: the bundled helper's `--status` line (Sources/AppleModel).
+public enum AppleModelStatus: Equatable, Sendable {
+    case ready
+    /// Apple Intelligence is off in System Settings.
+    case notEnabled
+    /// On, but the model isn't on this Mac yet.
+    case downloading
+    /// Not on this Mac (no Apple silicon, or older than macOS 26).
+    case notSupported
+    /// Unavailable for another reason Apple gives.
+    case unavailable
+    /// No helper in this build, or no answer it could read.
+    case unknown
+
+    public init(statusLine data: Data) {
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            self = .unknown
+            return
+        }
+        if object["available"] as? Bool == true {
+            self = .ready
+            return
+        }
+        switch object["reason"] as? String {
+        case "appleIntelligenceNotEnabled": self = .notEnabled
+        case "modelNotReady": self = .downloading
+        case "deviceNotEligible": self = .notSupported
+        case "noHelper": self = .unknown
+        default: self = .unavailable
+        }
+    }
+}

@@ -92,10 +92,37 @@ enum MeetingAgentSetup {
     static func environment() -> [String] {
         var list = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
         for (name, value) in keys() { list.append("STARNOTCH_KEY_\(name)=\(value)") }
-        // How Tara thinks (onboarding or Settings › Meeting agent): claude-code, api, rules or auto.
-        list.removeAll { $0.hasPrefix("STARNOTCH_BRAIN=") }
+        // How Tara thinks (onboarding or Settings › Meeting agent): claude-code, api, apple, rules or auto.
+        list.removeAll { $0.hasPrefix("STARNOTCH_BRAIN=") || $0.hasPrefix("STARNOTCH_APPLE_HELPER=") }
         list.append("STARNOTCH_BRAIN=\(brain.rawValue)")
+        if let appleHelper { list.append("STARNOTCH_APPLE_HELPER=\(appleHelper.path)") }
         return list
+    }
+
+    /// The Apple Intelligence helper in this app (Sources/AppleModel), which the agent runs for the `apple` brain.
+    static var appleHelper: URL? { Bundle.main.url(forAuxiliaryExecutable: "AppleModel") }
+
+    /// Whether Apple's on-device model is ready, from the helper's `--status` (a process: off the main thread,
+    /// stopped after 15 s). Before macOS 26 the helper isn't asked.
+    static func appleStatus() async -> AppleModelStatus {
+        guard #available(macOS 26, *) else { return .notSupported }
+        guard let helper = appleHelper else { return .unknown }
+        return await Task.detached {
+            let process = Process()
+            process.executableURL = helper
+            process.arguments = ["--status"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            do { try process.run() } catch { return AppleModelStatus.unknown }
+            let pid = process.processIdentifier
+            let stop = DispatchWorkItem { kill(pid, SIGTERM) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: stop)
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            stop.cancel()
+            process.waitUntilExit()
+            return AppleModelStatus(statusLine: data)
+        }.value
     }
 
     /// The saved brain choice, as a starting agent gets it.

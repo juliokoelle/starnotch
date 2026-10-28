@@ -176,7 +176,7 @@ struct SettingsView: View {
             } header: {
                 Text("Meeting agent")
             } footer: {
-                Text("The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Automatic uses Claude Code when it's there, else an Anthropic key, else simple rules.")
+                Text("The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Automatic uses Claude Code when it's there, else an Anthropic key, else Apple Intelligence, else simple rules.")
                     .foregroundStyle(.secondary)
             }
 
@@ -250,6 +250,7 @@ struct MeetingAgentSettings: View {
     @State private var reson8 = MeetingAgentSetup.keys()["RESON8_API_KEY"] ?? ""
     @State private var uvFound = MeetingAgentSetup.uvPath != nil
     @State private var copied = false
+    @State private var apple: AppleModelStatus?
 
     var body: some View {
         if !compact, let jamie {
@@ -264,6 +265,14 @@ struct MeetingAgentSettings: View {
                 ForEach(TaraBrain.allCases, id: \.self) { brain in
                     Text(LocalizedStringKey(BrainInfo.title(brain))).tag(brain)
                 }
+            }
+            if state.settings.brain == .apple || state.settings.brain == .auto {
+                LabeledContent("Apple Intelligence") { Text(LocalizedStringKey(Self.line(apple))) }
+                    .task { apple = await MeetingAgentSetup.appleStatus() }
+            }
+            if state.settings.brain == .apple {
+                Text("Answers are simpler than with Claude, and live meetings run on simple rules.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
         }
         // Previews and sample data never write the real agent.env.
@@ -296,6 +305,19 @@ struct MeetingAgentSettings: View {
         }
         if !compact, let url = URL(string: "https://console.anthropic.com/settings/keys") {
             Link("Get an Anthropic key", destination: url)
+        }
+    }
+
+    /// Apple Intelligence's state in a few words; nil while the helper is asked.
+    private static func line(_ status: AppleModelStatus?) -> String {
+        switch status {
+        case nil: "Checking…"
+        case .ready?: "Ready"
+        case .notEnabled?: "Not enabled: System Settings › Apple Intelligence & Siri"
+        case .downloading?: "Downloading the model"
+        case .notSupported?: "Not supported on this Mac"
+        case .unavailable?: "Unavailable"
+        case .unknown?: "Not in this build"
         }
     }
 

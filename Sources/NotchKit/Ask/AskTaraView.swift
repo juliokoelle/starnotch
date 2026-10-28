@@ -205,7 +205,7 @@ struct AskTaraView: View {
         }
         if answer.onRules {
             Text(LocalizedStringKey(ask.offlineReason == nil ? "Simple rules, no Claude: Settings › Meeting agent"
-                                                             : "Claude isn't reachable, so simple rules answered"))
+                                                             : "Tara's model isn't reachable, so simple rules answered"))
                 .font(Theme.font(11))
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

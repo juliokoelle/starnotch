@@ -10,7 +10,7 @@ The Swift app starts these programs and reads their JSON lines; [PROTOCOL.md](PR
 |---|---|
 | `memory.py` | The meeting memory: one JSON file per meeting, in `~/Library/Application Support/Starnotch/memory/` |
 | `agent.py` | The agent: utterances and commands on stdin, contradictions, questions, commitments, prep cards and answers on stdout |
-| `claude.py` | The Claude call: through the user's Claude Code on their Claude plan, or the Anthropic API (Claude Sonnet 5.5, effort `low`, structured outputs, server-side fallback on refusals) |
+| `claude.py` | The model call: through the user's Claude Code on their Claude plan, the Anthropic API (Claude Sonnet 5.5, effort `low`, structured outputs, server-side fallback on refusals), or Apple's on-device model through the app's helper |
 | `jamie_sync.py` | Pulls meetings from [Jamie](https://meetjamie.ai) over its MCP server (OAuth login in the browser) into the memory |
 | `transcribe.py` | Live transcription with Reson8 Realtime, from the microphone or an audio file streamed in real time |
 | `captures.py` | Reads Starnotch's quick-capture queue, so the agent knows the user's own tasks, questions and notes |
@@ -37,15 +37,19 @@ Keys are read from the environment only.
 
 | `STARNOTCH_BRAIN` | Thinks with | Costs |
 |---|---|---|
-| `auto` (default) | Claude Code if a `claude` binary is found, else the API if `ANTHROPIC_API_KEY` is set, else rules | |
+| `auto` (default) | Claude Code if a `claude` binary is found, else the API if `ANTHROPIC_API_KEY` is set, else Apple's on-device model if it is ready, else rules | |
 | `claude-code` | The user's Claude Code CLI, headless (`claude -p`), model alias `sonnet`, effort `low` | counts against their Claude plan |
 | `api` | The Anthropic API with `ANTHROPIC_API_KEY` | API credits |
+| `apple` | Apple's on-device model (Apple Intelligence, macOS 26 on Apple silicon) through the app's helper | nothing |
 | `rules` | Simple built-in rules, no model (same as `--offline`) | nothing |
 
 The claude binary is looked up on `PATH`, then in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`.
 Claude Code never bills an API by surprise: before the first call the agent runs `claude auth status` and only goes
 on with a Claude plan login (`claude.ai`, or a `claude setup-token` token); otherwise, also when it isn't signed
-in, it uses rules, never the API. Every call runs without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+in, it uses (under `auto`) Apple's free on-device model when that is ready, else rules, never the API.
+That includes a `claude auth status` that times out (15 s) or prints nothing readable: then `auto` thinks with Apple
+for the rest of the session even if Claude Code would have worked, and the live meeting analysis runs on rules.
+A brain chosen by name falls back to rules only. Every call runs without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
 `ANTHROPIC_BASE_URL` and the Bedrock/Vertex/Foundry switches in its environment (with a key there, Claude Code
 silently bills the key).
 
@@ -81,6 +85,44 @@ memory at the full budget (about 33,000 tokens) and Sonnet's API list prices, a 
 one-line batch and up to about $0.026 for a busy one (10 new utterances, 12 of context, 20 items already reported and
 the recall at its 4,000-character cap: about 8,000 characters). A meeting hour of steady talk, 144 calls, comes to
 about $1.50 to $3.70 plus about $0.13 for the first call, against $2.60 to $10 when every call followed the last one.
+
+### Apple Intelligence (`apple`)
+
+The free brain for people without Claude. The app ships a small helper, `Contents/MacOS/AppleModel`
+(`Sources/AppleModel`, built by `scripts/build-app.sh`), and passes its path as `STARNOTCH_APPLE_HELPER`; without
+that variable the agent looks in this repo's `.build/release` and `.build/debug`. Each call runs the helper once:
+one JSON request on stdin, one JSON line back (see [PROTOCOL.md](PROTOCOL.md#applemodel-the-apps-helper)). The helper
+builds Apple's guided-generation schema from the same JSON schema the Claude brains get, so the source ids it may
+cite are limited to the material sent. `auto` uses it only when `AppleModel --status` says the model is available
+(before macOS 26 the helper isn't even started); a call that reports it unavailable (switched off, still
+downloading) moves the rest of the session to rules. A rate-limited call is tried once more after 2 seconds.
+
+The model reads at most 4,096 tokens for instructions, prompt, schema and answer together. Ask Tara and captured
+questions get the whole memory (as Claude gets it, with every meeting, capture and connector id to cite) when it
+fits, which a new user's small memory mostly does, and something in it shares a content word with the question.
+Otherwise they get a retrieval: the facts (summary, decisions, commitments) of the meetings that share content words
+with the question, the 10 best transcript lines from `memory.search` with the line before and after each, and the
+quick captures and connector items that share words with it (pronouns don't count). When nothing shares a word,
+the prompt says that nothing matches, so the model says it isn't in the material, or answers a general question
+without sources. A follow-up adds the words of the last turn to the search and carries the last 2 turns (300
+characters each); the question itself counts up to 1,500 characters. It all has to fit into what is left after 600
+tokens for the answer (also the answer's cap, `maximumResponseTokens`), counted at 2.5 characters per token (German
+runs about 2 to 3; the Command Line Tools SDK can't count tokens); a window overflow anyway is retried once with a
+retrieval in half the room. The answer is asked for in under 300 characters with ids only in the sources; an id the
+model still writes in brackets is taken out of the text. The
+instructions name the question's locale the way Apple documents it ("The person's locale is de_DE." and "You MUST
+respond in German."), so the answer comes in the question's language. A picture (Tara dropped on a window) is not
+sent: the model is told it can't see it, and the answer opens with a sentence saying so. The live meeting analysis
+needs the whole memory, so with `apple` it runs on the rules. The usage ledger records each call with the model
+`apple-on-device`, tokens estimated at 3 characters per token, and cost 0.
+
+Measured on this repo's demo meetings with the 10 questions of the on-device benchmark (macOS 27, greedy sampling,
+two runs with the same answers; the demo memory fits whole): 8 of 10 answers right by the benchmark's word checks,
+10 of 10 with a source from the right meeting, all 10 in the question's language, 0.7 to 3.9 seconds per question
+(median about 3 s). Read by hand, 9 of 10 are right: "Has Max sent the margin numbers yet?" is right but leaves out
+why (the word check wants it), and the follow-up "who proposed this price?" names the wrong person. Answers are
+simpler than Claude's, sometimes repeat the quote or name a meeting id in the text, and a French question gets an
+English answer (only German and English are told apart); the source check keeps only quotes that are in the memory.
 
 ## Ask Tara
 
@@ -136,8 +178,9 @@ uv run python jamie_sync.py --no-login     # never opens the browser (the app's 
 uv run pytest
 ```
 
-Claude, Jamie and Reson8 are replaced by fakes: a fake Anthropic client, a fake `claude` binary on `PATH`, an in-process MCP server with Jamie's
-tool names, and a local WebSocket server.
+Claude, Apple's model, Jamie and Reson8 are replaced by fakes: a fake Anthropic client, a fake `claude` binary on `PATH`,
+a fake Apple Intelligence helper, an in-process MCP server with Jamie's tool names, and a local WebSocket server. The
+tests never use a helper a local `swift build` left in `.build`.
 
 ## MCP server: any agent reaches you in the notch
 

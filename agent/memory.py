@@ -133,6 +133,15 @@ def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[\wäöüß€]+", text.lower()) if len(w) > 2 or w.isdigit() or w == "€"}
 
 
+def _bare(quote: str, speaker: str) -> str:
+    """A quote without a leading "Speaker: " (models copy the line as the material prints it); "\0" when it has
+    none or too little follows it (under three words and 12 characters, like "Lisa: Ja"), so it matches no text."""
+    head, sep, rest = quote.partition(":")
+    rest = rest.strip().strip('"„“').strip()
+    enough = len(rest) >= 12 or len(rest.split()) >= 3
+    return rest.lower() if sep and enough and head.strip().lower() == speaker.strip().lower() else "\0"
+
+
 def _same_person(a: str, b: str) -> bool:
     a, b = a.strip().lower(), b.strip().lower()
     return bool(a and b) and (a == b or a.split()[0] == b.split()[0])
@@ -226,7 +235,7 @@ class Memory:
             return None
         for m in reversed(self.meetings):
             for line in m.transcript:
-                if needle in line.text.lower():
+                if needle in line.text.lower() or (line.speaker and _bare(needle, line.speaker) in line.text.lower()):
                     return m, line
         best = self.search(quote, limit=1)
         if best and best[0].score >= max(2.0, len(_words(quote)) * 0.5):

@@ -18,10 +18,13 @@ Shared rules:
 - Keys come from the environment the app starts the process with: `ANTHROPIC_API_KEY` for `agent.py` (only with
   `STARNOTCH_BRAIN=api`, or `auto` without Claude Code), `RESON8_API_KEY` for `transcribe.py`. Jamie needs no key
   (browser login, see below).
-- `STARNOTCH_BRAIN` picks what `agent.py` thinks with: `auto` (default), `claude-code`, `api` or `rules`
+- `STARNOTCH_BRAIN` picks what `agent.py` thinks with: `auto` (default), `claude-code`, `api`, `apple` or `rules`
   (see [README.md](README.md#taras-brain)). `auto` is Claude Code when a `claude` binary is found (`PATH`,
-  `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), else the API when `ANTHROPIC_API_KEY` is set, else rules.
-  Claude Code that isn't signed in to a Claude plan falls back to rules, never to the API.
+  `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), else the API when `ANTHROPIC_API_KEY` is set, else Apple's
+  on-device model when its helper says it is available, else rules. Claude Code that isn't signed in to a Claude plan
+  falls back to Apple's model (under `auto`) or rules, never to the API; a brain chosen by name falls back to rules.
+- `STARNOTCH_APPLE_HELPER` is the path of the app's Apple Intelligence helper (`Contents/MacOS/AppleModel`), which
+  the app sets; without it the agent looks for a build in this repo's `.build`.
 - `STARNOTCH_MEETING_GAP` (or `agent.py --meeting-gap`, which wins) is the least number of seconds between two
   live analysis calls to Claude, default `25` (also for a value that isn't a number), at most `600`; `0` asks for
   every batch (see "Order" under `agent.py`).
@@ -64,7 +67,9 @@ ledger, `usage.jsonl` in the same folder (`--usage` points elsewhere, `--usage '
 `feature` (`ask`, `capture` or `meeting`), `brain`, `model`, `input_tokens`, `cache_creation_input_tokens`,
 `cache_read_input_tokens`, `output_tokens`, `duration_ms` and `cost_usd`, the call's price at API list prices
 (Claude Code's own `total_cost_usd`; for `api` computed from the price table in `usage.py`, `null` for a model not
-in it). On a Claude plan nothing is billed per call; the tokens count against the plan's limits. Lines older than
+in it). On a Claude plan nothing is billed per call; the tokens count against the plan's limits. Apple's on-device
+model (`brain` `apple`, `model` `apple-on-device`) costs nothing: `cost_usd` is `0` and the tokens are estimated
+(3 characters per token), since the framework can't count them here. Lines older than
 90 days are dropped when an agent first writes after it starts; appends and that prune hold a lock on
 `usage.jsonl.lock`, since Ask Tara's agent and the meeting's write the same file. The tokens are summed over
 every turn and model of a call. A call that times out or is ended by SIGTERM printed no result and is missing
@@ -86,7 +91,8 @@ During a meeting the app reads `transcribe.py`'s stdout and writes each `utteran
 ```
 
 `brain` is what the agent thinks with: `claude-code` (the user's Claude plan, `model` is Claude Code's alias
-`sonnet`), `api` (`model` is the API model id, e.g. `claude-sonnet-5-5`) or `rules` (`model` is `null`: `--offline`,
+`sonnet`), `api` (`model` is the API model id, e.g. `claude-sonnet-5-5`), `apple` (Apple's on-device model, `model`
+is `apple-on-device`) or `rules` (`model` is `null`: `--offline`,
 `STARNOTCH_BRAIN=rules`, no Claude Code and no key, or Claude Code not signed in; the reason comes as a `status`
 `offline` line just before `ready`). `errors` lists meeting files that couldn't be read. Wait for `ready` before
 sending commands.
@@ -113,7 +119,15 @@ Commands. `id` is optional (string or number); the reply carries it back as `rep
 one). Optional fields: `history`, the conversation so far for a follow-up, oldest first
 (`[{"question": "…", "answer": "…"}]`, the last 6 count); `image`, the path of a screenshot (PNG or JPEG) of the window
 the question is about. Claude Code gets the screenshot as a copy in its brain folder, readable with `Read` for that
-file only, and deleted after the call; the API gets it as an image block.
+file only, and deleted after the call; the API gets it as an image block. Apple's on-device model gets no picture:
+it is told it can't see one, and the answer's `text` opens with a sentence saying so ("I can't see pictures with
+Apple Intelligence." or the German one).
+
+With `apple`, the window holds 4,096 tokens for instructions, prompt, schema and answer: the prompt carries the
+whole memory when it fits and something in it shares a word with the question, else the facts, transcript lines
+(with the line before and after), captures and connector items that share words with the question (and with the
+last turn of a follow-up); then the last 2 turns, and the instructions name the question's locale (see
+[README.md](README.md#apple-intelligence-apple)).
 
 The brain is told today's date (`--today`, else the real date, so an agent kept running overnight moves on) and, when
 `<memory>/jamie-sync.state` exists, when Jamie last synced: that file is written only at the end of a successful
@@ -134,7 +148,8 @@ proactive events arrive after the words, sometimes several at once. With Claude,
 every meeting gap (default 25 s): the first utterance after a quiet stretch goes at once, the ones after it wait until
 the gap since the last call is over and then go together in one call, also when nobody speaks in the meantime; none
 is dropped or sent twice. So a contradiction shows up to the gap plus a few seconds after the words. `save` analyses
-what is still waiting (see above), stdin closing runs it through the rules, `reset` drops it. Not held back by the
+what is still waiting (see above), stdin closing runs it through the rules, `reset` drops it. With `apple` the live
+analysis always runs on the rules (the memory doesn't fit the on-device window). Not held back by the
 gap: the rules (no brain, or Claude resting for a minute after a failed call), `ask` and captured questions; a
 proactive event from a waiting utterance may therefore come after the reply to a later command.
 
@@ -241,7 +256,7 @@ today. `captures` are quick-capture tasks and questions that tag or name a parti
 `sources` may be empty (then nothing in the material answered it, or it was a general question). Every source
 exists: a meeting quote is a line of that meeting, a capture is in the queue, a note is an item of a snapshot (its
 `quote` is empty unless the words are in the item; `url` is empty when the item names no place). `brain` is what
-answered: `claude-code`, `api`, or `rules` (no brain, or Claude failed just now and the rules found a line). On rules
+answered: `claude-code`, `api`, `apple`, or `rules` (no brain, or the brain failed just now and the rules found a line). On rules
 the answer is the line that shares the most words with the question, stop words left out (at least two; one for a
 question about a decision); a captured question is never an answer, least of all to itself. When nothing matches,
 the answer is a sentence in the question's language: without a brain, what Tara can do without one; with a brain
@@ -252,13 +267,40 @@ missing screenshot is left out, and a failed question doesn't rest Claude for th
 
 | `state` | Extra fields | When |
 |---|---|---|
-| `offline` | `message` | Claude isn't reachable (no key, Claude Code not signed in or not on a Claude plan, a timeout, an error); the agent continues on rules (sent once) |
+| `offline` | `message` | Claude isn't reachable (no key, Claude Code not signed in or not on a Claude plan, a timeout, an error) or Apple Intelligence isn't (switched off, still downloading, an error); the agent continues on rules, or under `auto` on Apple's model when the message ends in "using Apple Intelligence" (sent once) |
 | `saved` | `meeting_id`, `path` | after `save` |
 | `reset` | | after `reset` |
 | `reloaded` | `meetings` | after `reload` |
 
 **error**: `{"type": "error", "message": "…", "reply_to": 4}`, for a line that isn't JSON, an unknown command
 or a failed command. The agent keeps running.
+
+## AppleModel (the app's helper)
+
+`Contents/MacOS/AppleModel` (source `Sources/AppleModel`) asks Apple's on-device model once per run; the agent runs
+it for the `apple` brain. It needs macOS 26 and Apple silicon, and starts on older systems to say so.
+
+`AppleModel --status` prints `{"available": true}` or `{"available": false, "reason": "…", "message": "…"}`, `reason`
+being Apple's: `deviceNotEligible` (not this Mac, or older than macOS 26), `appleIntelligenceNotEnabled`,
+`modelNotReady` (still downloading).
+
+A call is one JSON object on stdin and one line on stdout:
+
+```json
+{"instructions": "…", "prompt": "…", "schema": {"type": "object", "properties": {…}, "required": […]}, "locale": "de_DE", "maximumResponseTokens": 600}
+{"result": {"answer": "…", "sources": […]}}
+{"error": {"kind": "rateLimited", "message": "…"}}
+```
+
+`schema` is the JSON Schema subset the agent uses: `object` (`properties`, `required`; properties come in the order
+of `required`, then the others by name), `array` (`items`, `minItems`, `maxItems`), `string` (with `enum` for a
+fixed choice), `integer`, `number`, `boolean`, and `description`. The root must be an object and each `type` one
+string (a node without `type` is a string); anything else, such as `["string", "null"]`, is refused with kind `other`.
+`locale` is checked against the model's languages first; `maximumResponseTokens` (optional) caps the answer.
+`kind` is `unavailable` (with `reason` as above), `rateLimited` (the agent tries once more after 2 seconds),
+`guardrail` (the agent treats it as a refusal), `contextWindowExceeded` (the agent retries once with a retrieval in
+half the room), `unsupportedLanguage` or `other`.
+Exit code 0 with a `result`, 1 with an `error`.
 
 ## transcribe.py
 

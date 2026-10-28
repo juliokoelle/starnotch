@@ -77,4 +77,16 @@ import TestSupport
         #expect(!gesture.listening)
         #expect(gesture.release(at: start.addingTimeInterval(3)) == .nothing)  // no press, no action
     }
+
+    @Test func appleModelStatusFromTheHelper() {
+        func status(_ json: String) -> AppleModelStatus { AppleModelStatus(statusLine: Bytes.data(json)) }
+        #expect(status(#"{"available":true}"#) == .ready)
+        #expect(status(#"{"available":false,"reason":"appleIntelligenceNotEnabled","message":"off"}"#) == .notEnabled)
+        #expect(status(#"{"available":false,"reason":"modelNotReady","message":"downloading"}"#) == .downloading)
+        #expect(status(#"{"available":false,"reason":"deviceNotEligible","message":"macOS 26"}"#) == .notSupported)
+        #expect(status("") == .unknown)
+        #expect(status(#"{"available":false,"reason":"somethingNew"}"#) == .unavailable)
+        #expect(status(#"{"available":false}"#) == .unavailable)
+        #expect(status(#"{"available":false,"reason":"noHelper"}"#) == .unknown)
+    }
 }

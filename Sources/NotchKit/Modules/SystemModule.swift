@@ -38,9 +38,13 @@ final class SystemModule: NotchModule {
     var offersKeepAwake = true
     @ObservationIgnored var onToggleKeepAwake: (() -> Void)?
     /// Keep awake's second level on a laptop: also with the lid closed, until a time or until
-    /// unplugged. `lidBusy` while macOS asks for the password or pmset runs.
+    /// switched off. `lidBusy` while macOS asks for the password or pmset runs.
     var lidAwake = LidAwake.State.off
     var lidBusy = false
+    /// The charge it stops at on battery, picked beside the times (remembered).
+    var lidFloor = UserDefaults.standard.object(forKey: "lidAwake.floor") as? Int ?? LidAwake.defaultFloor {
+        didSet { UserDefaults.standard.set(lidFloor, forKey: "lidAwake.floor") }
+    }
     /// The time choice is open in the switches row (closes with the panel).
     var lidPickerOpen = false
     /// A time switches it on (or moves the end), nil switches it off.
@@ -238,7 +242,7 @@ final class SystemModule: NotchModule {
 
     /// The camera or microphone in use wins over everything but dictation; tight memory or a
     /// long-busy CPU wins over agents at work; full memory over a meeting soon. Awake with the
-    /// lid closed sits above a failed loop and below music (unplugging ends it anyway).
+    /// lid closed sits above a failed loop and below music (its ear says it anyway).
     var ambientPriority: Int {
         if media.inUse { return 38 }
         switch alertLevel {
@@ -838,7 +842,7 @@ private struct StatusChips: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    /// Off: opens the time choice in this row. On: what's left (a bolt: until unplugged); a click
+    /// Off: opens the time choice in this row. On: what's left (∞: until switched off); a click
     /// switches it off.
     private func lidToggle(labels: Bool) -> some View {
         let on = module.lidAwakeOn
@@ -857,7 +861,7 @@ private struct StatusChips: View {
                         (Text("Lid closed") + Text(verbatim: left.map { " · " + Durations.short(max(60, $0)) } ?? ""))
                             .font(Theme.font(12, .medium).monospacedDigit())
                         if on && left == nil {
-                            Image(systemName: "bolt.fill").font(.system(size: 9.5, weight: .semibold))
+                            Image(systemName: "infinity").font(.system(size: 9.5, weight: .semibold))
                         }
                     }
                 }
@@ -867,7 +871,7 @@ private struct StatusChips: View {
         .buttonStyle(PressScale())
         .disabled(module.lidBusy)
         .help(on ? Text(LidAwakeText.line(module.lidAwake)) + Text(verbatim: " · ") + Text("Click to switch off")
-                 : Text("Also stay awake with the lid closed, on the power adapter"))
+                 : Text("Also stay awake with the lid closed"))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
@@ -899,49 +903,64 @@ private struct SwitchCapsule: ViewModifier {
     }
 }
 
-/// The lid's time choice, in place of the switches: 1 h, 3 h or until unplugged. Off the power
-/// adapter it only says so.
+/// The lid's time choice, in place of the switches: 1 h, 3 h or until switched off, and the
+/// battery floor. On battery a note says it stays warm with the lid closed, so not in a bag.
 private struct LidAwakePicker: View {
     let module: SystemModule
     let close: () -> Void
 
     var body: some View {
+        let onBattery = module.battery?.pluggedIn == false
         HStack(spacing: 8) {
             Image(systemName: "laptopcomputer").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
                 .padding(.leading, 4)
-            if module.battery?.pluggedIn == true {
+            if !onBattery {
                 Text("Stay awake with the lid closed for").font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody)
                     .fixedSize()
-                ForEach(LidAwakeLimit.allCases, id: \.self) { limit in
-                    Button {
-                        module.onLidAwake?(limit)
-                        close()
-                    } label: {
-                        Text(LidAwakeText.title(limit)).font(Theme.font(12, .medium)).foregroundStyle(Theme.textPrimary)
-                            .padding(.horizontal, 12)
-                            .frame(height: 28)
-                            .background(Color.white.opacity(0.08), in: Capsule())
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(PressScale())
-                    .fixedSize()
+            }
+            ForEach(LidAwakeLimit.allCases, id: \.self) { limit in
+                Button {
+                    module.onLidAwake?(limit)
+                    close()
+                } label: {
+                    capsule(Text(LidAwakeText.title(limit)))
                 }
-                Spacer(minLength: 8)
-                if module.lidNeedsPassword() {
-                    // The words where they fit, else the lock that says it in its tooltip.
-                    ViewThatFits(in: .horizontal) {
-                        Text("Asks for your password once").fixedSize()
-                        Image(systemName: "lock").font(.system(size: 11, weight: .semibold)).frame(width: 28, height: 28)
-                    }
-                    .font(Theme.font(11))
-                    .foregroundStyle(Theme.textTertiary)
-                    .help("Asks for your password once")
-                    .layoutPriority(1)
+                .buttonStyle(PressScale())
+                .fixedSize()
+            }
+            // The floor: each click picks the next one (10, 20, 30, 50 %).
+            Button {
+                let floors = LidAwake.floors
+                module.lidFloor = floors[((floors.firstIndex(of: module.lidFloor) ?? 0) + 1) % floors.count]
+            } label: {
+                capsule(Text("Stops at") + Text(verbatim: " \(module.lidFloor) %"))
+            }
+            .buttonStyle(PressScale())
+            .fixedSize()
+            .help("On battery it stops at this charge. Click for another: 10, 20, 30 or 50 percent")
+            Spacer(minLength: 8)
+            if onBattery {
+                // The words where they fit, else the warning sign that says it in its tooltip.
+                ViewThatFits(in: .horizontal) {
+                    Text("Awake and warm with the lid closed: not in a bag").fixedSize()
+                    Text("Warm with the lid closed: not in a bag").fixedSize()
+                    Text("Not in a bag").fixedSize()
+                    Image(systemName: "exclamationmark.triangle").font(.system(size: 11, weight: .semibold)).frame(width: 28, height: 28)
                 }
-            } else {
-                Text("Only on the power adapter. Plug in, then switch it on.").font(Theme.font(12, .medium))
-                    .foregroundStyle(Theme.textSecondary)
-                Spacer(minLength: 8)
+                .font(Theme.font(11))
+                .foregroundStyle(Theme.waiting)
+                .help("The Mac stays awake and warm with the lid closed, so not in a bag. It stops when the battery reaches the floor.")
+                .layoutPriority(1)
+            } else if module.lidNeedsPassword() {
+                // The words where they fit, else the lock that says it in its tooltip.
+                ViewThatFits(in: .horizontal) {
+                    Text("Asks for your password once").fixedSize()
+                    Image(systemName: "lock").font(.system(size: 11, weight: .semibold)).frame(width: 28, height: 28)
+                }
+                .font(Theme.font(11))
+                .foregroundStyle(Theme.textTertiary)
+                .help("Asks for your password once")
+                .layoutPriority(1)
             }
             Button(action: close) {
                 Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.textSecondary)
@@ -954,10 +973,18 @@ private struct LidAwakePicker: View {
         }
         .lineLimit(1)
     }
+
+    private func capsule(_ text: Text) -> some View {
+        text.font(Theme.font(12, .medium)).foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(Color.white.opacity(0.08), in: Capsule())
+            .contentShape(Capsule())
+    }
 }
 
-/// The ear while awake with the lid closed: a ring that empties toward the limit, or a bolt
-/// when it lasts until unplugged.
+/// The ear while awake with the lid closed: a ring that empties toward the limit, or ∞ when it
+/// lasts until switched off.
 private struct LidAwakeEar: View {
     let state: LidAwake.State
 
@@ -975,7 +1002,7 @@ private struct LidAwakeEar: View {
                 .frame(width: 11, height: 11)
             }
         } else {
-            Image(systemName: "bolt.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.accent)
+            Image(systemName: "infinity").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.accent)
         }
     }
 }
@@ -986,7 +1013,7 @@ enum LidAwakeText {
         if case .on(_, let until?) = state {
             return "Awake with the lid closed until \(until.formatted(date: .omitted, time: .shortened))"
         }
-        return "Awake with the lid closed until you unplug"
+        return "Awake with the lid closed until you switch it off"
     }
 
     /// For the narrow peek.
@@ -994,14 +1021,14 @@ enum LidAwakeText {
         if case .on(_, let until?) = state {
             return "Lid closed until \(until.formatted(date: .omitted, time: .shortened))"
         }
-        return "Lid closed until unplugged"
+        return "Lid closed until switched off"
     }
 
     static func title(_ limit: LidAwakeLimit) -> LocalizedStringKey {
         switch limit {
         case .oneHour: "1 h"
         case .threeHours: "3 h"
-        case .untilUnplugged: "Until unplugged"
+        case .untilOff: "Until off"
         }
     }
 }

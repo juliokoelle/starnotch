@@ -490,7 +490,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startExtras(_ system: SystemModule) {
         battery.onChange = { [weak self, weak system] before, now in
             system?.battery = now
-            self?.lidAwake?.powerChanged(now?.pluggedIn ?? false)
+            self?.lidAwake?.check()
             guard let self, let now, let before else { return }
             if now.pluggedIn != before.pluggedIn {
                 self.notch.sneak(Sneak(visual: .symbol(now.pluggedIn ? "bolt.fill" : "battery.75percent", tint: now.pluggedIn ? .ok : .neutral),
@@ -535,7 +535,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lidAwake = lid
         setup.lidAwake = lid
         lid.cleanUpAfterLaunch()
-        lid.onPower = { [weak self] in self?.battery.state?.pluggedIn ?? false }
         lid.installRule = { [weak self] in await self?.setup.installLidRule() ?? .cancelled }
         lid.onChange = { [weak system] state, busy in
             withAnimation(Theme.snappy) {
@@ -549,8 +548,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch notice {
             case .ended(let reason):
                 title = "The Mac sleeps again with the lid closed"
-                detail = reason == .unplugged ? "Unplugged" : "Time is up"
-            case .needsPower: title = "Only on the power adapter"
+                detail = reason == .batteryLow ? "Battery at the floor" : reason == .tooHot ? "Too hot" : "Time is up"
+            case .refused(let reason):
+                title = reason == .tooHot ? "Too hot to stay awake with the lid closed" : "Battery too low to stay awake with the lid closed"
+                detail = reason == .tooHot ? "Let the Mac cool down first" : "Plug in, or pick a lower floor"
             case .alreadyOff: title = "Sleep was already switched off elsewhere"
             case .failed: title = "Couldn't keep the Mac awake with the lid closed"
             case .ruleFailed: title = "Couldn't set up keeping awake with the lid closed"
@@ -560,11 +561,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               key: "lid-awake")
         }
         system.lidNeedsPassword = { [weak self] in self?.setup.isSetUp(.lidAwake) != true }
-        system.onLidAwake = { [weak self] limit in
+        system.onLidAwake = { [weak self, weak system] limit in
             guard let self else { return }
             if let limit {
                 self.keepAwake.set(true)
-                self.lidAwake?.switchOn(limit)
+                self.lidAwake?.switchOn(limit, floor: system?.lidFloor ?? LidAwake.defaultFloor)
             } else {
                 self.lidAwake?.switchOff()
             }

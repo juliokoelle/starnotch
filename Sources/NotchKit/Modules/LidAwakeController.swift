@@ -6,14 +6,18 @@ import NotchCore
 /// the app is gone). A marker in the support folder exists exactly while Starnotch keeps sleep off.
 ///
 /// The state machine says what pmset should be; `apply` brings pmset there, one command at a
-/// time, and looks at the state again after each one. So a switch, an unplug or the timer that
+/// time, and looks at the state again after each one. So a switch, a safety stop or the timer that
 /// lands while pmset runs never leaves sleep off behind a switch that says off.
+///
+/// The safety checks read the power source from IOKit and the thermal state: on every power
+/// source change, on every thermal state change and at least once a minute.
 @MainActor
 final class LidAwakeController {
     enum Notice {
-        /// Ended by itself: unplugged or the time is up.
+        /// Ended by itself: the time is up, the battery reached the floor or the Mac got too hot.
         case ended(LidAwake.Reason)
-        case needsPower
+        /// Not switched on: the battery is at or under the floor, or the Mac is too hot.
+        case refused(LidAwake.Reason)
         /// Sleep was already off before (set outside Starnotch): left alone.
         case alreadyOff
         case failed
@@ -38,43 +42,56 @@ final class LidAwakeController {
     var onNotice: ((Notice) -> Void)?
     /// Asks for the password once and installs the rule; `.installed` when `sudo -n` works afterwards.
     var installRule: (() async -> RuleInstall)?
-    /// On the power adapter right now.
-    var onPower: () -> Bool = { false }
+    private var thermalObserver: NSObjectProtocol?
+    /// The longest the safety checks wait while on, in case a notification comes late.
+    private static let checkEvery: TimeInterval = 60
 
-    init(marker: URL) { self.marker = marker }
+    init(marker: URL) {
+        self.marker = marker
+        thermalObserver = NotificationCenter.default.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification,
+                                                                 object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.check() }
+        }
+    }
+
+    /// The battery read fresh from IOKit (nil without one: no floor) and the thermal state.
+    private func readings() -> LidAwakeReadings {
+        LidAwakeReadings(battery: BatteryMonitor.read(), thermal: ProcessInfo.processInfo.thermalState)
+    }
 
     var state: LidAwake.State { machine.state }
 
-    /// The user picked a time (also while on: then only the end moves).
-    func switchOn(_ limit: LidAwakeLimit) {
+    /// The user picked a time and a floor (also while on: then only the end moves).
+    func switchOn(_ limit: LidAwakeLimit, floor: Int) {
         guard !busy else { return }
         setBusy(true)
         Task {
-            await switchOn(limit, ruleInstalled: await Self.ruleWorks())
+            await switchOn(limit, floor: floor, ruleInstalled: await Self.ruleWorks())
             schedule()
             setBusy(false)
         }
     }
 
-    /// Every await comes before the one `handle` that may switch on, and the power is read right
-    /// there: an unplug during the checks is never missed (`powerChanged` ignores it while off).
-    private func switchOn(_ limit: LidAwakeLimit, ruleInstalled: Bool) async {
+    /// Every await comes before the one `handle` that may switch on, and the readings are taken
+    /// right there: a drop in charge or a rise in heat during the checks is never missed
+    /// (`check` ignores it while off).
+    private func switchOn(_ limit: LidAwakeLimit, floor: Int, ruleInstalled: Bool) async {
         var ruleInstalled = ruleInstalled
-        // Off the adapter the last `handle` says so; the password isn't asked for first.
-        if !ruleInstalled, onPower() {
+        // When it may not run the last `handle` says why; the password isn't asked for first.
+        if !ruleInstalled, LidAwake.refusal(floor: floor, readings()) == nil {
             switch await installRule?() ?? .cancelled {
             case .installed: ruleInstalled = true
             case .cancelled: return
             case .failed: onNotice?(.ruleFailed); return
             }
         }
-        if !machine.isOn, ruleInstalled, onPower(), !applied, await Self.sleepDisabledAlready(), !applied,
+        if !machine.isOn, ruleInstalled, LidAwake.refusal(floor: floor, readings()) == nil, !applied, await Self.sleepDisabledAlready(), !applied,
            !FileManager.default.fileExists(atPath: marker.path) {
             // Someone else switched sleep off: switching it back on later would undo their choice.
             onNotice?(.alreadyOff)
             return
         }
-        await perform(machine.handle(.switchOn(limit, onPower: onPower(), ruleInstalled: ruleInstalled), now: Date()))
+        await perform(machine.handle(.switchOn(limit, floor: floor, readings: readings(), ruleInstalled: ruleInstalled), now: Date()))
     }
 
     func switchOff() {
@@ -87,9 +104,10 @@ final class LidAwakeController {
         if machine.isOn { await perform(machine.handle(.switchOff, now: Date())) }
     }
 
-    func powerChanged(_ onPower: Bool) {
+    /// The power source or the heat changed: the floor and the heat are checked again.
+    func check() {
         guard machine.isOn else { return }
-        Task { await perform(machine.handle(.power(onPower: onPower), now: Date())) }
+        Task { await perform(machine.handle(.check(readings()), now: Date())) }
     }
 
     /// The app quits: sleep comes back before it is gone. A pmset still running finishes first
@@ -116,14 +134,14 @@ final class LidAwakeController {
         switch action {
         case .none, .installRule:
             break
-        case .needsPower:
-            onNotice?(.needsPower)
+        case .refused(let reason):
+            onNotice?(.refused(reason))
         case .enable:
             await apply()
         case .disable(let reason):
             timer?.cancel()
             await apply()
-            if reason == .unplugged || reason == .timeUp { onNotice?(.ended(reason)) }
+            if reason != .user && reason != .quit { onNotice?(.ended(reason)) }
         }
         onChange?(machine.state, busy)
     }
@@ -163,14 +181,16 @@ final class LidAwakeController {
         await run.value
     }
 
-    /// Wakes at the limit; a wake a moment early sleeps again for the rest.
+    /// Wakes at the limit, and at least once a minute while on to check the battery and the heat
+    /// again; a wake before the limit sleeps again for the rest.
     private func schedule() {
         timer?.cancel()
-        guard let until = machine.until else { return }
+        guard machine.isOn else { return }
+        let wait = min(Self.checkEvery, machine.remaining(now: Date()) ?? Self.checkEvery)
         timer = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(max(0, until.timeIntervalSinceNow)))
+            try? await Task.sleep(for: .seconds(wait))
             guard !Task.isCancelled, let self else { return }
-            let action = self.machine.handle(.tick, now: Date())
+            let action = self.machine.handle(.check(self.readings()), now: Date())
             if action == .none { self.schedule() } else { await self.perform(action) }
         }
     }

@@ -383,7 +383,7 @@ struct SetupItemRow: View {
         case .launchAtLogin: "Starts with your Mac"
         case .calendar: "macOS asks once: your next meeting, its countdown and Join"
         case .musicAutomation: "macOS asks once per player: play, pause and skip"
-        case .lidAwake: "Your Mac stays awake with the lid closed while it is plugged in"
+        case .lidAwake: "Your Mac stays awake with the lid closed, on power or on battery"
         case .cursorHooks: "Cursor's sessions in the notch"
         case .copilotHooks: "Copilot CLI's sessions in the notch, and when it waits for you"
         case .geminiHooks: "Gemini CLI's sessions in the notch, and when it waits for you"

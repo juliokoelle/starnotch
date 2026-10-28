@@ -78,21 +78,15 @@
 
 /* Keep awake with the lid closed */
 "Lid closed" = "Deckel zu";
-"Also stay awake with the lid closed, on the power adapter" = "Auch mit geschlossenem Deckel wach bleiben, am Netzteil";
 "Click to switch off" = "Klicken zum Ausschalten";
 "Stay awake with the lid closed for" = "Mit geschlossenem Deckel wach für";
 "1 h" = "1 Std.";
 "3 h" = "3 Std.";
-"Until unplugged" = "Bis zum Ausstecken";
 "Asks for your password once" = "Fragt einmal nach deinem Passwort";
-"Only on the power adapter. Plug in, then switch it on." = "Nur am Netzteil. Einstecken, dann einschalten.";
 "Cancel" = "Abbrechen";
 "Awake with the lid closed until %@" = "Mit geschlossenem Deckel wach bis %@";
-"Awake with the lid closed until you unplug" = "Mit geschlossenem Deckel wach, bis du aussteckst";
 "The Mac sleeps again with the lid closed" = "Der Mac schläft wieder mit geschlossenem Deckel";
-"Unplugged" = "Ausgesteckt";
 "Time is up" = "Zeit abgelaufen";
-"Only on the power adapter" = "Nur am Netzteil";
 "Sleep was already switched off elsewhere" = "Ruhezustand war schon anderswo ausgeschaltet";
 "Couldn't keep the Mac awake with the lid closed" = "Mac konnte mit geschlossenem Deckel nicht wach bleiben";
 "Keep awake with the lid closed" = "Mit geschlossenem Deckel wach halten";
@@ -102,7 +96,6 @@
 "Couldn't set up keeping awake with the lid closed" = "Wach halten mit geschlossenem Deckel ließ sich nicht einrichten";
 "The rule is in place, but sudo doesn't accept it." = "Die Regel ist installiert, aber sudo nimmt sie nicht an.";
 "Lid closed until %@" = "Deckel zu bis %@";
-"Lid closed until unplugged" = "Deckel zu bis zum Ausstecken";
 /* Onboarding */
 "Your agents" = "Deine Agenten";
 "Meetings" = "Meetings";
@@ -142,7 +135,6 @@
 "Any agent can show you a line or ask you yes or no" = "Jeder Agent kann dir eine Zeile zeigen oder Ja oder Nein fragen";
 "Terminal commands that run 30 s or longer show in the notch" = "Terminal-Befehle ab 30 s erscheinen in der Notch";
 "Starts with your Mac" = "Startet mit deinem Mac";
-"Your Mac stays awake with the lid closed while it is plugged in" = "Dein Mac bleibt zugeklappt wach, solange er am Strom hängt";
 "macOS asks once: your next meeting, its countdown and Join" = "macOS fragt einmal: dein nächstes Meeting, Countdown und Beitreten";
 "macOS asks once per player: play, pause and skip" = "macOS fragt einmal pro Player: Abspielen, Pause und Weiter";
 "How Tara thinks" = "Wie Tara denkt";
@@ -542,3 +534,21 @@
 "Unavailable" = "Nicht verfügbar";
 "Needs Apple Intelligence on this Mac." = "Braucht Apple Intelligence auf diesem Mac.";
 "Tara's model isn't reachable, so simple rules answered" = "Taras Modell ist nicht erreichbar, deshalb haben einfache Regeln geantwortet";
+/* Wave 3: keep awake with the lid closed, also on battery */
+"Also stay awake with the lid closed" = "Auch mit geschlossenem Deckel wach bleiben";
+"Until off" = "Bis zum Ausschalten";
+"Awake with the lid closed until you switch it off" = "Mit geschlossenem Deckel wach, bis du ausschaltest";
+"Lid closed until switched off" = "Deckel zu bis zum Ausschalten";
+"Stops at" = "Stoppt bei";
+"On battery it stops at this charge. Click for another: 10, 20, 30 or 50 percent" = "Im Akkubetrieb stoppt es bei diesem Ladestand. Klicken für einen anderen: 10, 20, 30 oder 50 Prozent";
+"Awake and warm with the lid closed: not in a bag" = "Zugeklappt wach und warm: nicht in die Tasche";
+"Warm with the lid closed: not in a bag" = "Zugeklappt warm: nicht in die Tasche";
+"Not in a bag" = "Nicht in die Tasche";
+"The Mac stays awake and warm with the lid closed, so not in a bag. It stops when the battery reaches the floor." = "Der Mac bleibt mit geschlossenem Deckel wach und warm, also nicht in die Tasche. Er stoppt, wenn der Akku die Untergrenze erreicht.";
+"Battery at the floor" = "Akku an der Untergrenze";
+"Too hot" = "Zu heiß";
+"Too hot to stay awake with the lid closed" = "Zu heiß, um mit geschlossenem Deckel wach zu bleiben";
+"Battery too low to stay awake with the lid closed" = "Akku zu schwach, um mit geschlossenem Deckel wach zu bleiben";
+"Let the Mac cool down first" = "Lass den Mac erst abkühlen";
+"Plug in, or pick a lower floor" = "Einstecken oder eine niedrigere Untergrenze wählen";
+"Your Mac stays awake with the lid closed, on power or on battery" = "Dein Mac bleibt zugeklappt wach, am Strom oder im Akkubetrieb";

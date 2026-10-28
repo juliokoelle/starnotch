@@ -15,8 +15,9 @@ import Foundation
 ///     inbox = "Inbox.md"              # quick capture appends here
 ///     loops = "loops/RUNLOG.md"       # the loops' run log (unless [connectors.runlog] names one)
 ///
-/// Paths are relative to the folder unless they start with `/` or `~`. A due date is written
-/// `📅 2026-10-28`, `[due:: 2026-10-28]` or `(due 2026-10-28)`.
+/// Paths are relative to the folder unless they start with `/` or `~`; a key left out is guessed
+/// from the folder (`VaultDetect`). A due date is written `📅 2026-10-28`, `[due:: 2026-10-28]`
+/// or `(due 2026-10-28)`.
 public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked Sendable {
     public static let id = "vault"
     public static let displayName = "Notes"
@@ -36,6 +37,7 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
     private let lock = NSLock()
     private var cache: (key: String, tasks: [VaultTask])?
     private var dailyCache: (key: String, text: String)?
+    private var detected: (folder: String, layout: VaultLayout)?
 
     public init(config: ConfigSection, defaults: UserDefaults,
                 snapshotURL: URL? = Brand.supportFolder.appending(path: "connectors/vault.json")) {
@@ -65,15 +67,31 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
     /// Whether config.toml sets the folder (Settings then shows it read-only).
     public var isFromConfig: Bool { config.path("folder") != nil }
 
-    /// The files as configured, relative to the folder; config.toml wins key by key, and `""`
-    /// there means "none".
+    /// The files as configured, relative to the folder: config.toml wins key by key, then
+    /// Settings; `""` in either means "none". A folder from config.toml guesses the keys neither
+    /// sets (a folder picked in Settings saved its guesses when it was picked).
     public var layout: VaultLayout {
-        func value(_ key: String, _ defaultsKey: String) -> String? {
-            if let raw = config.string(key) { return raw.trimmingCharacters(in: .whitespaces).isEmpty ? nil : raw }
-            return defaults.string(forKey: defaultsKey).flatMap { $0.isEmpty ? nil : $0 }
+        let guessed = isFromConfig ? detectedLayout() : VaultLayout()
+        func value(_ key: String, _ defaultsKey: String, _ guess: String?) -> String? {
+            if let raw = config.string(key) ?? defaults.string(forKey: defaultsKey) {
+                return raw.trimmingCharacters(in: .whitespaces).isEmpty ? nil : raw
+            }
+            return guess
         }
-        return VaultLayout(tasks: value("tasks", Key.tasks), daily: value("daily", Key.daily),
-                           inbox: value("inbox", Key.inbox), loops: config.string("loops"))
+        return VaultLayout(tasks: value("tasks", Key.tasks, guessed.tasks), daily: value("daily", Key.daily, guessed.daily),
+                           inbox: value("inbox", Key.inbox, guessed.inbox), loops: config.string("loops"))
+    }
+
+    /// Whether config.toml sets this key (`tasks`, `daily`, `inbox`); Settings then shows it read-only.
+    public func setsInConfig(_ key: String) -> Bool { config.string(key) != nil }
+
+    /// What the folder looks like, guessed once per folder.
+    private func detectedLayout() -> VaultLayout {
+        guard isConfigured, let path = folder?.path else { return VaultLayout() }
+        if let cached = lock.withLock({ detected }), cached.folder == path { return cached.layout }
+        let found = VaultDetect.detect(in: URL(fileURLWithPath: path))
+        lock.withLock { detected = (path, found) }
+        return found
     }
 
     /// A configured path as a file URL: relative to the folder, or absolute, or `~/…`.
@@ -93,8 +111,17 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
     public var loopsFile: URL? { layout.loops.flatMap(resolve) }
 
     public func dailyURL(for date: Date) -> URL? {
+        dailyPath(for: date).flatMap(resolve)
+    }
+
+    /// Today's note as configured: month and weekday names in English (Obsidian's default), or in
+    /// this Mac's language when only that note exists.
+    func dailyPath(for date: Date) -> String? {
         guard isConfigured, let pattern = layout.daily else { return nil }
-        return resolve(DailyNote.path(pattern: pattern, date: date))
+        let english = DailyNote.path(pattern: pattern, date: date)
+        let local = DailyNote.path(pattern: pattern, date: date, locale: .current)
+        guard local != english, let url = resolve(local), FileManager.default.fileExists(atPath: url.path) else { return english }
+        return local
     }
 
     /// An Obsidian vault opens its notes in Obsidian; any other folder in the default app.
@@ -141,31 +168,39 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
         lock.withLock { cache?.tasks.first { $0.id == id } }.map { !$0.repeats } ?? false
     }
 
-    /// Ticks the task off in its file: the line must still be there exactly as read, and the file
-    /// must not change while it is written; otherwise nothing is written.
-    public func complete(_ id: String) -> Bool {
-        guard let task = lock.withLock({ cache?.tasks.first { $0.id == id } }), !task.repeats,
-              let file = resolve(task.file) else { return false }
-        var written = false
+    /// Ticks the task off in its file: its line must still be there exactly as read; otherwise
+    /// nothing is written. The tasks as read stay as they are (the next read sees the file's new
+    /// time), so the other rows keep their checkboxes and tick off at once; ticking the same one
+    /// twice finds it done and writes nothing.
+    public func complete(_ id: String) -> TodayCompletion {
+        guard let task = lock.withLock({ cache?.tasks.first { $0.id == id } }), !task.repeats else { return .changed }
+        guard let file = resolve(task.file) else { return .failed }
+        var result = TodayCompletion.failed
         var error: NSError?
         NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: file, options: .forMerging, error: &error) { url in
-            written = Self.tickOff(task, at: url)
+            result = Self.tickOff(task, at: url)
         }
-        if written { lock.withLock { cache = nil } }
-        return written
+        return result
     }
 
-    static func tickOff(_ task: VaultTask, at url: URL) -> Bool {
-        guard let before = try? Data(contentsOf: url), let text = String(data: before, encoding: .utf8),
-              let updated = MarkdownTasks.completing(task, in: text),
-              updated.utf8.count == text.utf8.count else { return false }
-        // Changed by someone else since the read: leave it, the next look shows the new state.
-        guard let again = try? Data(contentsOf: url), again == before else { return false }
+    /// Reads the file through one handle and writes the three bytes `[x]` over the `[ ]` in
+    /// place, so the file keeps its inode, creation date, tags and permissions, and the moment in
+    /// which another app's save could be overwritten stays as short as it can be.
+    static func tickOff(_ task: VaultTask, at url: URL) -> TodayCompletion {
+        guard let handle = try? FileHandle(forUpdating: url) else { return .failed }
+        defer { try? handle.close() }
+        guard let data = try? handle.readToEnd() else { return .failed }
+        let text = String(decoding: data, as: UTF8.self)
+        // Not UTF-8 (decoding replaced bytes): offsets wouldn't match the file.
+        guard text.utf8.count == data.count else { return .failed }
+        guard let offset = MarkdownTasks.boxOffset(task, in: text),
+              data.dropFirst(offset).prefix(3) == Data("[ ]".utf8) else { return .changed }
         do {
-            try Data(updated.utf8).write(to: url, options: .atomic)
-            return true
+            try handle.seek(toOffset: UInt64(offset))
+            try handle.write(contentsOf: Data("[x]".utf8))
+            return .done
         } catch {
-            return false
+            return .failed
         }
     }
 
@@ -173,6 +208,7 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
 
     public func today(now: Date) -> TodayFeed {
         guard isConfigured else { return TodayFeed(nowTitle: L("Due today"), emptyText: L("Pick your notes folder in Settings.")) }
+        guard layout.tasks != nil else { return TodayFeed(nowTitle: L("Due today"), emptyText: L("Choose your tasks in Settings › Notes.")) }
         let tasks = openTasks()
         let day = RunLog.day(now)
         let week = RunLog.day(now.addingTimeInterval(7 * 86_400))
@@ -230,8 +266,8 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
         let dated = tasks.filter { $0.due != nil }.sorted { ($0.due ?? "", $0.file, $0.line) < ($1.due ?? "", $1.file, $1.line) }
         let ordered = dated + tasks.filter { $0.due == nil }
         var daily: VaultSnapshot.DailyNote?
-        if let pattern = layout.daily, let url = dailyURL(for: now), let text = dailyText(url) {
-            daily = .init(path: DailyNote.path(pattern: pattern, date: now), headings: DailyNote.headings(text), text: DailyNote.body(text))
+        if let path = dailyPath(for: now), let url = resolve(path), let text = dailyText(url) {
+            daily = .init(path: path, headings: DailyNote.headings(text), text: DailyNote.body(text))
         }
         return VaultSnapshot(updated: now, name: folder.lastPathComponent, today: RunLog.day(now), tasks: Array(ordered.prefix(300)),
                              openTasks: tasks.count, dailyNote: daily, recentNotes: Self.recentNotes(in: folder, limit: recent))

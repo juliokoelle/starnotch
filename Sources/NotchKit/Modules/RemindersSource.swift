@@ -64,13 +64,23 @@ final class RemindersSource: NotchConnector, TodayCompleting, @unchecked Sendabl
         guard var feed = base()?.today(now: now) else {
             return TodayFeed(now: reminders, nowTitle: "Reminders", emptyText: "No reminders due today.")
         }
-        feed.now += reminders.filter { reminder in !feed.now.contains { $0.title == reminder.title } }
+        let due = reminders.filter { reminder in !feed.now.contains { $0.title == reminder.title } }
+        // The connector filled its main list with what comes later (nothing of its own is due):
+        // with reminders due now, those move down to their own section.
+        let day = AgentScanner.day(now)
+        if !due.isEmpty, feed.followUps.isEmpty, !feed.now.isEmpty, feed.now.allSatisfy({ ($0.date ?? "") > day }) {
+            feed.followUps = feed.now
+            feed.followUpTitle = feed.nowTitle
+            feed.now = []
+            feed.nowTitle = Localization.string("Due today")
+        }
+        feed.now += due
         return feed
     }
 
     /// The connector's tasks tick off where they live; reminders open in Reminders.
     func canComplete(_ id: String) -> Bool { (base() as? any TodayCompleting)?.canComplete(id) ?? false }
-    func complete(_ id: String) -> Bool { (base() as? any TodayCompleting)?.complete(id) ?? false }
+    func complete(_ id: String) -> TodayCompletion { (base() as? any TodayCompleting)?.complete(id) ?? .changed }
 }
 
 /// Writes one event from quick capture.

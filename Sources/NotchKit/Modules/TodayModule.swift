@@ -61,8 +61,8 @@ final class TodayModule: NotchModule {
     var selectedID: String?
     /// Ticked off, shown done until the list reloads without them.
     private(set) var doneIDs: Set<String> = []
-    /// Couldn't be ticked off (its file changed meanwhile); the row says so for a moment.
-    private(set) var failedID: String?
+    /// Couldn't be ticked off, and why; the row and the detail card say so for a moment.
+    private(set) var failure: (id: String, result: TodayCompletion)?
     /// Ear priority in the preview.
     var ambientOverride = 0
     /// "Prepare" switches to the calendar.
@@ -137,6 +137,12 @@ final class TodayModule: NotchModule {
         item.kind == .task && completer?.canComplete(item.id) == true
     }
 
+    /// Why `item` wasn't ticked off, while that note shows.
+    func failureText(_ item: Item) -> LocalizedStringKey? {
+        guard let failure, failure.id == item.id else { return nil }
+        return failure.result == .changed ? "Changed elsewhere, not ticked off" : "Couldn't write to the file"
+    }
+
     /// Shows the task done at once, writes it back off the main thread, then lets it go; when the
     /// write wasn't safe the row comes back with a short note.
     func complete(_ item: Item) {
@@ -145,9 +151,9 @@ final class TodayModule: NotchModule {
         Haptics.confirm()
         withAnimation(Theme.snappy) { doneIDs.insert(id) }
         Task { [weak self] in
-            let written = await Task.detached(priority: .userInitiated) { completer.complete(id) }.value
+            let result = await Task.detached(priority: .userInitiated) { completer.complete(id) }.value
             guard let self else { return }
-            if written {
+            if result == .done {
                 try? await Task.sleep(for: .milliseconds(420))
                 withAnimation(Theme.snappy) {
                     if self.detail?.id == id { self.detail = nil }
@@ -157,10 +163,10 @@ final class TodayModule: NotchModule {
             } else {
                 withAnimation(Theme.snappy) {
                     self.doneIDs.remove(id)
-                    self.failedID = id
+                    self.failure = (id, result)
                 }
                 try? await Task.sleep(for: .seconds(4))
-                if self.failedID == id { withAnimation(Theme.snappy) { self.failedID = nil } }
+                if self.failure?.id == id { withAnimation(Theme.snappy) { self.failure = nil } }
             }
         }
     }
@@ -416,6 +422,9 @@ private struct TodayDetailCard: View {
                             if !item.group.isEmpty { Text(item.group).foregroundStyle(Theme.textSecondary) }
                         }
                         .font(Theme.font(12))
+                        if let failure = module.failureText(item) {
+                            Text(failure).font(Theme.font(12)).foregroundStyle(Theme.waiting)
+                        }
                     }
                     Spacer(minLength: 8)
                     if module.canComplete(item) {
@@ -551,8 +560,8 @@ private struct ItemRow: View {
                     }
                 }
                 Spacer(minLength: 4)
-                if module.failedID == item.id {
-                    Text("Changed elsewhere, not ticked off")
+                if let failure = module.failureText(item) {
+                    Text(failure)
                         .font(Theme.font(11.5)).foregroundStyle(Theme.waiting)
                 } else if let date = item.date {
                     Text(R5Clock.due(date, today: module.today))

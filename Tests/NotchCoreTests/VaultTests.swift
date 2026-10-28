@@ -75,6 +75,63 @@ import TestSupport
         #expect(DailyNote.path(pattern: "[Day] YYYY-MM-DD.md", date: date, calendar: calendar) == "Day 2026-03-07.md")
     }
 
+    @Test func dailyNotePathsWithNamesAndOrdinals() {
+        let date = UTC.date("2026-03-07 12:00")   // a Saturday
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        #expect(DailyNote.path(pattern: "Journal/YYYY-MM-DD dddd.md", date: date, calendar: calendar) == "Journal/2026-03-07 Saturday.md")
+        #expect(DailyNote.path(pattern: "YYYY/MMMM/YYYY-MM-DD.md", date: date, calendar: calendar) == "2026/March/2026-03-07.md")
+        #expect(DailyNote.path(pattern: "ddd, MMM Do YYYY.md", date: date, calendar: calendar) == "Sat, Mar 7th 2026.md")
+        #expect(DailyNote.path(pattern: "Done/YYYY-MM-DD.md", date: date, calendar: calendar) == "Done/2026-03-07.md")
+        #expect(DailyNote.path(pattern: "YYYY-MM-DD dddd.md", date: date, calendar: calendar, locale: Locale(identifier: "de_DE"))
+            == "2026-03-07 Samstag.md")
+        #expect(DailyNote.ordinal(1, locale: Locale(identifier: "en_US")) == "1st")
+        #expect(DailyNote.ordinal(12, locale: Locale(identifier: "en_US")) == "12th")
+        #expect(DailyNote.ordinal(23, locale: Locale(identifier: "en_US")) == "23rd")
+    }
+
+    @Test func tickingOffCountsBytesNotCharacters() throws {
+        let text = "# 📅 Wöche\r\n- [ ] Ünïcode first 🔥\r\n- [ ] Tick me\r\n"
+        let task = try #require(MarkdownTasks.parse(text, file: "t.md").last)
+        let offset = try #require(MarkdownTasks.boxOffset(task, in: text))
+        #expect(Array(text.utf8)[offset..<(offset + 3)] == Array("[ ]".utf8)[...])
+        #expect(MarkdownTasks.completing(task, in: text) == "# 📅 Wöche\r\n- [ ] Ünïcode first 🔥\r\n- [x] Tick me\r\n")
+    }
+
+    @Test func twoTicksInARowWithoutAReload() throws {
+        let day = RunLog.day(Date())
+        let root = try Self.folder(["Tasks.md": "- [ ] Alpha 📅 \(day)\n- [ ] Beta 📅 \(day)\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = VaultConnector(config: ConfigSection(values: ["folder": .string(root.path), "tasks": .string("Tasks.md")]),
+                                   defaults: UserDefaults(suiteName: "app.starnotch.tests")!, snapshotURL: nil)
+        let feed = vault.today(now: Date())
+        let (alpha, beta) = (feed.now[0].id, feed.now[1].id)
+        #expect(vault.complete(alpha) == .done)
+        #expect(vault.canComplete(beta))
+        #expect(vault.complete(beta) == .done)
+        #expect(vault.complete(alpha) == .changed)   // done already: nothing written
+        #expect(try String(contentsOf: root.appending(path: "Tasks.md"), encoding: .utf8) == "- [x] Alpha 📅 \(day)\n- [x] Beta 📅 \(day)\n")
+    }
+
+    @Test func tickingOffWritesInPlace() throws {
+        let day = RunLog.day(Date())
+        let root = try Self.folder(["Tasks.md": "- [ ] Alpha 📅 \(day)\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appending(path: "Tasks.md")
+        let created = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.creationDate: created, .posixPermissions: 0o600], ofItemAtPath: file.path)
+        let inode = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? Int
+        let vault = VaultConnector(config: ConfigSection(values: ["folder": .string(root.path), "tasks": .string("Tasks.md")]),
+                                   defaults: UserDefaults(suiteName: "app.starnotch.tests")!, snapshotURL: nil)
+        let id = try #require(vault.today(now: Date()).now.first?.id)
+        #expect(vault.complete(id) == .done)
+        let after = try FileManager.default.attributesOfItem(atPath: file.path)
+        #expect(after[.systemFileNumber] as? Int == inode)
+        #expect(after[.creationDate] as? Date == created)
+        #expect((after[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        #expect(try String(contentsOf: file, encoding: .utf8) == "- [x] Alpha 📅 \(day)\n")
+    }
+
     @Test func headingsOfTheDailyNote() {
         let note = "---\ndate: 2026-10-28\n---\n# 2026-10-28\n\n## ☀️ Morning\n[[brief]]\n## Notes\n```\n## not a heading\n```\n### **Log**\n"
         #expect(DailyNote.headings(note) == ["☀️ Morning", "Notes", "Log"])
@@ -97,6 +154,21 @@ import TestSupport
         try FileManager.default.createDirectory(at: root.appending(path: ".obsidian"), withIntermediateDirectories: true)
         try Data(#"{"folder":"Days/","format":"YYYY/MM-DD"}"#.utf8).write(to: root.appending(path: ".obsidian/daily-notes.json"))
         #expect(VaultDetect.detect(in: root).daily == "Days/YYYY/MM-DD.md")
+    }
+
+    @Test func aFolderFromConfigGuessesWhatItDoesNotSet() throws {
+        let day = RunLog.day(Date())
+        let root = try Self.folder(["Tasks.md": "- [ ] Ship it 📅 \(day)\n", "Inbox.md": "- [ ] idea\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = VaultConnector(config: ConfigSection(values: ["folder": .string(root.path)]),
+                                   defaults: UserDefaults(suiteName: "app.starnotch.tests")!, snapshotURL: nil)
+        #expect(vault.layout.tasks == "Tasks.md" && vault.layout.inbox == "Inbox.md")
+        #expect(vault.today(now: Date()).now.map(\.title) == ["Ship it"])
+        // "" in config.toml still means none, and Today says where to choose them.
+        let none = VaultConnector(config: ConfigSection(values: ["folder": .string(root.path), "tasks": .string("")]),
+                                  defaults: UserDefaults(suiteName: "app.starnotch.tests")!, snapshotURL: nil)
+        #expect(none.layout.tasks == nil)
+        #expect(none.today(now: Date()).emptyText == "Choose your tasks in Settings › Notes.")
     }
 
     @Test func todayTicksOffAndWritesTheSnapshot() throws {
@@ -125,7 +197,7 @@ import TestSupport
         // Ticking off writes "- [x]" into that line only.
         let late = try #require(feed.now.first)
         #expect(vault.canComplete(late.id))
-        #expect(vault.complete(late.id))
+        #expect(vault.complete(late.id) == .done)
         let written = try String(contentsOf: root.appending(path: "Tasks.md"), encoding: .utf8)
         #expect(written == tasks.replacingOccurrences(of: "- [ ] Late", with: "- [x] Late"))
         #expect(vault.today(now: now).now.map(\.title) == ["Today"])
@@ -133,7 +205,7 @@ import TestSupport
         // Edited elsewhere after it was read: not written.
         let today = try #require(vault.today(now: now).now.first)
         try Data(written.replacingOccurrences(of: "- [ ] Today", with: "- [ ] Today, moved").utf8).write(to: root.appending(path: "Tasks.md"))
-        #expect(!vault.complete(today.id))
+        #expect(vault.complete(today.id) == .changed)
         #expect(try String(contentsOf: root.appending(path: "Tasks.md"), encoding: .utf8).contains("- [ ] Today, moved"))
 
         // The snapshot for Tara.

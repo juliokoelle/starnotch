@@ -100,9 +100,19 @@ public enum MarkdownTasks {
     }
 
     /// The text with `task` ticked off (`- [ ]` becomes `- [x]`), or nil when its line isn't
-    /// there exactly once as it was read. Only that line changes; line endings stay as they are.
+    /// there exactly once as it was read. Only those three bytes change.
     public static func completing(_ task: VaultTask, in text: String) -> String? {
-        var lines = text.components(separatedBy: "\n")
+        guard let offset = boxOffset(task, in: text) else { return nil }
+        var bytes = Array(text.utf8)
+        bytes.replaceSubrange(offset..<(offset + 3), with: Array("[x]".utf8))
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// Where the `[ ]` of `task` starts, in UTF-8 bytes from the start of `text`, so ticking it
+    /// off can write three bytes in place; nil when its line isn't there exactly once as it was
+    /// read, or is ticked off already.
+    public static func boxOffset(_ task: VaultTask, in text: String) -> Int? {
+        let lines = text.components(separatedBy: "\n")
         let index: Int
         if task.line < lines.count, lines[task.line] == task.raw {
             index = task.line
@@ -111,9 +121,10 @@ public enum MarkdownTasks {
             guard hits.count == 1, let only = hits.first else { return nil }
             index = only
         }
-        guard checkbox(lines[index])?.open == true, let box = lines[index].range(of: "[ ]") else { return nil }
-        lines[index].replaceSubrange(box, with: "[x]")
-        return lines.joined(separator: "\n")
+        let line = lines[index]
+        guard checkbox(line)?.open == true, let box = line.range(of: "[ ]") else { return nil }
+        let before = lines[..<index].reduce(0) { $0 + $1.utf8.count + 1 }
+        return before + line.utf8.distance(from: line.startIndex, to: box.lowerBound)
     }
 
     // MARK: Lines
@@ -296,16 +307,27 @@ enum Hash {
 // MARK: Daily notes
 
 public enum DailyNote {
-    /// The path of a day's note from a pattern like `Daily/YYYY-MM-DD.md`. `YYYY`, `YY`, `MM`,
-    /// `M`, `DD` and `D` are replaced where they stand apart from other letters, so a folder
-    /// named "Daily" stays as it is; `[text]` is literal, as in Obsidian's date format.
-    public static func path(pattern: String, date: Date, calendar: Calendar = .current) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+    /// The path of a day's note from a pattern like `Daily/YYYY-MM-DD.md`, in Obsidian's
+    /// (Moment's) date format: `YYYY` `YY`, `M` `MM` `MMM` `MMMM`, `D` `DD` `Do`, `d` `dd` `ddd`
+    /// `dddd`. Tokens count where they stand apart from other letters, so a folder named "Daily"
+    /// stays as it is; `[text]` is literal. Month and weekday names are in `locale`.
+    public static func path(pattern: String, date: Date, calendar: Calendar = .current,
+                            locale: Locale = Locale(identifier: "en_US_POSIX")) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day, .weekday], from: date)
         let year = parts.year ?? 0, month = parts.month ?? 0, day = parts.day ?? 0
-        let tokens: [String: String] = [
-            "YYYY": String(format: "%04d", year), "YY": String(format: "%02d", year % 100),
-            "MM": String(format: "%02d", month), "M": "\(month)",
-            "DD": String(format: "%02d", day), "D": "\(day)",
+        let name = { (format: String) -> String in
+            let formatter = DateFormatter()
+            formatter.calendar = calendar
+            formatter.timeZone = calendar.timeZone
+            formatter.locale = locale
+            formatter.dateFormat = format
+            return formatter.string(from: date)
+        }
+        let tokens: [String: () -> String] = [
+            "YYYY": { String(format: "%04d", year) }, "YY": { String(format: "%02d", year % 100) },
+            "MMMM": { name("MMMM") }, "MMM": { name("MMM") }, "MM": { String(format: "%02d", month) }, "M": { "\(month)" },
+            "DD": { String(format: "%02d", day) }, "D": { "\(day)" },
+            "dddd": { name("EEEE") }, "ddd": { name("EEE") }, "dd": { name("EEEEEE") }, "d": { "\((parts.weekday ?? 1) - 1)" },
         ]
         let characters = Array(pattern)
         var result = ""
@@ -317,20 +339,32 @@ public enum DailyNote {
                 index = close + 1
                 continue
             }
-            guard "YMD".contains(character) else { result.append(character); index += 1; continue }
+            guard "YMDd".contains(character) else { result.append(character); index += 1; continue }
             var end = index
             while end < characters.count, characters[end] == character { end += 1 }
             let run = String(characters[index..<end])
             let before = index > 0 ? characters[index - 1] : " "
-            let after = end < characters.count ? characters[end] : " "
-            if let value = tokens[run], !before.isLetter, !after.isLetter {
-                result += value
+            let after = { (offset: Int) in offset < characters.count ? characters[offset] : " " }
+            if run == "D", after(end) == "o", !before.isLetter, !after(end + 1).isLetter {
+                result += ordinal(day, locale: locale)
+                index = end + 1
+                continue
+            }
+            if let value = tokens[run], !before.isLetter, !after(end).isLetter {
+                result += value()
             } else {
                 result += run
             }
             index = end
         }
         return result
+    }
+
+    /// `Do`: 1st, 2nd, 28th in English, else `28.`
+    static func ordinal(_ day: Int, locale: Locale) -> String {
+        guard locale.language.languageCode?.identifier == "en" else { return "\(day)." }
+        let suffix = (11...13).contains(day % 100) ? "th" : [1: "st", 2: "nd", 3: "rd"][day % 10] ?? "th"
+        return "\(day)\(suffix)"
     }
 
     /// The note's headings, the date heading on top left out when there are others.
@@ -383,7 +417,8 @@ public enum VaultDetect {
     static let logNames: Set<String> = ["runlog", "run-log", "run log"]
 
     /// A sensible first guess from the folder's files: Obsidian's daily notes settings, else the
-    /// folder with the most `YYYY-MM-DD.md` notes; a file called Tasks, TODO or Inbox; a run log.
+    /// folder with the most `YYYY-MM-DD.md` notes; a file or folder called Tasks or TODO; a file
+    /// called Inbox; a run log.
     public static func detect(in folder: URL) -> VaultLayout {
         let files = markdownFiles(in: folder, maxDepth: 3)
         var layout = VaultLayout()

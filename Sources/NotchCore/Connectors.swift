@@ -214,11 +214,20 @@ public protocol InboxSink: NotchConnector {
 
 // MARK: Ticking off
 
+/// What ticking a task off came to.
+public enum TodayCompletion: Equatable, Sendable {
+    case done
+    /// The task changed where it lives (edited, moved twice, ticked off already): nothing was written.
+    case changed
+    /// Its place couldn't be read or written (file missing, not downloaded, no permission).
+    case failed
+}
+
 /// A Today source whose tasks can be ticked off in the notch.
 public protocol TodayCompleting: TodayProvider {
     /// Whether the item with this id gets a checkbox.
     func canComplete(_ id: String) -> Bool
-    /// Marks it done where it lives. Called off the main thread. False when that wasn't safe
-    /// (the source changed meanwhile); then nothing was written.
-    func complete(_ id: String) -> Bool
+    /// Marks it done where it lives. Called off the main thread. Anything but `.done` means
+    /// nothing was written: return `.changed` rather than guess.
+    func complete(_ id: String) -> TodayCompletion
 }

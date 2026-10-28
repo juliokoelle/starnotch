@@ -229,7 +229,7 @@
 "Notes" = "Notizen";
 "Your notes" = "Deine Notizen";
 "An Obsidian vault or any Markdown folder: your tasks and today's note in the notch, and Tara reads along." = "Ein Obsidian-Vault oder ein beliebiger Markdown-Ordner: deine Aufgaben und die heutige Notiz in der Notch, und Tara liest mit.";
-"An Obsidian vault or any Markdown folder. Tasks are checkboxes (- [ ]) with an optional due date (📅 2026-10-28 or [due:: 2026-10-28]); ticking one off in the notch writes - [x] into its line. Tara reads your tasks and today's note on this Mac." = "Ein Obsidian-Vault oder ein beliebiger Markdown-Ordner. Aufgaben sind Checkboxen (- [ ]) mit optionalem Fälligkeitsdatum (📅 2026-10-28 oder [due:: 2026-10-28]); wer eine in der Notch abhakt, schreibt - [x] in ihre Zeile. Tara liest deine Aufgaben und die heutige Notiz auf diesem Mac.";
+"An Obsidian vault or any Markdown folder. Tasks are checkboxes (- [ ]) with an optional due date (📅 2026-10-28 or [due:: 2026-10-28]); ticking one off in the notch writes - [x] into its line. Tara reads your tasks and today's note on this Mac." = "Ein Obsidian-Vault oder ein beliebiger Markdown-Ordner. Aufgaben sind Checkboxen (- [ ]) mit optionalem Fälligkeitsdatum (📅 2026-10-28 oder [due:: 2026-10-28]); hakst du eine in der Notch ab, steht danach - [x] in ihrer Zeile. Tara liest deine Aufgaben und die heutige Notiz auf diesem Mac.";
 "Choose folder…" = "Ordner wählen…";
 "Use this folder" = "Diesen Ordner nehmen";
 "Your notes: an Obsidian vault or any folder of Markdown files" = "Deine Notizen: ein Obsidian-Vault oder ein beliebiger Ordner mit Markdown-Dateien";
@@ -261,7 +261,11 @@
 "Open lines in your inbox" = "Offene Zeilen in deinem Eingang";
 "Open in Obsidian" = "In Obsidian öffnen";
 "Open the note" = "Notiz öffnen";
-"Mark done" = "Erledigt";
+"Mark done" = "Abhaken";
 "Tick it off in your notes (Space)" = "In deinen Notizen abhaken (Leertaste)";
 "Tick off" = "Abhaken";
 "Changed elsewhere, not ticked off" = "Woanders geändert, nicht abgehakt";
+"Couldn't write to the file" = "Datei ließ sich nicht schreiben";
+"Choose your tasks in Settings › Notes." = "Wähle deine Aufgaben unter Einstellungen › Notizen.";
+"Meetings and notes" = "Meetings und Notizen";
+"Needs your notes folder (Settings › Notes) or Apple Reminders" = "Braucht deinen Notizordner (Einstellungen › Notizen) oder Apple Erinnerungen";

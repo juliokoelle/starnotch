@@ -1006,7 +1006,7 @@ extension AppDelegate {
 
     /// Today's calendar for the AI apps that read Tara's memory (`calendar-today.json`, which
     /// only the memory server reads): written while meetings may be recorded and an AI app is set
-    /// up in Settings › What's set up. With none set up, the file goes.
+    /// up (its setup step, or Settings › Tara's memory › Choose apps…). With none set up, the file goes.
     private func writeCalendarSnapshot(_ events: [CalendarModule.Meeting]) {
         guard state.persists else { return }
         let url = MemoryFiles(support: Brand.supportFolder).calendarSnapshot

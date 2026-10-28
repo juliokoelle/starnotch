@@ -9,7 +9,7 @@ What changed in Starnotch, newest first: one section per day an update landed, g
 - **New:** A switch per source: meetings and calendar, quick captures, notes vault, clipboard, agent sessions. A source that is off records nothing new and is left out of Ask Tara and your AI apps.
 - **New:** Delete what Tara remembers from one source, after a confirmation. Only Starnotch's copy goes; your vault, Jamie and your calendar keep theirs.
 - **New:** Apps Tara never records: password apps always, and any app you add.
-- **New:** Tara's memory in your AI apps. Claude Desktop, Claude Code, Cursor and ChatGPT's Mac app can search your meetings, captures and notes, read only, from this Mac. Each app is off until you choose it, in the setup or in Settings › Tara's memory.
+- **New:** Tara's memory in your AI apps. Claude Desktop, Claude Code, Cursor and ChatGPT's Mac app can search your meetings, captures and notes, read only, from this Mac. What an app looks up goes to its AI provider with your chat. Each app is off until you choose it, in the setup or in Settings › Tara's memory.
 
 ### Ask Tara
 - **New:** Ask Tara: press ⌃⌥T or click on Tara, then type or speak a question. She answers from your meetings, quick captures and notes, with sources you can open, and follow-ups keep the thread.
@@ -82,7 +82,7 @@ What changed in Starnotch, newest first: one section per day an update landed, g
 
 ## 24 October 2026
 
-### First public release
+### First release
 - **New:** Starnotch turns the MacBook notch into a small island; on a display without a notch it is a small pill. Hover to peek, click to open, ⌃⌥Space from the keyboard, swipe on the notch to switch, hold for the wheel.
 - **New:** Agents: Claude Code and Codex sessions as small characters (working, waiting for you, idle) with their last steps, subagents and context window, plan limits for both side by side in the header, and recurring loops.
 - **New:** Answer permission prompts from the notch: Allow once with ↵, Allow for session with ⌘↵, Deny with esc. Nothing is allowed without your click.

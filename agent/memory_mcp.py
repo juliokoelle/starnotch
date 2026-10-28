@@ -2,8 +2,8 @@
 
     uv run --directory "$HOME/Library/Application Support/Starnotch/agent" python memory_mcp.py
 
-Starnotch registers it as `starnotch-memory` in Claude Desktop, Claude Code, Cursor and ChatGPT's Mac app (Settings ›
-What's set up). Tools:
+Starnotch registers it as `starnotch-memory` in Claude Desktop, Claude Code, Cursor and ChatGPT's Mac app (its own setup step, or
+Settings › Tara's memory › Choose apps…). Tools:
 
 - search_memory: meetings, quick captures, notes and agent sessions that share words with a query.
 - get_meeting: one meeting in full (summary, decisions, commitments, notes, transcript).

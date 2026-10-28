@@ -25,7 +25,8 @@ struct MemorySettings: View {
             sourceRow(source)
         }
         IgnoreList(state: state)
-        if let setup { aiApps(setup) }
+        // Only when one of the AI apps is on this Mac: otherwise their onboarding step is hidden.
+        if let setup, setup.offered.contains(where: SetupItem.memoryItems.contains) { aiApps(setup) }
     }
 
     // MARK: Sources
@@ -167,7 +168,7 @@ private struct PauseRow: View {
 
     private func line(_ privacy: MemoryPrivacy, paused: Bool) -> String {
         guard paused, let until = privacy.pausedUntil else {
-            return Localization.string("On this Mac only. Pause it for a call or work you don't want kept; what Tara already has stays.")
+            return Localization.string("Recorded on this Mac. Pause it for a call or work you don't want kept; what Tara already has stays.")
         }
         if privacy.isPausedUntilResumed { return Localization.string("Nothing new is recorded until you resume.") }
         let time = until.formatted(Calendar.current.isDate(until, inSameDayAs: now) ? .dateTime.hour().minute() : .dateTime.weekday(.wide).hour().minute())
@@ -287,5 +288,5 @@ enum MemorySettingsPreview {
 }
 
 extension MemorySettings {
-    static let footer: LocalizedStringKey = "Everything Tara remembers stays on this Mac, in the app's folder. A pause stops recording; a source that's off is also left out of Tara's answers and your AI apps. Delete removes Starnotch's copy only: your vault, Jamie and your calendar keep theirs."
+    static let footer: LocalizedStringKey = "Tara keeps what she remembers on this Mac, in the app's folder. With Claude as her brain, what she needs for an answer goes to Anthropic; what an AI app looks up goes to its AI provider with your chat. A pause stops recording; a source that's off is also left out of Tara's answers and your AI apps. Delete removes Starnotch's copy only: your vault, Jamie and your calendar keep theirs."
 }

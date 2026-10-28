@@ -645,7 +645,7 @@
 "Paused" = "Pausiert";
 "Remembering" = "Merkt sich";
 "Resume" = "Fortsetzen";
-"On this Mac only. Pause it for a call or work you don't want kept; what Tara already has stays." = "Nur auf diesem Mac. Pausiere es für ein Gespräch oder eine Arbeit, die nicht festgehalten werden soll; was Tara schon hat, bleibt.";
+"Recorded on this Mac. Pause it for a call or work you don't want kept; what Tara already has stays." = "Festgehalten auf diesem Mac. Pausiere es für ein Gespräch oder eine Arbeit, die nicht festgehalten werden soll; was Tara schon hat, bleibt.";
 "Nothing new is recorded until you resume." = "Nichts Neues wird festgehalten, bis du fortsetzt.";
 "Nothing new is recorded until %@." = "Nichts Neues wird festgehalten bis %@.";
 "Delete…" = "Löschen …";
@@ -678,7 +678,7 @@
 "Record this app again" = "Diese App wieder festhalten";
 "Remove %@ from the list" = "%@ von der Liste nehmen";
 "Never record" = "Nie festhalten";
-"Everything Tara remembers stays on this Mac, in the app's folder. A pause stops recording; a source that's off is also left out of Tara's answers and your AI apps. Delete removes Starnotch's copy only: your vault, Jamie and your calendar keep theirs." = "Alles, was Tara sich merkt, bleibt auf diesem Mac, im Ordner der App. Eine Pause stoppt das Festhalten; eine ausgeschaltete Quelle fehlt auch in Taras Antworten und deinen KI-Apps. Löschen entfernt nur die Kopie von Starnotch: Vault, Jamie und Kalender behalten ihre.";
+"Tara keeps what she remembers on this Mac, in the app's folder. With Claude as her brain, what she needs for an answer goes to Anthropic; what an AI app looks up goes to its AI provider with your chat. A pause stops recording; a source that's off is also left out of Tara's answers and your AI apps. Delete removes Starnotch's copy only: your vault, Jamie and your calendar keep theirs." = "Tara bewahrt, was sie sich merkt, auf diesem Mac auf, im Ordner der App. Mit Claude als Gehirn geht, was sie für eine Antwort braucht, an Anthropic; was eine KI-App nachschlägt, geht mit deinem Chat an ihren KI-Anbieter. Eine Pause stoppt das Festhalten; eine ausgeschaltete Quelle fehlt auch in Taras Antworten und deinen KI-Apps. Löschen entfernt nur die Kopie von Starnotch: Vault, Jamie und Kalender behalten ihre.";
 "Tara's memory is paused. Click to resume" = "Taras Gedächtnis ist pausiert. Klicken zum Fortsetzen";
 "Tara's memory is paused" = "Taras Gedächtnis ist pausiert";
 "Resumes it" = "Setzt es fort";

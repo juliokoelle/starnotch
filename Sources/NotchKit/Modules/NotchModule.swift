@@ -151,6 +151,15 @@ enum TimeText {
         date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
     }
 
+    /// "23:06" today, "Thu 23:06" / "Do 23:06" on another day (a weekly limit's forecast).
+    static func clock(_ date: Date, from now: Date) -> String {
+        guard !Calendar.current.isDate(date, inSameDayAs: now) else { return clock(date) }
+        let language = Bundle.main.preferredLocalizations.first ?? "en"
+        let day = date.formatted(.dateTime.weekday(.abbreviated).locale(Locale(identifier: language)))
+            .replacingOccurrences(of: ".", with: "")
+        return "\(day) \(clock(date))"
+    }
+
     /// `today`, `yesterday` or `18.10.` for a `YYYY-MM-DD` day.
     static func day(_ day: String, now: Date = Date()) -> String {
         if day == AgentScanner.day(now) { return "today" }

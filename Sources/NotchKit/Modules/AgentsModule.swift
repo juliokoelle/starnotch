@@ -55,6 +55,8 @@ final class AgentsModule: NotchModule {
     /// A loop finished (a new logged run or a push): for its sneak.
     @ObservationIgnored var onLoopFinished: ((AgentSnapshot.LoopStatus) -> Void)?
     @ObservationIgnored private var previewMode = false
+    /// Pending approvals already turned into a step of their session.
+    @ObservationIgnored private var ingestedApprovals: Set<String> = []
 
     /// Idle sessions count as "waiting for you" this long after their last turn.
     static let waitingWindow: TimeInterval = 10 * 60
@@ -252,7 +254,7 @@ final class AgentsModule: NotchModule {
                     let outcome = PaceForecast.projection(usedPercent: window.usedPercent, minutes: window.minutes,
                                                           resetsAt: window.resetsAt, samples: samples, now: now)
                     let short: String? = switch outcome {
-                    case .hitsLimit(let at): "full at \(TimeText.clock(at))"
+                    case .hitsLimit(let at): "full at \(TimeText.clock(at, from: now))"
                     case .lasts: "lasts"
                     case .unknown: nil
                     }
@@ -275,9 +277,9 @@ final class AgentsModule: NotchModule {
         switch pace(provider, window, now: now) {
         case .hitsLimit(let at):
             let name = window.label == "week" ? Localization.string("weekly") : window.label == "5 h" ? Localization.string("5-hour") : window.label
-            return String(format: Localization.string("At this pace your %@ limit is full at %@"), name, TimeText.clock(at))
+            return String(format: Localization.string("At this pace your %@ limit is full at %@"), name, TimeText.clock(at, from: now))
         case .lasts(let until):
-            return until.map { String(format: Localization.string("Lasts until the reset at %@"), TimeText.clock($0)) }
+            return until.map { String(format: Localization.string("Lasts until the reset at %@"), TimeText.clock($0, from: now)) }
                 ?? Localization.string("Lasts until the reset")
         case .unknown:
             return nil
@@ -290,13 +292,13 @@ final class AgentsModule: NotchModule {
             guard case .hitsLimit(let at) = pace(usage.provider, window, now: now), at > now.addingTimeInterval(60) else { return nil }
             return at
         }
-        return hits.min().map { String(format: Localization.string("full %@"), TimeText.clock($0)) }
+        return hits.min().map { String(format: Localization.string("full %@"), TimeText.clock($0, from: now)) }
     }
 
     /// "full 16:40" for a header pill: only when the window runs out before its reset.
     func paceShort(_ provider: String, _ window: AgentUsage.Window, now: Date = Date()) -> String? {
         guard case .hitsLimit(let at) = pace(provider, window, now: now), at > now.addingTimeInterval(60) else { return nil }
-        return String(format: Localization.string("full %@"), TimeText.clock(at))
+        return String(format: Localization.string("full %@"), TimeText.clock(at, from: now))
     }
 
     /// More than one tool has sessions: chips carry a small tool badge.
@@ -318,11 +320,7 @@ final class AgentsModule: NotchModule {
         switch provider {
         case CodexProvider.id: Color(hex: 0x4FC3B5)
         case ClaudeCodeProvider.id: Color(hex: 0xE0875F)
-        // Muted like the two above, told apart by hue only.
-        case CursorProvider.id: Color(hex: 0xB8BFCC)
-        case CopilotProvider.id: Color(hex: 0xA78BDB)
-        case GeminiProvider.id: Color(hex: 0x7FA8E8)
-        case OpencodeProvider.id: Color(hex: 0xD4B76A)
+        // The other tools: a neutral badge; their name tells them apart.
         default: Theme.textSecondary
         }
     }
@@ -346,8 +344,10 @@ final class AgentsModule: NotchModule {
             request.agentID.map { AgentEvent(sessionID: $0, kind: .needsApproval("Approve: \(request.summary.isEmpty ? request.tool : request.summary)"), at: Date()) }
         }
         // A prompt from a hooked tool (Cursor, Copilot CLI, opencode) may be the first its session
-        // says: it makes the session known, with its process for the jump.
-        let updates = requests.compactMap { request -> HookUpdate? in
+        // says: it makes the session known, with its process for the jump. Each request once.
+        let fresh = requests.filter { !ingestedApprovals.contains($0.id) }
+        ingestedApprovals = Set(requests.map(\.id))
+        let updates = fresh.compactMap { request -> HookUpdate? in
             guard let session = request.sessionID, request.provider != ClaudeCodeProvider.id, request.provider != CodexProvider.id,
                   request.provider != ApprovalRequest.mcpProvider else { return nil }
             let step = SessionStep(kind: request.tool == "Bash" ? .shell : .tool, text: request.summary.isEmpty ? request.tool : request.summary)

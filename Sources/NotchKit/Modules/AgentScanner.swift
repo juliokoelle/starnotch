@@ -30,6 +30,8 @@ actor AgentScanner {
     private let hooked: [any HookSessionSource] = [CursorProvider(), CopilotProvider(), GeminiProvider(), OpencodeProvider()]
     /// Which hooked tools are on this Mac, checked once a minute.
     private var detected: Set<String> = []
+    /// Tools a hook came from: here even where `detect()` doesn't look.
+    private var seenThroughHooks: Set<String> = []
     private var detectedAt = Date.distantPast
     private var jobs: [LaunchdJob] = []
     private var jobsCheckedAt = Date.distantPast
@@ -63,7 +65,7 @@ actor AgentScanner {
             fileTimes.merge(await codex.fileTimes) { a, _ in a }
         }
         if now.timeIntervalSince(detectedAt) > 60 {
-            detected = Set(hooked.map { type(of: $0) }.filter { $0.detect() }.map { $0.id })
+            detected = Set(hooked.map { type(of: $0) }.filter { $0.detect() }.map { $0.id }).union(seenThroughHooks)
             detectedAt = now
         }
         for provider in hooked {
@@ -93,6 +95,7 @@ actor AgentScanner {
     func ingest(_ update: HookUpdate) async -> Bool {
         guard let provider = hooked.first(where: { type(of: $0).id == update.provider }) else { return false }
         // A hook proves the tool is here, even where its folder isn't.
+        seenThroughHooks.insert(update.provider)
         detected.insert(update.provider)
         await provider.ingest(update)
         return true

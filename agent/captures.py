@@ -61,13 +61,14 @@ def read(path: Path = QUEUE) -> list[Capture]:
     return out
 
 
-def as_context(captures: list[Capture], limit: int = 60) -> str:
-    """'- 2026-10-24 task (due 2026-10-28) [max]: Zahlen nachfragen' lines for a prompt, newest first."""
+def as_context(captures: list[Capture], limit: int = 60, ids: bool = False) -> str:
+    """'- 2026-10-24 task (due 2026-10-28) [max]: Zahlen nachfragen' lines for a prompt, newest first.
+    With ids, each line starts with the capture's id in brackets, for answers that cite it."""
     lines = []
     for c in reversed(captures[-limit:]):
         due = f" (due {c.due})" if c.due else ""
         people = f" [{', '.join(c.people)}]" if c.people else ""
-        lines.append(f"- {c.day} {c.route}{due}{people}: {c.text}")
+        lines.append(f"- {f'[{c.id}] ' if ids else ''}{c.day} {c.route}{due}{people}: {c.text}")
     return "\n".join(lines)
 
 

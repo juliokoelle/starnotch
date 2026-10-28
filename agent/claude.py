@@ -8,6 +8,7 @@ Two backends, chosen by STARNOTCH_BRAIN (see `make_brain`):
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -39,8 +40,13 @@ CODE_RETRIES = "1"
 SYSTEM_FILES = "starnotch-system-*"  # system prompts handed to claude -p; they carry the meeting memory
 
 
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+IMAGE_FILES = "starnotch-image-*"  # screenshots handed to claude -p, next to the system prompts
+
+
 class JSONModel(Protocol):
-    def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000) -> dict[str, Any] | None: ...
+    def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000,
+             images: list[Path] | None = None) -> dict[str, Any] | None: ...
 
 
 class Claude:
@@ -53,12 +59,18 @@ class Claude:
         # Server-side fallback re-runs a declined request on another model. Switched off if the API rejects it.
         self.fallbacks = os.environ.get("STARNOTCH_NO_FALLBACK") is None
 
-    def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000) -> dict[str, Any] | None:
+    def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000,
+             images: list[Path] | None = None) -> dict[str, Any] | None:
+        content: str | list[dict[str, Any]] = user
+        if images:  # a screenshot the user asks about, before the question
+            content = [{"type": "image", "source": {"type": "base64", "media_type": _media_type(path),
+                                                    "data": base64.b64encode(Path(path).read_bytes()).decode()}}
+                       for path in images] + [{"type": "text", "text": user}]
         request: dict[str, Any] = dict(
             model=self.model,
             max_tokens=max_tokens,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": user}],
+            messages=[{"role": "user", "content": content}],
             output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": schema}},
         )
         try:
@@ -132,8 +144,8 @@ class ClaudeCode:
         self.check_login()
 
     def sweep(self, older_than: float = 300) -> None:
-        """Removes system prompt files a killed agent left behind (a running call's file is minutes younger)."""
-        for path in self.folder.glob(SYSTEM_FILES):
+        """Removes prompt and image files a killed agent left behind (a running call's file is minutes younger)."""
+        for path in [*self.folder.glob(SYSTEM_FILES), *self.folder.glob(IMAGE_FILES)]:
             try:
                 if path.stat().st_mtime < time.time() - older_than:
                     path.unlink()
@@ -154,7 +166,11 @@ class ClaudeCode:
             raise ClaudeCodeUnavailable(f"Claude Code is signed in with {status.get('authMethod')}, not a Claude plan; "
                                         "Starnotch won't bill it")
 
-    def args(self, system_file: str, schema: dict[str, Any]) -> list[str]:
+    def args(self, system_file: str, schema: dict[str, Any], images: list[str] | None = None) -> list[str]:
+        # A screenshot is a file in the brain folder (the session's working folder): Read is the one tool, allowed
+        # for that file only (headless, any other read outside the folder is denied).
+        tools = ["--tools", "Read", "--allowedTools", ",".join(f"Read(./{Path(i).name})" for i in images)] if images \
+            else ["--tools", ""]
         return [
             self.binary, "-p",
             "--output-format", "json",
@@ -162,26 +178,45 @@ class ClaudeCode:
             "--system-prompt-file", system_file,
             "--model", self.model,
             "--effort", self.effort,
-            "--tools", "",
+            *tools,
             "--strict-mcp-config", "--mcp-config", '{"mcpServers": {}}',
             "--setting-sources", "",  # no user/project settings: no hooks, plugins, apiKeyHelper or memory
             "--disable-slash-commands",
             "--no-session-persistence",
         ]
 
-    def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000) -> dict[str, Any] | None:
+    def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000,
+             images: list[Path] | None = None) -> dict[str, Any] | None:
         # max_tokens has no CLI flag; the answers here are short. The prompt goes in on stdin and the system prompt
         # (it carries the whole meeting memory) through a file, so neither hits the argument length limit. The file
         # lives in the brain folder, not $TMPDIR, so one a killed agent leaves behind is swept on the next start.
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix=SYSTEM_FILES[:-1],
-                                         dir=self.folder) as file:
-            file.write(system)
-            file.flush()
-            try:
-                proc = subprocess.run(self.args(file.name, schema), input=user, capture_output=True, text=True,
-                                      encoding="utf-8", timeout=self.timeout, cwd=self.folder, env=plan_env())
-            except subprocess.TimeoutExpired:  # its text lists the whole command line: not for the notch
-                raise ClaudeCodeError(f"Claude Code took longer than {self.timeout:g} s") from None
+        # A screenshot is copied there too: the session may read its own folder and nothing else.
+        copies: list[Path] = []
+        try:
+            for image in images or []:
+                fd, name = tempfile.mkstemp(suffix=Path(image).suffix.lower() or ".png", prefix=IMAGE_FILES[:-1],
+                                            dir=self.folder)
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(Path(image).read_bytes())
+                copies.append(Path(name))
+            if copies:
+                user = "\n".join(f"Screenshot of the window the user asks about: ./{c.name} (read it first)"
+                                 for c in copies) + "\n\n" + user
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix=SYSTEM_FILES[:-1],
+                                             dir=self.folder) as file:
+                file.write(system)
+                file.flush()
+                # A screenshot costs a Read turn: twice the time.
+                timeout = self.timeout * (2 if copies else 1)
+                try:
+                    proc = subprocess.run(self.args(file.name, schema, [str(c) for c in copies]), input=user,
+                                          capture_output=True, text=True, encoding="utf-8", timeout=timeout,
+                                          cwd=self.folder, env=plan_env())
+                except subprocess.TimeoutExpired:  # its text lists the whole command line: not for the notch
+                    raise ClaudeCodeError(f"Claude Code took longer than {timeout:g} s") from None
+        finally:
+            for copy in copies:
+                copy.unlink(missing_ok=True)
         try:
             result = json.loads(proc.stdout)
         except ValueError:
@@ -207,6 +242,10 @@ class ClaudeCode:
             except ValueError:
                 return None
         return data if isinstance(data, dict) else None
+
+
+def _media_type(path: Path | str) -> str:
+    return IMAGE_TYPES.get(Path(path).suffix.lower(), "image/png")
 
 
 def make_brain(choice: str | None = None) -> tuple[str, JSONModel | None, str | None]:

@@ -1,0 +1,145 @@
+"""Ask Tara: the general `ask` over meetings, quick captures and connector snapshots, with sources and follow-ups."""
+
+import datetime as dt
+import json
+from types import SimpleNamespace
+
+import connectors
+from agent import ASK_SCHEMA, Agent, _language
+from memory import Memory
+
+TODAY = dt.date(2026, 10, 26)
+
+VAULT = {
+    "name": "vault",
+    "today": {"title": "2026-10-26", "path": "/tmp/vault/Daily/2026-10-26.md",
+              "content": "Investor call at 15:00. Deck v3 is final."},
+    "tasks": [
+        {"text": "Send the deck to Mara", "due": "2026-10-27", "path": "/tmp/vault/Tasks.md"},
+        {"text": "Book the train to Hamburg", "url": "obsidian://open?vault=v&file=Tasks"},
+    ],
+}
+CAPTURES = [
+    {"id": "c1", "created": "2026-10-24T09:00:00Z", "route": "task", "text": "Ask Lisa about the workshop room",
+     "due": "2026-10-28"},
+]
+
+
+class FakeLLM:
+    def __init__(self, *answers):
+        self.answers = list(answers)
+        self.calls = []
+
+    def json(self, system, user, schema, max_tokens=4000, **extra):
+        self.calls.append(SimpleNamespace(system=system, user=user, schema=schema, extra=extra))
+        return self.answers.pop(0)
+
+
+def setup(tmp_path, memory_dir, llm, vault=True):
+    folder = tmp_path / "connectors"
+    folder.mkdir()
+    if vault:
+        (folder / "vault.json").write_text(json.dumps(VAULT), encoding="utf-8")
+    (folder / "broken.json").write_text("{not json", encoding="utf-8")
+    queue = tmp_path / "capture-queue.jsonl"
+    queue.write_text("".join(json.dumps(c) + "\n" for c in CAPTURES), encoding="utf-8")
+    out = []
+    agent = Agent(Memory(memory_dir), llm, out.append, TODAY, queue, folder, brain="claude-code" if llm else None)
+    return agent, out
+
+
+def test_connectors_are_read_without_a_schema(tmp_path):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "vault.json").write_text(json.dumps(VAULT), encoding="utf-8")
+    (folder / "empty.json").write_text("[]", encoding="utf-8")
+    items = connectors.read(folder)
+    assert [(i.id, i.group, i.title) for i in items] == [
+        ("vault:0", "today", "2026-10-26"),
+        ("vault:1", "tasks", "Send the deck to Mara"),
+        ("vault:2", "tasks", "Book the train to Hamburg"),
+    ]
+    assert items[0].body == "Investor call at 15:00. Deck v3 is final."
+    assert items[0].url == "file:///tmp/vault/Daily/2026-10-26.md"
+    assert items[1].date == "2026-10-27" and items[2].url.startswith("obsidian://")
+    text = connectors.as_context(items)
+    assert "## Source: vault" in text and "- [vault:1] tasks: Send the deck to Mara (2026-10-27)" in text
+
+
+def test_missing_connector_folder_is_fine(tmp_path):
+    assert connectors.read(tmp_path / "nope") == [] and connectors.read(None) == []
+
+
+def test_ask_sees_everything_and_cites_each_kind(tmp_path, memory_dir):
+    llm = FakeLLM({"answer": "Investor call at 15:00; send Mara the deck; ask Lisa about the room.", "sources": [
+        {"kind": "note", "id": "vault:0", "quote": "Investor call at 15:00."},
+        {"kind": "note", "id": "vault:1", "quote": "Send the deck to Mara"},
+        {"kind": "capture", "id": "c1", "quote": "Ask Lisa about the workshop room"},
+        {"kind": "meeting", "id": "2026-10-12-kickoff", "quote": "kostet 30 Euro im Monat"},
+        {"kind": "note", "id": "vault:99", "quote": "made up"},
+        {"kind": "capture", "id": "nope", "quote": "made up"},
+    ]})
+    agent, out = setup(tmp_path, memory_dir, llm)
+    agent.handle({"cmd": "ask", "question": "What's on today?", "id": 7})
+    call = llm.calls[0]
+    assert call.schema is ASK_SCHEMA and call.extra == {}
+    assert "[c1] 2026-10-24 task (due 2026-10-28): Ask Lisa" in call.system
+    assert "[vault:0] today: 2026-10-26" in call.system and "Kickoff Lumen-Abo" in call.system
+    answer = out[0]
+    assert answer["type"] == "answer" and answer["reply_to"] == 7 and answer["brain"] == "claude-code"
+    kinds = [(s["kind"], s["title"]) for s in answer["sources"]]
+    assert kinds == [("note", "2026-10-26"), ("note", "Send the deck to Mara"),
+                     ("capture", "Ask Lisa about the workshop room"), ("meeting", "Kickoff Lumen-Abo")]
+    note = answer["sources"][0]
+    assert note["url"] == "file:///tmp/vault/Daily/2026-10-26.md" and note["source"] == "vault"
+    assert note["quote"] == "Investor call at 15:00."
+    assert answer["sources"][2]["date"] == "2026-10-24"
+
+
+def test_follow_up_carries_the_conversation(tmp_path, memory_dir):
+    llm = FakeLLM({"answer": "Jonas.", "sources": []})
+    agent, out = setup(tmp_path, memory_dir, llm)
+    history = [{"question": "Welcher Preis?", "answer": "30 Euro."}, {"bad": True}, "x"]
+    agent.handle({"cmd": "ask", "question": "Wer hat das entschieden?", "history": history})
+    prompt = llm.calls[0].user
+    assert prompt.startswith("# Conversation so far\nUser: Welcher Preis?\nTara: 30 Euro.\n\n# Question now\nWer hat")
+    assert out[0]["text"] == "Jonas." and out[0]["sources"] == []
+
+
+def test_history_is_capped(tmp_path, memory_dir):
+    llm = FakeLLM({"answer": "ok", "sources": []})
+    agent, _ = setup(tmp_path, memory_dir, llm)
+    history = [{"question": f"q{n}", "answer": f"a{n}"} for n in range(10)]
+    agent.handle({"cmd": "ask", "question": "now?", "history": history})
+    prompt = llm.calls[0].user
+    assert "q3" not in prompt and "User: q4" in prompt and "User: q9" in prompt
+
+
+def test_screenshot_goes_to_the_brain(tmp_path, memory_dir):
+    llm = FakeLLM({"answer": "A pull request.", "sources": []})
+    agent, _ = setup(tmp_path, memory_dir, llm)
+    agent.handle({"cmd": "ask", "question": "What is this?", "image": "~/shot.png"})
+    assert [p.name for p in llm.calls[0].extra["images"]] == ["shot.png"]
+
+
+def test_rules_say_honestly_what_they_can_do(tmp_path, memory_dir):
+    agent, out = setup(tmp_path, memory_dir, None, vault=False)
+    agent.handle({"cmd": "ask", "question": "Wie wird das Wetter morgen?"})
+    agent.handle({"cmd": "ask", "question": "Who won the football yesterday?"})
+    assert out[0]["brain"] == "rules" and out[0]["sources"] == []
+    assert out[0]["text"].startswith("Ohne Claude finde ich nur Wörter")
+    assert out[1]["text"].startswith("Without Claude I can only look up words")
+
+
+def test_rules_find_captures_and_notes(tmp_path, memory_dir):
+    agent, out = setup(tmp_path, memory_dir, None)
+    agent.handle({"cmd": "ask", "question": "workshop room Lisa?"})
+    agent.handle({"cmd": "ask", "question": "train Hamburg"})
+    assert out[0]["sources"][0]["kind"] == "capture" and out[0]["text"] == "Ask Lisa about the workshop room"
+    assert out[1]["sources"][0]["kind"] == "note" and out[1]["sources"][0]["url"].startswith("obsidian://")
+
+
+def test_language_guess():
+    assert _language("Was haben wir mit Max besprochen?") == "de"
+    assert _language("What did we decide with Max?") == "en"
+    assert _language("Größe?") == "de" and _language("ok?") == "en"

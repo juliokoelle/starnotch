@@ -143,7 +143,7 @@ ASK_SCHEMA = {
     "additionalProperties": False,
 }
 # Apple's on-device model (brain "apple"): 4,096 tokens for instructions, prompt, schema and answer together, so a
-# question gets the material that shares words with it instead of the whole memory (Agent._ask_on_device).
+# question gets the whole memory only when it fits, else the material that shares words with it (Agent._ask_on_device).
 APPLE_WINDOW = 4096
 APPLE_ANSWER = 600  # tokens kept free for the answer and its sources
 APPLE_CHARS_PER_TOKEN = 2.5  # conservative: German runs about 2 to 3 characters per token
@@ -151,13 +151,19 @@ APPLE_LINES = 10  # transcript lines from memory.search, each with the line befo
 APPLE_HISTORY = 2  # turns of a follow-up's conversation
 APPLE_TURN_CHARS = 300  # of each question and answer in it
 APPLE_NOTE_CHARS = 300  # of a connector item's body
+APPLE_QUESTION_CHARS = 1500  # of the question itself (a long paste would leave no room for the material)
+# Pronouns are no topic either: in a general question ("Erzähl mir einen Witz") they'd pull in unrelated lines.
+APPLE_STOP = {"mir", "mich", "dir", "dich", "ihm", "ihn", "ihnen", "sich", "euer", "eure", "meinen", "meinem", "meiner",
+              "deinen", "deinem", "deiner", "sein", "seine", "seinen", "seinem", "seiner", "ihre", "ihren", "ihrem",
+              "ihrer", "him", "her", "them", "his", "their", "mine", "yours"}
 # Apple's documented way to answer in the user's language: the locale, then a firm instruction.
 APPLE_LOCALES = {"de": "de_DE", "en": "en_US"}
 APPLE_LANGUAGE = {"de": "The person's locale is de_DE.\n", "en": ""}
 APPLE_REPLY = {"de": "You MUST respond in German.", "en": "You MUST respond in English."}
 APPLE_ASK_SYSTEM = """{locale}You are Tara, the user's assistant in the Mac's notch. Answer the question only from the material \
 in the prompt: lines from the user's meetings, their quick-capture notes and items from their other tools. Lead with the \
-answer, in at most three short sentences. Back every fact with a source: kind "meeting" with the meeting id and words \
+answer, in at most three short sentences and under 300 characters. Never write an id in the answer, only in the \
+sources. Back every fact with a source: kind "meeting" with the meeting id and words \
 copied exactly from one line of that meeting, kind "capture" or "note" with the id in brackets. If the material does \
 not answer the question, say plainly that it is not in the material and give no sources. A general question that is \
 not about the user's work you may answer briefly, with no sources.{picture} {reply}"""
@@ -405,6 +411,10 @@ class Agent:
             if source and source not in sources:
                 sources.append(source)
         text = result.get("answer", "")
+        if brain == "apple":  # the small model writes "[id]" into the text now and then, though told not to
+            known = ({m.id for m in self.memory.meetings} | {c.id for c in self.captures()}
+                     | {item.id for item in notes})
+            text = re.sub(r"\s*\[([^\]]+)\]", lambda m: "" if m.group(1) in known else m.group(0), text).strip()
         if image and self.brain == "apple":  # say so rather than seem to have looked
             text = NO_PICTURE[_language(question)] + text
         return {"type": "answer", "question": question, "text": text, "sources": sources, "brain": brain}
@@ -412,23 +422,32 @@ class Agent:
     def _ask_on_device(self, question: str, history: Any, notes: list[linked.Item], answering: str | None,
                        picture: bool = False) -> dict[str, Any] | None:
         """A question to Apple's on-device model. Its window holds instructions, prompt, schema and answer in 4,096
-        tokens, so it gets the material that shares words with the question (and with the last turn of a follow-up)
-        in what that leaves, estimated conservatively; an overflow anyway is tried once more with half the material.
-        The instructions name the question's locale, as Apple documents, so the answer comes in its language."""
+        tokens, estimated conservatively. The whole memory goes along when it fits in what that leaves (a small one
+        mostly does) and something in it shares a word with the question; else the material that shares words with
+        the question (and with the last turn of a follow-up), which may be nothing: then the prompt says so, and the
+        model answers plainly that it isn't in the material, or a general question without sources. An overflow anyway is tried once more with half the room for retrieval. The instructions name the question's
+        locale, as Apple documents, so the answer comes in its language."""
         language = _language(question)
         system = APPLE_ASK_SYSTEM.format(locale=APPLE_LANGUAGE[language], reply=APPLE_REPLY[language],
                                          picture=APPLE_PICTURE if picture else "")
         talk = _conversation(history, APPLE_HISTORY, APPLE_TURN_CHARS)
+        question = question[:APPLE_QUESTION_CHARS]
         head, tail = self.ask_moment() + "# Material\n", "\n\n" + (talk or "# Question\n") + question
         turns = [t for t in history if isinstance(t, dict)][-1:] if isinstance(history, list) else []
         query = " ".join([question] + [str(t.get(k) or "") for t in turns for k in ("question", "answer")])
-        room = (int((APPLE_WINDOW - APPLE_ANSWER) * APPLE_CHARS_PER_TOKEN) - len(system) - len(head) - len(tail)
-                - len(json.dumps(_on_device_schema([]))))
+        bare = len(json.dumps(_on_device_schema([])))
+        room = int((APPLE_WINDOW - APPLE_ANSWER) * APPLE_CHARS_PER_TOKEN) - len(system) - len(head) - len(tail) - bare
+        whole = self.ask_context(notes)
+        every = ([("meeting", m.id) for m in self.memory.meetings] + [("capture", c.id) for c in self.captures()]
+                 + [("note", item.id) for item in notes])
+        fits = len(whole) + len(json.dumps(_on_device_schema(every))) - bare <= room
         for share in (1, 2):
             material, cited = self._retrieve(query, notes, answering, room // share)
+            if fits and share == 1 and cited:  # sharing no word with any of it, it gets "nothing matches" instead
+                material, cited = whole, every
             try:
                 return self._think("capture" if answering else "ask", system, head + material + tail,
-                                   _on_device_schema(cited), 2000, locale=APPLE_LOCALES[language])
+                                   _on_device_schema(cited), APPLE_ANSWER, locale=APPLE_LOCALES[language])
             except Exception as error:
                 if getattr(error, "kind", "") != "contextWindowExceeded" or share == 2:
                     raise
@@ -440,7 +459,7 @@ class Agent:
         count too): facts of the meetings, transcript lines from memory.search (with the line before and after),
         captures and connector items that share content words with `text`, the most shared first (a number counts
         twice), newest first on a tie, then the context lines. Returns the text and the (kind, id) it can cite."""
-        query = _content(text)
+        query = _content(text) - APPLE_STOP
         found: list[tuple[float, str, tuple[str, str], tuple[int, int], str]] = []  # score, date, source, order, row
         heads: dict[str, str] = {}
         for m in self.memory.meetings:

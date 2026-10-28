@@ -491,7 +491,6 @@
 "Start over" = "Neu anfangen";
 "Thinking" = "Denkt nach";
 "Simple rules, no Claude: Settings › Meeting agent" = "Einfache Regeln, kein Claude: Einstellungen › Meeting-Agent";
-"Claude isn't reachable, so simple rules answered" = "Claude ist nicht erreichbar, deshalb haben einfache Regeln geantwortet";
 "Show the words from the meeting" = "Die Worte aus dem Meeting zeigen";
 "Show the note" = "Die Notiz zeigen";
 "Tara needs speech recognition and the microphone: System Settings › Privacy & Security" = "Tara braucht Spracherkennung und das Mikrofon: Systemeinstellungen › Datenschutz & Sicherheit";
@@ -536,7 +535,10 @@
 "Checking…" = "Wird geprüft …";
 "Ready" = "Bereit";
 "Not enabled: System Settings › Apple Intelligence & Siri" = "Nicht eingeschaltet: Systemeinstellungen › Apple Intelligence & Siri";
-"Downloading the model" = "Das Modell wird geladen";
+"Downloading the model" = "Das Modell wird heruntergeladen";
 "Not supported on this Mac" = "Auf diesem Mac nicht unterstützt";
 "Not in this build" = "In diesem Build nicht enthalten";
 "Answers are simpler than with Claude, and live meetings run on simple rules." = "Die Antworten sind einfacher als mit Claude, und laufende Meetings nutzen einfache Regeln.";
+"Unavailable" = "Nicht verfügbar";
+"Needs Apple Intelligence on this Mac." = "Braucht Apple Intelligence auf diesem Mac.";
+"Tara's model isn't reachable, so simple rules answered" = "Taras Modell ist nicht erreichbar, deshalb haben einfache Regeln geantwortet";

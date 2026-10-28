@@ -85,6 +85,8 @@ import TestSupport
         #expect(status(#"{"available":false,"reason":"modelNotReady","message":"downloading"}"#) == .downloading)
         #expect(status(#"{"available":false,"reason":"deviceNotEligible","message":"macOS 26"}"#) == .notSupported)
         #expect(status("") == .unknown)
-        #expect(status(#"{"available":false,"reason":"somethingNew"}"#) == .unknown)
+        #expect(status(#"{"available":false,"reason":"somethingNew"}"#) == .unavailable)
+        #expect(status(#"{"available":false}"#) == .unavailable)
+        #expect(status(#"{"available":false,"reason":"noHelper"}"#) == .unknown)
     }
 }

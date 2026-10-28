@@ -266,9 +266,11 @@ struct MeetingAgentSettings: View {
                     Text(LocalizedStringKey(BrainInfo.title(brain))).tag(brain)
                 }
             }
-            if state.settings.brain == .apple {
+            if state.settings.brain == .apple || state.settings.brain == .auto {
                 LabeledContent("Apple Intelligence") { Text(LocalizedStringKey(Self.line(apple))) }
                     .task { apple = await MeetingAgentSetup.appleStatus() }
+            }
+            if state.settings.brain == .apple {
                 Text("Answers are simpler than with Claude, and live meetings run on simple rules.")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
@@ -314,6 +316,7 @@ struct MeetingAgentSettings: View {
         case .notEnabled?: "Not enabled: System Settings › Apple Intelligence & Siri"
         case .downloading?: "Downloading the model"
         case .notSupported?: "Not supported on this Mac"
+        case .unavailable?: "Unavailable"
         case .unknown?: "Not in this build"
         }
     }

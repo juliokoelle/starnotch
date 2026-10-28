@@ -301,7 +301,7 @@ final class MeetingModule: NotchModule {
                     set(.idle)
                 }
             } else if state == "offline" {
-                message = text ?? "Claude isn't reachable; running on rules"
+                message = text ?? "Tara's model isn't reachable; running on rules"
             }
         case .error(let text):
             message = text

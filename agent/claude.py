@@ -14,6 +14,7 @@ import base64
 import json
 import math
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -47,6 +48,7 @@ SYSTEM_FILES = "starnotch-system-*"  # system prompts handed to claude -p; they 
 
 APPLE_MODEL = "apple-on-device"  # the model name in the usage ledger
 APPLE_TIMEOUT = 60  # one call takes a few seconds; the first after a while may load the model
+APPLE_RETRY = 2.0  # seconds before the one retry of a rate-limited call
 APPLE_CHARS_PER_TOKEN = 3.0  # the ledger's estimate (the framework can't count tokens with the Command Line Tools SDK)
 # STARNOTCH_APPLE_HELPER (the app sets it to its bundled copy), else a build in this repo.
 APPLE_HELPERS = tuple(str(Path(__file__).resolve().parent.parent / ".build" / kind / "AppleModel")
@@ -288,6 +290,9 @@ def find_apple_helper() -> str | None:
 
 def apple_status(binary: str | None = None) -> dict[str, Any]:
     """The helper's --status: {"available": true}, or false with Apple's `reason` and a `message`."""
+    major = platform.mac_ver()[0].split(".")[0]
+    if major.isdigit() and int(major) < 26:  # the framework isn't there: don't even start the helper
+        return {"available": False, "reason": "deviceNotEligible", "message": "Apple Intelligence needs macOS 26 or later"}
     binary = binary or find_apple_helper()
     if not binary:
         return {"available": False, "reason": "noHelper", "message": "the Apple Intelligence helper isn't in this build"}
@@ -321,10 +326,20 @@ class AppleModel:
 
     def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000,
              images: list[Path] | None = None, locale: str = "") -> dict[str, Any] | None:
-        # max_tokens has no use here: instructions, prompt, schema and answer share one window of 4,096 tokens.
+        # max_tokens caps the answer (maximumResponseTokens); instructions, prompt, schema and answer share one
+        # window of 4,096 tokens. A rate-limited call is tried once more after a short wait.
+        try:
+            return self._json(system, user, schema, max_tokens, locale)
+        except AppleModelError as error:
+            if error.kind != "rateLimited":
+                raise
+        time.sleep(APPLE_RETRY)
+        return self._json(system, user, schema, max_tokens, locale)
+
+    def _json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int, locale: str) -> dict[str, Any] | None:
         self.last_usage = None
-        request = json.dumps({"instructions": system, "prompt": user, "schema": schema, "locale": locale},
-                             ensure_ascii=False)
+        request = json.dumps({"instructions": system, "prompt": user, "schema": schema, "locale": locale,
+                              "maximumResponseTokens": max_tokens}, ensure_ascii=False)
         started = time.monotonic()
         try:
             proc = subprocess.run([self.binary], input=request, capture_output=True, text=True, encoding="utf-8",

@@ -3,14 +3,15 @@
 //
 //   AppleModel --status     {"available": true} or {"available": false, "reason": "modelNotReady", "message": "…"}
 //   AppleModel < request    one JSON request on stdin, one JSON line on stdout:
-//       {"instructions": "…", "prompt": "…", "schema": {JSON Schema}, "locale": "de_DE"}
+//       {"instructions": "…", "prompt": "…", "schema": {JSON Schema}, "locale": "de_DE", "maximumResponseTokens": 600}
 //       -> {"result": {…}} or {"error": {"kind": "…", "message": "…", "reason": "…"}}
 //
 // kind: unavailable (reason: deviceNotEligible, appleIntelligenceNotEnabled, modelNotReady), rateLimited, guardrail,
 // contextWindowExceeded, unsupportedLanguage, other. The schema is the JSON Schema subset the sidecar uses (object,
 // array, string with or without enum, integer, number, boolean, description, required, minItems, maxItems), built into
 // a DynamicGenerationSchema here: the Command Line Tools have no @Generable macro, and the sidecar keeps one schema
-// format for every brain. Properties keep the order of `required`, then the others by name.
+// format for every brain. Properties keep the order of `required`, then the others by name. The root is an object,
+// and every `type` one string (a node without one is a string); anything else is refused with kind other.
 //
 // The rest of the app targets macOS 14; the framework needs macOS 26, so everything that touches it is behind
 // @available, and the binary links it weakly (it starts on older systems and answers "unavailable").
@@ -61,6 +62,9 @@ func unavailable(_ model: SystemLanguageModel) -> Failure? {
 @available(macOS 26, *)
 func dynamic(_ node: [String: Any], name: String) throws -> DynamicGenerationSchema {
     let description = node["description"] as? String
+    if let type = node["type"], !(type is String) {
+        throw Failure(kind: "other", message: "schema node \(name): the type must be one string")
+    }
     switch node["type"] as? String {
     case "object":
         let properties = node["properties"] as? [String: Any] ?? [:]
@@ -119,9 +123,13 @@ func answer(_ request: [String: Any]) async throws -> Any {
     guard let prompt = request["prompt"] as? String, let schema = request["schema"] as? [String: Any] else {
         throw Failure(kind: "other", message: "the request needs a prompt and a schema")
     }
+    guard schema["type"] as? String == "object" else {
+        throw Failure(kind: "other", message: "the schema's root must be an object")
+    }
     let generation = try GenerationSchema(root: try dynamic(schema, name: "Answer"), dependencies: [])
     let session = LanguageModelSession(model: model, instructions: request["instructions"] as? String ?? "")
-    let response = try await session.respond(to: prompt, schema: generation, options: GenerationOptions(sampling: .greedy))
+    let options = GenerationOptions(sampling: .greedy, maximumResponseTokens: request["maximumResponseTokens"] as? Int)
+    let response = try await session.respond(to: prompt, schema: generation, options: options)
     return try JSONSerialization.jsonObject(with: Data(response.content.jsonString.utf8))
 }
 #endif

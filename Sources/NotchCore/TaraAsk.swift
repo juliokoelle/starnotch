@@ -188,6 +188,8 @@ public enum AppleModelStatus: Equatable, Sendable {
     case downloading
     /// Not on this Mac (no Apple silicon, or older than macOS 26).
     case notSupported
+    /// Unavailable for another reason Apple gives.
+    case unavailable
     /// No helper in this build, or no answer it could read.
     case unknown
 
@@ -204,7 +206,8 @@ public enum AppleModelStatus: Equatable, Sendable {
         case "appleIntelligenceNotEnabled": self = .notEnabled
         case "modelNotReady": self = .downloading
         case "deviceNotEligible": self = .notSupported
-        default: self = .unknown
+        case "noHelper": self = .unknown
+        default: self = .unavailable
         }
     }
 }

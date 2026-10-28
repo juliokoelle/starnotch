@@ -135,10 +135,11 @@ def _words(text: str) -> set[str]:
 
 def _bare(quote: str, speaker: str) -> str:
     """A quote without a leading "Speaker: " (models copy the line as the material prints it); "\0" when it has
-    none or nothing follows it, so it matches no text."""
+    none or too little follows it (under three words and 12 characters, like "Lisa: Ja"), so it matches no text."""
     head, sep, rest = quote.partition(":")
     rest = rest.strip().strip('"„“').strip()
-    return rest.lower() if sep and rest and head.strip().lower() == speaker.strip().lower() else "\0"
+    enough = len(rest) >= 12 or len(rest.split()) >= 3
+    return rest.lower() if sep and enough and head.strip().lower() == speaker.strip().lower() else "\0"
 
 
 def _same_person(a: str, b: str) -> bool:

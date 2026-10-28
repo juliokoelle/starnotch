@@ -25,6 +25,8 @@ with open(os.environ["FAKE_APPLE_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(request) + "\\n")
 if mode == "slow":
     time.sleep(5)
+if mode == "rateLimitedOnce" and len(open(os.environ["FAKE_APPLE_LOG"], encoding="utf-8").readlines()) == 1:
+    mode = "rateLimited"
 if mode in ("rateLimited", "contextWindowExceeded", "guardrail", "unsupportedLanguage", "other"):
     print(json.dumps({{"error": {{"kind": mode, "message": mode + " happened"}}}}))
     sys.exit(1)

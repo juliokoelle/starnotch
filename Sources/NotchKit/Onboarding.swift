@@ -432,7 +432,7 @@ private struct MeetingsStep: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 OnboardingLabel("How Tara thinks")
-                CardList(items: [TaraBrain.claudeCode, .api, .rules]) { brain in
+                CardList(items: [TaraBrain.claudeCode, .api, .apple, .rules]) { brain in
                     BrainRow(model: model, brain: brain)
                 }
                 Text(model.state.settings.brain == .auto
@@ -597,10 +597,13 @@ private struct BrainRow: View {
     @Bindable var model: Onboarding
     let brain: TaraBrain
     @State private var key = MeetingAgentSetup.keys()["ANTHROPIC_API_KEY"] ?? ""
+    @State private var apple: AppleModelStatus?
 
     var body: some View {
         let selected = model.state.settings.brain == brain
+        // Apple Intelligence stays open while it's off or downloading: the user can still switch it on.
         let blocked = brain == .claudeCode && !model.claudeFound
+            || brain == .apple && (apple == .notSupported || apple == .unknown)
         VStack(alignment: .leading, spacing: 8) {
             Button {
                 Haptics.tick()
@@ -623,7 +626,9 @@ private struct BrainRow: View {
                                     .background(Theme.accent.opacity(0.14), in: Capsule())
                             }
                         }
-                        Text(LocalizedStringKey(blocked ? "Needs Claude Code on this Mac." : BrainInfo.line(brain)))
+                        Text(LocalizedStringKey(!blocked ? BrainInfo.line(brain)
+                                                : brain == .apple ? "Needs Apple Intelligence on this Mac."
+                                                : "Needs Claude Code on this Mac."))
                             .font(.system(size: 11.5)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -635,6 +640,7 @@ private struct BrainRow: View {
             .disabled(blocked)
             .opacity(blocked ? 0.5 : 1)
             .accessibilityAddTraits(selected ? .isSelected : [])
+            .task { if brain == .apple { apple = await MeetingAgentSetup.appleStatus() } }
             if brain == .api && selected {
                 SecureField("Anthropic API key", text: $key, prompt: Text("sk-ant-…"))
                     .textFieldStyle(.roundedBorder)

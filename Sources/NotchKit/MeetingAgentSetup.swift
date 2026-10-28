@@ -102,8 +102,10 @@ enum MeetingAgentSetup {
     /// The Apple Intelligence helper in this app (Sources/AppleModel), which the agent runs for the `apple` brain.
     static var appleHelper: URL? { Bundle.main.url(forAuxiliaryExecutable: "AppleModel") }
 
-    /// Whether Apple's on-device model is ready, from the helper's `--status` (a process: off the main thread).
+    /// Whether Apple's on-device model is ready, from the helper's `--status` (a process: off the main thread,
+    /// stopped after 15 s). Before macOS 26 the helper isn't asked.
     static func appleStatus() async -> AppleModelStatus {
+        guard #available(macOS 26, *) else { return .notSupported }
         guard let helper = appleHelper else { return .unknown }
         return await Task.detached {
             let process = Process()
@@ -113,7 +115,11 @@ enum MeetingAgentSetup {
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
             do { try process.run() } catch { return AppleModelStatus.unknown }
+            let pid = process.processIdentifier
+            let stop = DispatchWorkItem { kill(pid, SIGTERM) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: stop)
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            stop.cancel()
             process.waitUntilExit()
             return AppleModelStatus(statusLine: data)
         }.value

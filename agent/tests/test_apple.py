@@ -12,7 +12,8 @@ from types import SimpleNamespace
 import pytest
 
 import claude
-from agent import (APPLE_ANSWER, APPLE_CHARS_PER_TOKEN, APPLE_WINDOW, ASK_SCHEMA, NO_PICTURE, Agent)
+from agent import (APPLE_ANSWER, APPLE_CHARS_PER_TOKEN, APPLE_QUESTION_CHARS, APPLE_WINDOW, ASK_SCHEMA, NO_PICTURE,
+                   Agent)
 from claude import AppleModel, AppleModelError, AppleModelUnavailable, make_brain
 from memory import Line, Meeting, Memory
 
@@ -54,7 +55,8 @@ def test_request_format_and_usage(apple):
     assert model.model == "apple-on-device"
     assert model.json("Be brief.", "Preis?", SCHEMA, 2000, locale="de_DE") == {"answer": "30 Euro.", "sources": []}
     request = apple()[0]
-    assert request == {"instructions": "Be brief.", "prompt": "Preis?", "schema": SCHEMA, "locale": "de_DE"}
+    assert request == {"instructions": "Be brief.", "prompt": "Preis?", "schema": SCHEMA, "locale": "de_DE",
+                       "maximumResponseTokens": 2000}
     usage = model.last_usage
     assert usage["model"] == "apple-on-device" and usage["cost_usd"] == 0.0
     assert usage["input_tokens"] == claude.estimate_tokens("Be brief." + "Preis?" + json.dumps(SCHEMA)) > 0
@@ -62,6 +64,7 @@ def test_request_format_and_usage(apple):
 
 
 def test_errors(apple, monkeypatch):
+    monkeypatch.setattr(claude, "APPLE_RETRY", 0)
     model = AppleModel()
     for kind in ("rateLimited", "contextWindowExceeded", "unsupportedLanguage", "other"):
         monkeypatch.setenv("FAKE_APPLE", kind)
@@ -82,6 +85,20 @@ def test_errors(apple, monkeypatch):
     monkeypatch.setenv("FAKE_APPLE", "slow")
     with pytest.raises(AppleModelError, match="longer than 0.5 s"):
         AppleModel(timeout=0.5).json("s", "u", SCHEMA)
+
+
+def test_a_rate_limited_call_is_tried_once_more(apple, monkeypatch):
+    monkeypatch.setattr(claude, "APPLE_RETRY", 0)
+    monkeypatch.setenv("FAKE_APPLE", "rateLimitedOnce")
+    assert AppleModel().json("s", "u", SCHEMA) == {"answer": "30 Euro.", "sources": []}
+    assert len(apple()) == 2
+
+
+def test_before_macos_26_the_helper_is_not_asked(apple, monkeypatch):
+    monkeypatch.setattr(claude.platform, "mac_ver", lambda: ("15.4", ("", "", ""), "arm64"))
+    assert claude.apple_status() == {"available": False, "reason": "deviceNotEligible",
+                                     "message": "Apple Intelligence needs macOS 26 or later"}
+    assert make_brain("auto")[0] in ("claude-code", "api", "rules") and apple() == []
 
 
 def test_status_decides_whether_apple_can_think(apple, monkeypatch):
@@ -148,9 +165,26 @@ def test_retrieval_fits_the_window_and_finds_the_line(memory_dir):
     assert answer["sources"][0]["quote"] == "Der Raum ist gebucht, Donnerstag nächste Woche, Raum Ahorn."
 
 
+def test_a_small_memory_goes_along_whole(memory_dir):
+    llm = FakeLLM({"answer": "Donnerstag nächste Woche im Raum Ahorn [2026-10-19-weekly]. [Hinweis] bleibt.",
+                   "sources": []}, {"answer": "Ein Witz.", "sources": []})
+    agent, _ = on_device(memory_dir, llm)
+    answer = agent.ask("Wann und wo findet der Launch-Workshop statt?")
+    call = llm.calls[0]
+    assert sent(call) <= WINDOW_CHARS and agent.ask_context([]) in call.user
+    assert "Lisa: Der Raum ist gebucht, Donnerstag nächste Woche, Raum Ahorn." in call.user  # shares no word with it
+    ids = call.schema["properties"]["sources"]["items"]["properties"]["id"]["enum"]
+    assert ids == ["2026-10-12-kickoff", "2026-10-19-weekly"]
+    assert answer["text"] == "Donnerstag nächste Woche im Raum Ahorn. [Hinweis] bleibt."  # ids only in sources
+    agent.ask("Erzähl mir einen Witz über Katzen.")
+    joke = llm.calls[1]
+    assert "(Nothing in the meetings, captures or notes matches this question.)" in joke.user
+    assert agent.ask_context([]) not in joke.user and joke.schema["properties"]["sources"]["maxItems"] == 0
+
+
 def test_the_schema_cites_only_what_was_sent(memory_dir):
     llm = FakeLLM({"answer": "30 Euro.", "sources": []}, {"answer": "Weiß ich nicht.", "sources": []})
-    agent, _ = on_device(memory_dir, llm)
+    agent = Agent(big_memory(memory_dir), llm, [].append, TODAY, brain="apple")
     agent.ask("Welchen Preis haben wir für das Lumen-Abo beschlossen?")
     schema = llm.calls[0].schema
     item = schema["properties"]["sources"]["items"]["properties"]
@@ -174,7 +208,7 @@ def test_captures_and_notes_that_match_come_along(memory_dir, tmp_path):
     (folder / "vault.json").write_text(json.dumps({"name": "vault", "tasks": [
         {"text": "Workshop-Material drucken", "content": "Flipchart und Stifte"}, {"text": "Steuer"}]}), encoding="utf-8")
     llm = FakeLLM({"answer": "Agenda und Material.", "sources": [{"kind": "capture", "id": "c7", "quote": "Agenda"}]})
-    agent = Agent(Memory(memory_dir), llm, [].append, TODAY, queue, folder, brain="apple")
+    agent = Agent(big_memory(memory_dir), llm, [].append, TODAY, queue, folder, brain="apple")
     answer = agent.ask("Was steht für den Workshop noch an?")
     call = llm.calls[0]
     assert "- [c7] 2026-10-24 task: Workshop-Agenda an Lisa schicken" in call.user
@@ -195,6 +229,25 @@ def test_locale_instruction_follows_the_question(memory_dir):
     assert german.extra == {"locale": "de_DE"}
     assert "locale is" not in english.system and english.system.endswith("You MUST respond in English.")
     assert english.extra == {"locale": "en_US"}
+
+
+def test_pronouns_find_nothing(memory_dir):
+    llm = FakeLLM({"answer": "Ein Witz.", "sources": []})
+    agent = Agent(big_memory(memory_dir), llm, [].append, TODAY, brain="apple")
+    agent.ask("Erzähl mir einen Witz über Katzen.")
+    assert "Max: Noch nicht, mir fehlen noch" not in llm.calls[0].user
+    assert llm.calls[0].schema["properties"]["sources"]["maxItems"] == 0
+
+
+def test_a_long_question_is_cut_and_the_answer_capped(memory_dir):
+    llm = FakeLLM({"answer": "30 Euro.", "sources": []})
+    agent = Agent(big_memory(memory_dir), llm, [].append, TODAY, brain="apple")
+    question = "Welchen Preis haben wir für das Lumen-Abo beschlossen? " + "Bla bla. " * 1000
+    answer = agent.ask(question)
+    call = llm.calls[0]
+    assert sent(call) <= WINDOW_CHARS and question[:APPLE_QUESTION_CHARS] in call.user
+    assert question[:APPLE_QUESTION_CHARS + 1] not in call.user and "Lumen-Abo kostet 30 Euro" in call.user
+    assert answer["question"] == question
 
 
 def test_follow_up_history_is_short(memory_dir):
@@ -253,7 +306,7 @@ def test_lost_availability_switches_to_rules(memory_dir):
 @pytest.mark.parametrize("brain", ["apple", "claude-code"])
 def test_a_quote_with_its_speaker_still_counts(memory_dir, brain):
     llm = FakeLLM({"answer": "Super.", "sources": [
-        {"kind": "meeting", "id": "2026-10-12-kickoff", "quote": "Jonas: Super."},
+        {"kind": "meeting", "id": "2026-10-12-kickoff", "quote": "Jonas: Super. Nächste Woche gleiche Zeit"},
         {"kind": "meeting", "id": "2026-10-19-weekly", "quote": '"Max: Noch nicht, mir fehlen noch die Supportkosten."'},
         {"kind": "meeting", "id": "2026-10-12-kickoff", "quote": "Lisa:"},
     ]})
@@ -271,3 +324,12 @@ def test_a_decision_quote_with_its_speaker_still_counts(memory_dir):
     agent = Agent(memory, None, [].append, TODAY)
     found = agent._locate("Jonas: Das Lumen-Abo kostet 30 Euro im Monat", "2026-10-12-kickoff")
     assert found and found[2] == "Jonas" and found[1].startswith("Okay, dann entscheiden wir")
+
+
+def test_a_short_quote_with_its_speaker_matches_nothing(memory_dir):
+    memory = Memory(memory_dir)
+    memory.save(Meeting(id="2026-10-20-plan", title="Plan", date="2026-10-20", participants=["Lisa"],
+                        transcript=[Line("Lisa", "Im nächsten Jahr machen wir das anders.", 0.0)]))
+    memory = Memory(memory_dir)
+    assert memory.find_quote("Lisa: Ja") is None  # "ja" would be inside "Jahr"
+    assert memory.find_quote("Lisa: Im nächsten Jahr")[1].text.startswith("Im nächsten Jahr")

@@ -318,8 +318,8 @@ final class AskTara {
     /// with the next question. Only then, so moving her around never takes pictures.
     func droppedOnWindow(at point: CGPoint) {
         guard isOpen, !isThinking, !capturing, !previewing, let target = AskWindowShot.window(at: point) else { return }
-        // The rules can't see pictures; sample data never brings up the Screen Recording prompt.
-        guard MeetingAgentSetup.brain != .rules, !demo || CGPreflightScreenCaptureAccess() else { return }
+        // The rules and Apple's model can't see pictures; sample data never brings up the Screen Recording prompt.
+        guard ![.rules, .apple].contains(MeetingAgentSetup.brain), !demo || CGPreflightScreenCaptureAccess() else { return }
         withAnimation(Theme.snappy) { capturing = true }
         let folder = Self.shotFolder
         Task { [weak self] in

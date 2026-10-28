@@ -123,10 +123,11 @@ file only, and deleted after the call; the API gets it as an image block. Apple'
 it is told it can't see one, and the answer's `text` opens with a sentence saying so ("I can't see pictures with
 Apple Intelligence." or the German one).
 
-With `apple`, the material isn't the whole memory: the window holds 4,096 tokens for instructions, prompt, schema
-and answer, so the prompt carries the facts, transcript lines (with the line before and after), captures and
-connector items that share words with the question (and with the last turn of a follow-up), the last 2 turns, and
-the instructions name the question's locale (see [README.md](README.md#apple-intelligence-apple)).
+With `apple`, the window holds 4,096 tokens for instructions, prompt, schema and answer: the prompt carries the
+whole memory when it fits and something in it shares a word with the question, else the facts, transcript lines
+(with the line before and after), captures and connector items that share words with the question (and with the
+last turn of a follow-up); then the last 2 turns, and the instructions name the question's locale (see
+[README.md](README.md#apple-intelligence-apple)).
 
 The brain is told today's date (`--today`, else the real date, so an agent kept running overnight moves on) and, when
 `<memory>/jamie-sync.state` exists, when Jamie last synced: that file is written only at the end of a successful
@@ -286,16 +287,19 @@ being Apple's: `deviceNotEligible` (not this Mac, or older than macOS 26), `appl
 A call is one JSON object on stdin and one line on stdout:
 
 ```json
-{"instructions": "…", "prompt": "…", "schema": {"type": "object", "properties": {…}, "required": […]}, "locale": "de_DE"}
+{"instructions": "…", "prompt": "…", "schema": {"type": "object", "properties": {…}, "required": […]}, "locale": "de_DE", "maximumResponseTokens": 600}
 {"result": {"answer": "…", "sources": […]}}
 {"error": {"kind": "rateLimited", "message": "…"}}
 ```
 
 `schema` is the JSON Schema subset the agent uses: `object` (`properties`, `required`; properties come in the order
 of `required`, then the others by name), `array` (`items`, `minItems`, `maxItems`), `string` (with `enum` for a
-fixed choice), `integer`, `number`, `boolean`, and `description`. `locale` is checked against the model's languages
-first. `kind` is `unavailable` (with `reason` as above), `rateLimited`, `guardrail` (the agent treats it as a
-refusal), `contextWindowExceeded` (the agent retries once with half the material), `unsupportedLanguage` or `other`.
+fixed choice), `integer`, `number`, `boolean`, and `description`. The root must be an object and each `type` one
+string (a node without `type` is a string); anything else, such as `["string", "null"]`, is refused with kind `other`.
+`locale` is checked against the model's languages first; `maximumResponseTokens` (optional) caps the answer.
+`kind` is `unavailable` (with `reason` as above), `rateLimited` (the agent tries once more after 2 seconds),
+`guardrail` (the agent treats it as a refusal), `contextWindowExceeded` (the agent retries once with a retrieval in
+half the room), `unsupportedLanguage` or `other`.
 Exit code 0 with a `result`, 1 with an `error`.
 
 ## transcribe.py

@@ -65,9 +65,13 @@ import TestSupport
         let start = UTC.date("2026-10-28 10:00")
         var gesture = AskHotKeyGesture()
         #expect(gesture.press(at: start, isOpen: true) == .wait)
-        #expect(!gesture.holdElapsed(at: start.addingTimeInterval(0.2)))
-        #expect(gesture.holdElapsed(at: start.addingTimeInterval(0.4)))
-        #expect(!gesture.holdElapsed(at: start.addingTimeInterval(0.5)))  // once per press
+        // `holdElapsed` is mutating, so its results are taken before #expect sees them.
+        let early = gesture.holdElapsed(at: start.addingTimeInterval(0.2))
+        let held = gesture.holdElapsed(at: start.addingTimeInterval(0.4))
+        let again = gesture.holdElapsed(at: start.addingTimeInterval(0.5))
+        #expect(!early)
+        #expect(held)
+        #expect(!again)  // once per press
         #expect(gesture.listening)
         #expect(gesture.release(at: start.addingTimeInterval(2)) == .send)
         #expect(!gesture.listening)

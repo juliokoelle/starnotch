@@ -19,7 +19,7 @@ import Testing
         var lid = LidAwake()
         _ = lid.handle(.switchOn(.threeHours, onPower: true, ruleInstalled: true), now: now)
         #expect(lid.handle(.tick, now: now.addingTimeInterval(3 * 3600 - 1)) == .none)
-        #expect(lid.remaining(now: now.addingTimeInterval(3600)) == 2 * 3600)
+        #expect(lid.remaining(now: now.addingTimeInterval(3600)) == 2 * 3600.0)  // a Double: an Int literal compares as AnyHashable and fails
         #expect(lid.handle(.tick, now: now.addingTimeInterval(3 * 3600)) == .disable(.timeUp))
         #expect(!lid.isOn)
         #expect(lid.handle(.tick, now: now.addingTimeInterval(4 * 3600)) == .none)

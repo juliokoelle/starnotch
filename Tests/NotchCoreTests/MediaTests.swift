@@ -183,16 +183,15 @@ import Testing
 
 @Suite struct HelperProcessTests {
     @Test func failuresCountShortRunsEvenWithLines() {
+        // `ended` is mutating, so its results are taken before #expect sees them.
         var restarts = HelperRestarts()
-        #expect(restarts.ended(after: 1))
-        #expect(restarts.ended(after: 5))
-        #expect(!restarts.ended(after: 2))
+        let short = [restarts.ended(after: 1), restarts.ended(after: 5), restarts.ended(after: 2)]
+        #expect(short == [true, true, false])
         #expect(restarts.gaveUp)
         // A run that lasted starts the count over.
         var lasting = HelperRestarts()
-        #expect(lasting.ended(after: 1))
-        #expect(lasting.ended(after: 2))
-        #expect(lasting.ended(after: 600))
+        let mixed = [lasting.ended(after: 1), lasting.ended(after: 2), lasting.ended(after: 600)]
+        #expect(mixed == [true, true, true])
         #expect(lasting.failures == 1)
         lasting.failedToStart()
         #expect(lasting.gaveUp)

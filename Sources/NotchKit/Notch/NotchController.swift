@@ -68,6 +68,11 @@ final class NotchController {
     let inbox = CaptureInbox()
     /// The menu bar icons, so the open island ends between them.
     private let menuBar = MenuBarExtras()
+    /// Previews: icons to pretend are in the menu bar (extents from the notch centre) instead of
+    /// the real ones.
+    var simulatedMenuBarItems: [ClosedRange<CGFloat>]? {
+        didSet { fitToMenuBar() }
+    }
 
     /// For our own screenshots and recordings (`--capturable`); otherwise the island stays out
     /// of screen sharing and captures.
@@ -170,6 +175,7 @@ final class NotchController {
                 .filter { bar.contains(CGPoint(x: $0.midX, y: $0.midY)) }
                 .map { ($0.minX - notch.rect.midX) ... ($0.maxX - notch.rect.midX) }
         }
+        if let simulatedMenuBarItems { items = simulatedMenuBarItems }
         guard items != model.menuBarItems else { return }
         if model.interaction == .expanded || model.interaction == .capture {
             withAnimation(Theme.snappy) { model.menuBarItems = items }

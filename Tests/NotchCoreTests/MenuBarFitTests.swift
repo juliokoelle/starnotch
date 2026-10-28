@@ -75,3 +75,39 @@ import Testing
         #expect(MenuBarFit.edges([]) == [0 ... .infinity])
     }
 }
+
+@Suite struct EarRoomTests {
+    let half: CGFloat = 92
+
+    func room(_ items: [ClosedRange<CGFloat>], limit: CGFloat = 30, minimum: CGFloat = 0) -> CGFloat {
+        MenuBarFit.earRoom(halfNotch: half, limit: limit, items: items, minimum: minimum)
+    }
+
+    @Test func noIconsKeepTheLimit() {
+        #expect(room([]) == 30)
+    }
+
+    @Test func farIconsKeepTheLimit() {
+        #expect(room([140 ... 160, -200 ... -150]) == 30)
+    }
+
+    @Test func iconCloseOnTheRightNarrowsBothEars() {
+        // The icon starts 20 pt right of the notch: 20 minus the margin.
+        #expect(room([112 ... 140]) == 20 - MenuBarFit.margin)
+    }
+
+    @Test func iconHuggingTheNotchOnTheLeftLeavesNoRoom() {
+        // A long status item that macOS put directly left of the notch (seen with a meeting title).
+        #expect(room([-354 ... -94]) == 0)
+    }
+
+    @Test func iconsUnderTheNotchAreIgnored() {
+        // Hidden behind the camera housing: overlaps the notch.
+        #expect(room([50 ... 311]) == 30)
+    }
+
+    @Test func tooLittleRoomIsNone() {
+        #expect(room([108 ... 130], minimum: 14) == 0)
+        #expect(room([130 ... 150], minimum: 14) == 30)
+    }
+}

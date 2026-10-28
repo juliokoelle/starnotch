@@ -128,6 +128,8 @@ struct NotchLayout: Equatable {
     static let captureWidth: CGFloat = 520
     /// The middle between the old Agents (about 180) and Calendar (about 386) panels.
     static let panelHeight: CGFloat = 280
+    /// An ear narrower than this shows nothing rather than a sliver of a figure.
+    static let minEarWidth: CGFloat = 14
     /// Compact ears stay inside the gap between the hardware notch and the first menu extra
     /// (about 30 pt on a 14" MacBook Pro: measured 21.10.); with the 6 pt flare, 24 pt fits.
     static let earWidth: CGFloat = 24
@@ -169,7 +171,7 @@ struct NotchLayout: Equatable {
     var innerWidth: CGFloat {
         switch presentation {
         case .closed: notch.width
-        case .compact: notch.width + 2 * min(earWidth, besideNotch)
+        case .compact: notch.width + 2 * compactEarWidth
         case .peek, .sneak: notch.width + 2 * besideNotch
         // The straight sides are what runs through the icons; the flares only touch the top rows.
         case .expanded:
@@ -181,6 +183,15 @@ struct NotchLayout: Equatable {
 
     /// Room for content beside the notch: the menu bar room minus the curved corner.
     var besideNotch: CGFloat { max(0, menuBarRoom - topRadius) }
+
+    /// Each ear at rest: as wide as the module asks, within the menu bar room, and never over an
+    /// icon that sits closer to the notch (macOS puts a long status item right beside it when the
+    /// right side is full). Too little room hides the ears; the peek line still has it all.
+    var compactEarWidth: CGFloat {
+        let room = MenuBarFit.earRoom(halfNotch: notch.width / 2, limit: menuBarRoom, items: menuBarItems) - topRadius
+        let width = min(earWidth, room)
+        return width < Self.minEarWidth ? 0 : width
+    }
 
     var height: CGFloat {
         switch presentation {

@@ -61,27 +61,25 @@ function send(message, wait = false) {
   return { done, cancel: () => finish(null) }
 }
 
-export const StarnotchPlugin = async ({ directory, serverUrl }) => {
+export const StarnotchPlugin = async ({ client, directory }) => {
   const pending = new Map()
 
+  // The answer goes through opencode's own client: it reaches opencode in-process (its TUI opens
+  // no HTTP port unless started with --port). The current route first, then the older one.
   async function reply(id, sessionID, answer) {
-    const headers = { "content-type": "application/json" }
-    if (process.env.OPENCODE_SERVER_PASSWORD) {
-      const user = process.env.OPENCODE_SERVER_USERNAME || "opencode"
-      headers.authorization = "Basic " + Buffer.from(`${user}:${process.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")
-    }
-    const base = new URL(serverUrl)
-    const query = `?directory=${encodeURIComponent(directory)}`
     const tries = [
-      [`permission/${encodeURIComponent(id)}/reply${query}`, { reply: answer }],
-      [`session/${encodeURIComponent(sessionID)}/permissions/${encodeURIComponent(id)}${query}`, { response: answer }],
+      () => client._client.post({ url: "/permission/{requestID}/reply", path: { requestID: id }, query: { directory },
+                                  body: { reply: answer }, headers: { "Content-Type": "application/json" } }),
+      () => client.postSessionIdPermissionsPermissionId({ path: { id: sessionID, permissionID: id }, query: { directory },
+                                                          body: { response: answer } }),
     ]
-    for (const [route, body] of tries) {
+    for (const attempt of tries) {
       try {
-        const res = await fetch(new URL(route, base), { method: "POST", headers, body: JSON.stringify(body) })
-        if (res.ok) return
+        const res = await attempt()
+        if (res?.response?.ok) return true
       } catch {}
     }
+    return false
   }
 
   async function ask(permission) {

@@ -55,6 +55,9 @@ final class SystemModule: NotchModule {
         didSet { if sort != oldValue { regroup() } }
     }
 
+    /// The dark mode switch flipped back: System Events may not be controlled (Automation).
+    @ObservationIgnored var onDarkModeDenied: (() -> Void)?
+
     /// One sneak per overload episode ("Memory tight · Google Chrome 3.1 GB").
     @ObservationIgnored var onAlert: ((String, String?, SystemAlert.Level) -> Void)?
 
@@ -192,9 +195,10 @@ final class SystemModule: NotchModule {
         let next = !darkMode
         withAnimation(Theme.snappy) { darkMode = next }
         guard !previewMode else { return }
-        DarkMode.set(next) { [weak self] actual in
+        DarkMode.set(next) { [weak self] actual, failed in
             guard let self, self.darkMode != actual else { return }
             withAnimation(Theme.snappy) { self.darkMode = actual }
+            if failed { self.onDarkModeDenied?() }
         }
     }
 
@@ -427,25 +431,28 @@ private struct SystemBody: View {
     let module: SystemModule
 
     /// Four meters in a square on the left, the apps behind them on the right, the switches
-    /// along the bottom: the whole panel without scrolling.
+    /// along the bottom: the whole panel without scrolling. On a panel narrowed to the menu bar
+    /// the square gives up half of what it loses, so the app names keep their room.
     var body: some View {
         VStack(spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(spacing: 10) {
-                    HStack(spacing: 10) {
-                        Meter(title: "CPU", value: module.cpu, history: module.cpuHistory,
-                              detail: "\(ProcessInfo.processInfo.activeProcessorCount) cores",
-                              tint: module.cpu >= 0.85 ? Theme.waiting : Theme.textBody)
-                        Meter(title: "GPU", value: module.gpu ?? 0, history: module.gpuHistory,
-                              detail: module.gpu == nil ? "not readable" : "", tint: Theme.textBody)
+            GeometryReader { proxy in
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(spacing: 10) {
+                        HStack(spacing: 10) {
+                            Meter(title: "CPU", value: module.cpu, history: module.cpuHistory,
+                                  detail: "\(ProcessInfo.processInfo.activeProcessorCount) cores",
+                                  tint: module.cpu >= 0.85 ? Theme.waiting : Theme.textBody)
+                            Meter(title: "GPU", value: module.gpu ?? 0, history: module.gpuHistory,
+                                  detail: module.gpu == nil ? "not readable" : "", tint: Theme.textBody)
+                        }
+                        HStack(spacing: 10) {
+                            MemoryMeter(memory: module.memory, history: module.memoryHistory)
+                            NetworkMeter(down: module.networkDown, up: module.networkUp, history: module.networkHistory)
+                        }
                     }
-                    HStack(spacing: 10) {
-                        MemoryMeter(memory: module.memory, history: module.memoryHistory)
-                        NetworkMeter(down: module.networkDown, up: module.networkUp, history: module.networkHistory)
-                    }
+                    .frame(width: min(280, 280 - (NotchLayout.expandedWidth - 2 * NotchLayout.sideInset - proxy.size.width) / 2))
+                    TopApps(module: module)
                 }
-                .frame(width: 280)
-                TopApps(module: module)
             }
             StatusChips(module: module)
                 .frame(height: 28)
@@ -487,13 +494,10 @@ private struct MemoryMeter: View {
     var body: some View {
         NotchCard(padding: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text("Memory").font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.textSecondary)
-                    Spacer(minLength: 4)
-                    if let memory {
-                        Circle().fill(memory.pressure.color).frame(width: 6, height: 6)
-                        Text(memory.pressure.word).font(Theme.font(11)).foregroundStyle(memory.pressure == .normal ? Theme.textTertiary : memory.pressure.color)
-                    }
+                // The pressure word steps aside on a narrow card; its dot stays.
+                ViewThatFits(in: .horizontal) {
+                    header(word: true)
+                    header(word: false)
                 }
                 if let memory {
                     // The number stays whole; "of 24 GB" goes first when the card is narrow.
@@ -516,6 +520,20 @@ private struct MemoryMeter: View {
                     }
                         .font(Theme.font(10.5)).foregroundStyle(Theme.textTertiary).lineLimit(1)
                         .help("App \(ByteText.short(memory.app)) · wired \(ByteText.short(memory.wired)) · compressed \(ByteText.short(memory.compressed)) · swap \(ByteText.short(memory.swapUsed))")
+                }
+            }
+        }
+    }
+
+    private func header(word: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text("Memory").font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.textSecondary).fixedSize()
+            Spacer(minLength: 4)
+            if let memory {
+                Circle().fill(memory.pressure.color).frame(width: 6, height: 6)
+                if word {
+                    Text(memory.pressure.word).font(Theme.font(11)).foregroundStyle(memory.pressure == .normal ? Theme.textTertiary : memory.pressure.color)
+                        .fixedSize()
                 }
             }
         }
@@ -615,15 +633,17 @@ private struct TopApps: View {
                     }
                     .padding(2)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    // 28 pt to hit; the row keeps the height of the CPU and Memory switch.
                     Button { module.openActivityMonitor() } label: {
                         Image(systemName: "arrow.up.forward.app")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.textSecondary)
-                            .frame(width: 28, height: 22)
+                            .frame(width: 28, height: 28)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(PressScale())
                     .help("Open Activity Monitor")
+                    .padding(.vertical, -3)
                 }
                 .padding(.horizontal, 6)
                 .padding(.bottom, 4)
@@ -672,10 +692,16 @@ private struct AppRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 icon.frame(width: 18, height: 18)
-                Text(app.name).font(Theme.font(12.5, .medium)).foregroundStyle(Theme.textPrimary).lineLimit(1)
-                if app.processes > 1 {
-                    Text("\(app.processes)").font(Theme.font(10.5).monospacedDigit()).foregroundStyle(Theme.textTertiary)
-                        .help("\(app.processes) processes")
+                // The process count steps aside before the name would be cut.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        name.fixedSize()
+                        if app.processes > 1 {
+                            Text("\(app.processes)").font(Theme.font(10.5).monospacedDigit()).foregroundStyle(Theme.textTertiary)
+                                .help("\(app.processes) processes")
+                        }
+                    }
+                    name
                 }
                 Spacer(minLength: 6)
                 Text(Percent.text(app.cpu))
@@ -700,6 +726,10 @@ private struct AppRow: View {
         .buttonStyle(PressScale())
         .onHover { hovering = $0 }
         .help(app.bundlePath == nil ? app.name : "Bring \(app.name) forward")
+    }
+
+    private var name: some View {
+        Text(app.name).font(Theme.font(12.5, .medium)).foregroundStyle(Theme.textPrimary).lineLimit(1)
     }
 
     @ViewBuilder private var icon: some View {
@@ -778,7 +808,7 @@ private struct StatusChips: View {
                     module.toggleDarkMode()
                 }
                 toggle(module.desktopHidden ? "eye.slash" : "menubar.dock.rectangle", labels(module.desktopHidden) ? "Hide icons" : nil, on: module.desktopHidden,
-                       help: "Hide the icons on the desktop (Finder restarts to apply it)") {
+                       help: "Hide the icons on the desktop. Finder restarts to apply it, which stops a copy in progress") {
                     module.toggleDesktopIcons()
                 }
             }

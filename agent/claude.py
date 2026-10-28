@@ -1,15 +1,18 @@
-"""The one place that talks to Claude: a JSON-in, JSON-out call with a schema.
+"""The one place that talks to a model: a JSON-in, JSON-out call with a schema.
 
-Two backends, chosen by STARNOTCH_BRAIN (see `make_brain`):
+Three backends, chosen by STARNOTCH_BRAIN (see `make_brain`):
 - ClaudeCode runs the user's own Claude Code CLI headless, so Tara thinks on their Claude plan.
 - Claude calls the Anthropic API; the key comes from the environment (ANTHROPIC_API_KEY or an `ant auth login`
   profile), never from a file here.
+- AppleModel asks Apple's on-device model through the app's bundled helper (Sources/AppleModel): free, on this Mac,
+  with a context window of 4,096 tokens, so the agent sends it a retrieval instead of the whole memory.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -28,7 +31,7 @@ EFFORT = os.environ.get("STARNOTCH_EFFORT", "low")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 TIMEOUT = 30  # live: better a rule now than Claude late
 
-BRAINS = ("auto", "claude-code", "api", "rules")
+BRAINS = ("auto", "claude-code", "api", "apple", "rules")
 CODE_MODEL = "sonnet"  # Claude Code's alias for the newest Sonnet
 CLAUDE_BINARIES = ("~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude")
 BRAIN_FOLDER = Path.home() / "Library" / "Application Support" / "Starnotch" / "brain"
@@ -41,6 +44,13 @@ PLAN_LOGINS = ("claude.ai", "oauth_token")  # `claude auth status`: a Pro/Max/Te
 CODE_RETRIES = "1"
 SYSTEM_FILES = "starnotch-system-*"  # system prompts handed to claude -p; they carry the meeting memory
 
+
+APPLE_MODEL = "apple-on-device"  # the model name in the usage ledger
+APPLE_TIMEOUT = 60  # one call takes a few seconds; the first after a while may load the model
+APPLE_CHARS_PER_TOKEN = 3.0  # the ledger's estimate (the framework can't count tokens with the Command Line Tools SDK)
+# STARNOTCH_APPLE_HELPER (the app sets it to its bundled copy), else a build in this repo.
+APPLE_HELPERS = tuple(str(Path(__file__).resolve().parent.parent / ".build" / kind / "AppleModel")
+                      for kind in ("release", "debug"))
 
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
 IMAGE_FILES = "starnotch-image-*"  # screenshots handed to claude -p, next to the system prompts
@@ -257,15 +267,112 @@ class ClaudeCode:
         return data if isinstance(data, dict) else None
 
 
+class AppleModelError(RuntimeError):
+    """One call to the on-device model failed: `kind` is the helper's (rateLimited, contextWindowExceeded, ...)."""
+
+    def __init__(self, kind: str, message: str):
+        super().__init__(message)
+        self.kind = kind
+
+
+class AppleModelUnavailable(AppleModelError):
+    """Apple Intelligence can't think for Tara on this Mac: no helper, not supported, switched off, or still downloading."""
+
+
+def find_apple_helper() -> str | None:
+    for candidate in (os.environ.get("STARNOTCH_APPLE_HELPER", ""), *APPLE_HELPERS):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def apple_status(binary: str | None = None) -> dict[str, Any]:
+    """The helper's --status: {"available": true}, or false with Apple's `reason` and a `message`."""
+    binary = binary or find_apple_helper()
+    if not binary:
+        return {"available": False, "reason": "noHelper", "message": "the Apple Intelligence helper isn't in this build"}
+    try:
+        proc = subprocess.run([binary, "--status"], capture_output=True, text=True, encoding="utf-8", timeout=15,
+                              stdin=subprocess.DEVNULL)
+        status = json.loads(proc.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError) as error:
+        return {"available": False, "reason": "other", "message": f"the Apple Intelligence helper failed: {error}"}
+    return status if isinstance(status, dict) else {"available": False, "reason": "other", "message": "unexpected status"}
+
+
+def estimate_tokens(text: str) -> int:
+    return math.ceil(len(text) / APPLE_CHARS_PER_TOKEN)
+
+
+class AppleModel:
+    """Structured-output calls to Apple's on-device model, one helper run per call. Free, so the ledger gets cost 0
+    and estimated tokens. Pictures aren't sent: the agent answers without them and says so.
+    Returns None when Apple's guardrails decline, like a refusal."""
+
+    def __init__(self, binary: str | None = None, timeout: float = APPLE_TIMEOUT):
+        self.binary = binary or find_apple_helper()
+        status = apple_status(self.binary)
+        if not status.get("available"):
+            raise AppleModelUnavailable(str(status.get("reason") or "unavailable"),
+                                        f"Apple Intelligence isn't available: {status.get('message') or status.get('reason')}")
+        self.model = APPLE_MODEL
+        self.timeout = timeout
+        self.last_usage: dict[str, Any] | None = None
+
+    def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000,
+             images: list[Path] | None = None, locale: str = "") -> dict[str, Any] | None:
+        # max_tokens has no use here: instructions, prompt, schema and answer share one window of 4,096 tokens.
+        self.last_usage = None
+        request = json.dumps({"instructions": system, "prompt": user, "schema": schema, "locale": locale},
+                             ensure_ascii=False)
+        started = time.monotonic()
+        try:
+            proc = subprocess.run([self.binary], input=request, capture_output=True, text=True, encoding="utf-8",
+                                  timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            raise AppleModelError("timeout", f"Apple Intelligence took longer than {self.timeout:g} s") from None
+        try:
+            reply = json.loads(proc.stdout)
+        except ValueError:
+            detail = (proc.stderr or proc.stdout).strip()[:200]
+            raise AppleModelError("other", f"the Apple Intelligence helper exited {proc.returncode}: {detail}") from None
+        if not isinstance(reply, dict):
+            raise AppleModelError("other", "the Apple Intelligence helper printed no object")
+        result = reply.get("result")
+        self.last_usage = {"model": APPLE_MODEL, "input_tokens": estimate_tokens(system + user + json.dumps(schema)),
+                           "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                           "output_tokens": estimate_tokens(json.dumps(result, ensure_ascii=False)) if result else 0,
+                           "duration_ms": int((time.monotonic() - started) * 1000), "cost_usd": 0.0}
+        print(f"apple: ~{self.last_usage['input_tokens']} tokens in, {self.last_usage['duration_ms']} ms", file=sys.stderr)
+        error = reply.get("error")
+        if isinstance(error, dict):
+            kind, message = str(error.get("kind") or "other"), str(error.get("message") or "error")
+            if kind == "guardrail":
+                return None
+            if kind == "unavailable":
+                raise AppleModelUnavailable(str(error.get("reason") or kind), f"Apple Intelligence isn't available: {message}")
+            raise AppleModelError(kind, f"Apple Intelligence: {message}")
+        return result if isinstance(result, dict) else None
+
+
+def _apple_or_rules(why: str | None) -> tuple[str, JSONModel | None, str | None]:
+    """The on-device model when this Mac has it ready, else rules; `why` is what didn't work before it."""
+    try:
+        return "apple", AppleModel(), f"{why}; using Apple Intelligence" if why else None
+    except AppleModelUnavailable as error:
+        return "rules", None, f"{why}; {error}; using rules" if why else None
+
+
 def _media_type(path: Path | str) -> str:
     return IMAGE_TYPES.get(Path(path).suffix.lower(), "image/png")
 
 
 def make_brain(choice: str | None = None) -> tuple[str, JSONModel | None, str | None]:
-    """(brain, model, why it fell back to rules) from STARNOTCH_BRAIN: auto (default) | claude-code | api | rules.
+    """(brain, model, why it fell back) from STARNOTCH_BRAIN: auto (default) | claude-code | api | apple | rules.
 
-    auto: Claude Code when a claude binary is found, else the API when ANTHROPIC_API_KEY is set, else rules.
-    A Claude Code that can't think on the user's plan falls back to rules, never to the API.
+    auto: Claude Code when a claude binary is found, else the API when ANTHROPIC_API_KEY is set, else Apple's
+    on-device model when the helper says it is available, else rules. A Claude Code that can't think on the user's
+    plan falls back to the free on-device model or rules, never to the API. A brain chosen by name falls back to rules.
     """
     choice = (choice if choice is not None else os.environ.get("STARNOTCH_BRAIN", "")).strip().lower() or "auto"
     if choice not in BRAINS:
@@ -274,10 +381,19 @@ def make_brain(choice: str | None = None) -> tuple[str, JSONModel | None, str | 
         try:
             return "claude-code", ClaudeCode(), None
         except ClaudeCodeUnavailable as error:
-            return "rules", None, f"{error}; using rules"
+            return _apple_or_rules(str(error)) if choice == "auto" else ("rules", None, f"{error}; using rules")
     if choice == "api" or (choice == "auto" and os.environ.get("ANTHROPIC_API_KEY")):
         try:
             return "api", Claude(), None
         except Exception as error:  # no credentials
+            if choice == "auto":
+                return _apple_or_rules(f"Claude unavailable: {error}")
             return "rules", None, f"Claude unavailable, using rules: {error}"
+    if choice == "apple":
+        try:
+            return "apple", AppleModel(), None
+        except AppleModelUnavailable as error:
+            return "rules", None, f"{error}; using rules"
+    if choice == "auto":
+        return _apple_or_rules(None)
     return "rules", None, None

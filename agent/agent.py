@@ -9,6 +9,7 @@ See PROTOCOL.md for every message.
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 import json
 import math
@@ -27,7 +28,7 @@ import captures as quick
 import connectors as linked
 from jamie_sync import last_synced
 import usage as ledger
-from memory import Commitment, Line, Meeting, Memory, _words
+from memory import Commitment, Line, Meeting, Memory, _bare, _facts, _words
 
 WINDOW = 12  # utterances of the running meeting the model sees around the new ones
 RECALL = 6  # earlier transcript lines that share words with the new ones, for transcripts the memory had to shorten
@@ -140,6 +141,31 @@ ASK_SCHEMA = {
     },
     "required": ["answer", "sources"],
     "additionalProperties": False,
+}
+# Apple's on-device model (brain "apple"): 4,096 tokens for instructions, prompt, schema and answer together, so a
+# question gets the material that shares words with it instead of the whole memory (Agent._ask_on_device).
+APPLE_WINDOW = 4096
+APPLE_ANSWER = 600  # tokens kept free for the answer and its sources
+APPLE_CHARS_PER_TOKEN = 2.5  # conservative: German runs about 2 to 3 characters per token
+APPLE_LINES = 10  # transcript lines from memory.search, each with the line before and after it as context
+APPLE_HISTORY = 2  # turns of a follow-up's conversation
+APPLE_TURN_CHARS = 300  # of each question and answer in it
+APPLE_NOTE_CHARS = 300  # of a connector item's body
+# Apple's documented way to answer in the user's language: the locale, then a firm instruction.
+APPLE_LOCALES = {"de": "de_DE", "en": "en_US"}
+APPLE_LANGUAGE = {"de": "The person's locale is de_DE.\n", "en": ""}
+APPLE_REPLY = {"de": "You MUST respond in German.", "en": "You MUST respond in English."}
+APPLE_ASK_SYSTEM = """{locale}You are Tara, the user's assistant in the Mac's notch. Answer the question only from the material \
+in the prompt: lines from the user's meetings, their quick-capture notes and items from their other tools. Lead with the \
+answer, in at most three short sentences. Back every fact with a source: kind "meeting" with the meeting id and words \
+copied exactly from one line of that meeting, kind "capture" or "note" with the id in brackets. If the material does \
+not answer the question, say plainly that it is not in the material and give no sources. A general question that is \
+not about the user's work you may answer briefly, with no sources.{picture} {reply}"""
+APPLE_PICTURE = (" The user sent a picture of a window with the question, but you cannot see pictures: never describe "
+                 "it or guess what it shows.")
+NO_PICTURE = {  # opens an answer from the on-device model when the user sent a picture it can't see
+    "de": "Bilder kann ich mit Apple Intelligence nicht sehen. ",
+    "en": "I can't see pictures with Apple Intelligence. ",
 }
 MATCH = 2  # shared content words (no stop words) a line needs before the rules offer it as an answer
 HISTORY = 6  # earlier questions and answers of the conversation that come along in a follow-up
@@ -348,7 +374,14 @@ class Agent:
             return {"type": "error", "message": "ask: empty question"}
         notes = self.notes()
         result, brain = None, "rules"
-        if self.llm is not None:
+        if self.llm is not None and self.brain == "apple":  # a small window: retrieval, and no picture
+            try:
+                result = self._ask_on_device(question, history, notes, answering, picture=bool(image))
+            except Exception as error:
+                self._warn(error, rest=False)
+            if result is not None:
+                brain = self.brain
+        elif self.llm is not None:
             recall = self._recall(question)
             prompt = self.ask_moment() + _conversation(history) + question
             if recall:
@@ -371,8 +404,95 @@ class Agent:
             source = self._resolve(s, notes)
             if source and source not in sources:
                 sources.append(source)
-        return {"type": "answer", "question": question, "text": result.get("answer", ""), "sources": sources,
-                "brain": brain}
+        text = result.get("answer", "")
+        if image and self.brain == "apple":  # say so rather than seem to have looked
+            text = NO_PICTURE[_language(question)] + text
+        return {"type": "answer", "question": question, "text": text, "sources": sources, "brain": brain}
+
+    def _ask_on_device(self, question: str, history: Any, notes: list[linked.Item], answering: str | None,
+                       picture: bool = False) -> dict[str, Any] | None:
+        """A question to Apple's on-device model. Its window holds instructions, prompt, schema and answer in 4,096
+        tokens, so it gets the material that shares words with the question (and with the last turn of a follow-up)
+        in what that leaves, estimated conservatively; an overflow anyway is tried once more with half the material.
+        The instructions name the question's locale, as Apple documents, so the answer comes in its language."""
+        language = _language(question)
+        system = APPLE_ASK_SYSTEM.format(locale=APPLE_LANGUAGE[language], reply=APPLE_REPLY[language],
+                                         picture=APPLE_PICTURE if picture else "")
+        talk = _conversation(history, APPLE_HISTORY, APPLE_TURN_CHARS)
+        head, tail = self.ask_moment() + "# Material\n", "\n\n" + (talk or "# Question\n") + question
+        turns = [t for t in history if isinstance(t, dict)][-1:] if isinstance(history, list) else []
+        query = " ".join([question] + [str(t.get(k) or "") for t in turns for k in ("question", "answer")])
+        room = (int((APPLE_WINDOW - APPLE_ANSWER) * APPLE_CHARS_PER_TOKEN) - len(system) - len(head) - len(tail)
+                - len(json.dumps(_on_device_schema([]))))
+        for share in (1, 2):
+            material, cited = self._retrieve(query, notes, answering, room // share)
+            try:
+                return self._think("capture" if answering else "ask", system, head + material + tail,
+                                   _on_device_schema(cited), 2000, locale=APPLE_LOCALES[language])
+            except Exception as error:
+                if getattr(error, "kind", "") != "contextWindowExceeded" or share == 2:
+                    raise
+        return None
+
+    def _retrieve(self, text: str, notes: list[linked.Item], answering: str | None,
+                  room: int) -> tuple[str, list[tuple[str, str]]]:
+        """The material for the on-device model in at most `room` characters (the source ids it adds to the schema
+        count too): facts of the meetings, transcript lines from memory.search (with the line before and after),
+        captures and connector items that share content words with `text`, the most shared first (a number counts
+        twice), newest first on a tie, then the context lines. Returns the text and the (kind, id) it can cite."""
+        query = _content(text)
+        found: list[tuple[float, str, tuple[str, str], tuple[int, int], str]] = []  # score, date, source, order, row
+        heads: dict[str, str] = {}
+        for m in self.memory.meetings:
+            facts = _facts(m).splitlines()
+            heads[m.id] = facts[0]
+            for i, row in enumerate(facts[1:]):
+                if _score(query, row):
+                    found.append((_score(query, row), m.date, ("meeting", m.id), (0, i), row))
+        hits = self.memory.search(" ".join(sorted(query)), APPLE_LINES) if query else []
+        context = []
+        for hit in hits:
+            at = next(i for i, line in enumerate(hit.meeting.transcript) if line is hit.line)
+            for i in (at, at - 1, at + 1):
+                if 0 <= i < len(hit.meeting.transcript):
+                    line = hit.meeting.transcript[i]
+                    entry = (hit.score if i == at else 0.5, hit.meeting.date, ("meeting", hit.meeting.id), (1, i),
+                             f"{line.speaker}: {line.text}" if line.speaker else line.text)
+                    (found if i == at else context).append(entry)
+        for c in self.captures():
+            if c.id != answering and _score(query, c.text):
+                due = f" (due {c.due})" if c.due else ""
+                found.append((_score(query, c.text), c.day, ("capture", c.id), (0, 0),
+                              f"- [{c.id}] {c.day} {c.route}{due}: {c.text}"))
+        for item in notes:
+            if _score(query, item.title + " " + item.body):
+                body = " ".join(item.body.split())[:APPLE_NOTE_CHARS]
+                found.append((_score(query, item.title + " " + item.body), item.date, ("note", item.id), (0, 0),
+                              f"- [{item.id}] {item.group + ': ' if item.group else ''}{item.title}"
+                              + (f" ({item.date})" if item.date else "") + (f": {body}" if body else "")))
+        found.sort(key=lambda f: f[1], reverse=True)
+        found.sort(key=lambda f: f[0], reverse=True)
+        picked: dict[tuple[str, str], dict[tuple[int, int], str]] = {}
+        used = 0
+        for _, _, source, order, row in found + context:
+            rows = picked.get(source)
+            if rows is not None and order in rows:
+                continue
+            cost = len(row) + 1 + (0 if rows is not None else len(source[1]) + 4
+                                   + (len(heads[source[1]]) + 2 if source[0] == "meeting" else 0))
+            if used + cost > room:
+                continue
+            picked.setdefault(source, {})[order] = row
+            used += cost
+        blocks = [heads[m.id] + "\n" + "\n".join(r for _, r in sorted(picked[("meeting", m.id)].items()))
+                  for m in reversed(self.memory.meetings) if ("meeting", m.id) in picked]
+        for kind, title in (("capture", "# Quick capture: the user's own tasks, questions and notes"),
+                            ("note", "# Items from the user's other tools")):
+            rows = [r for source, by in picked.items() if source[0] == kind for r in by.values()]
+            if rows:
+                blocks.append(title + "\n" + "\n".join(rows))
+        text = "\n\n".join(blocks) or "(Nothing in the meetings, captures or notes matches this question.)"
+        return text, list(picked)
 
     def _resolve(self, cited: dict[str, Any], notes: list[linked.Item]) -> dict[str, Any] | None:
         """A source the model cited, as the app shows it; None when it isn't in the material."""
@@ -474,7 +594,7 @@ class Agent:
         before = self.live[-WINDOW:]
         self.live += new
         result = None
-        if claude and self._thinking():
+        if claude and self._thinking() and self.brain != "apple":  # the memory doesn't fit the on-device window
             self.last_call = self.clock()
             try:
                 result = self._think("meeting", SYSTEM.format(memory=self.context()),
@@ -540,11 +660,12 @@ class Agent:
             return meeting, line.text, line.speaker
         meeting = self.memory.get(meeting_id)
         if meeting:
-            needle = _norm(quote)
             for d in meeting.decisions:
+                needle = _norm(_unprefixed(quote, d.speaker))
                 if needle and (needle in _norm(d.quote) or needle in _norm(d.text)):
                     return meeting, d.quote or d.text, d.speaker
             for c in meeting.commitments:
+                needle = _norm(_unprefixed(quote, c.who))
                 if needle and needle in _norm(c.quote):
                     return meeting, c.quote, c.who
         return None
@@ -596,12 +717,14 @@ class Agent:
         return self.llm is not None and time.monotonic() >= self.resting_until
 
     def _warn(self, error: Exception, rest: bool = True) -> None:
-        if type(error).__name__ in ("AuthenticationError", "PermissionDeniedError", "TypeError", "ClaudeCodeUnavailable"):
+        if type(error).__name__ in ("AuthenticationError", "PermissionDeniedError", "TypeError", "ClaudeCodeUnavailable",
+                                    "AppleModelUnavailable"):
             self.llm = None  # no or bad credentials: stop waiting on Claude for every line
         elif rest:  # slow, overloaded or throttled: the rules for a while, then Claude again
             self.resting_until = time.monotonic() + REST
         if not self.warned:
-            self.emit({"type": "status", "state": "offline", "message": f"Claude unavailable, using rules: {error}"})
+            name = "Apple Intelligence" if self.brain == "apple" else "Claude"
+            self.emit({"type": "status", "state": "offline", "message": f"{name} unavailable, using rules: {error}"})
             self.warned = True
 
     # Without Claude: simple rules, enough for the demo
@@ -634,15 +757,40 @@ class Agent:
         return out
 
 
-def _conversation(history: Any) -> str:
+def _conversation(history: Any, keep: int = HISTORY, chars: int = 600) -> str:
     """The last few questions and answers of the conversation, as the start of a follow-up's prompt."""
-    turns = [t for t in history if isinstance(t, dict)][-HISTORY:] if isinstance(history, list) else []
+    turns = [t for t in history if isinstance(t, dict)][-keep:] if isinstance(history, list) else []
     lines = []
     for turn in turns:
         question, answer = str(turn.get("question") or "").strip(), str(turn.get("answer") or "").strip()
         if question:
-            lines += [f"User: {question[:600]}", f"Tara: {answer[:600]}"]
+            lines += [f"User: {question[:chars]}", f"Tara: {answer[:chars]}"]
     return "# Conversation so far\n" + "\n".join(lines) + "\n\n# Question now\n" if lines else ""
+
+
+def _unprefixed(quote: str, speaker: str) -> str:
+    """The quote without a leading "<speaker>: ", as the source check reads it for every brain."""
+    bare = _bare(quote.strip().strip('"„“').lower(), speaker) if speaker else "\0"
+    return quote if bare == "\0" else bare
+
+
+def _on_device_schema(cited: list[tuple[str, str]]) -> dict[str, Any]:
+    """ASK_SCHEMA for the on-device model: kinds and ids only of the material sent (none: no sources), at most three."""
+    schema = copy.deepcopy(ASK_SCHEMA)
+    schema["properties"]["answer"]["description"] = "At most three short sentences"
+    sources = schema["properties"]["sources"]
+    sources["maxItems"] = 3 if cited else 0
+    item = sources["items"]["properties"]
+    if cited:
+        item["kind"]["enum"] = sorted({kind for kind, _ in cited})
+        item["id"]["enum"] = [ref for _, ref in cited]
+    item["quote"]["description"] = "Words copied exactly from one line of the material"
+    return schema
+
+
+def _score(query: set[str], text: str) -> float:
+    """The content words `text` shares with a question's, a number counting twice."""
+    return sum(2.0 if w.isdigit() else 1.0 for w in query & _content(text))
 
 
 def _content(text: str) -> set[str]:

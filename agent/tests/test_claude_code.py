@@ -192,6 +192,25 @@ def test_brain_choice(fake, tmp_path, monkeypatch):
     assert make_brain("claude-code")[0] == "rules"
 
 
+def test_auto_falls_back_claude_code_api_apple_rules(fake, apple, tmp_path, monkeypatch):
+    assert make_brain()[0] == "claude-code"  # a Claude plan first
+    assert make_brain("apple")[0] == "apple"  # or Apple's model by name
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("FAKE_CLAUDE", "logged-out")
+    brain, llm, why = make_brain()
+    assert brain == "apple" and llm.model == "apple-on-device"  # free, and still never the API by surprise
+    assert "claude auth login" in why and why.endswith("; using Apple Intelligence")
+    assert make_brain("claude-code")[0] == "rules"  # a brain chosen by name doesn't switch to another
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert make_brain()[0] == "api"  # no Claude Code: the key
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert make_brain()[:1] == ("apple",) and make_brain()[2] is None  # no key: Apple's model, nothing to report
+    monkeypatch.setenv("FAKE_APPLE", "downloading")
+    assert make_brain() == ("rules", None, None)  # not ready yet: rules
+    brain, _, why = make_brain("apple")
+    assert brain == "rules" and "modelNotReady" not in why and "downloading" in why
+
+
 def test_agent_falls_back_to_rules(fake, tmp_path, memory_dir, monkeypatch):
     out = []
     agent = Agent(Memory(memory_dir), code(tmp_path, timeout=0.5), out.append, gap=0)

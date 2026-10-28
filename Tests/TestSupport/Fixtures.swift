@@ -15,15 +15,16 @@ public enum Fixtures {
 
     static func temp(_ name: String) -> URL {
         let url = FileManager.default.temporaryDirectory.appending(path: "\(name)-\(UUID().uuidString.prefix(8))")
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        // Setup failures stop the run here, so a broken temp folder is not reported later as a missing session.
+        try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
 
     static func place(_ fixture: String, at url: URL, modified: Date) {
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: url)
-        try? FileManager.default.copyItem(at: root.appending(path: fixture), to: url)
-        try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+        try! FileManager.default.copyItem(at: root.appending(path: fixture), to: url)
+        try! FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
     }
 
     /// A Codex folder with the thread database and four paginated rollouts (one done, one
@@ -44,8 +45,10 @@ public enum Fixtures {
             .replacingOccurrences(of: "{ROOT}", with: home.path)
             .replacingOccurrences(of: "{NOW}", with: String(Int(now.timeIntervalSince1970)))
         var db: OpaquePointer?
-        sqlite3_open(home.appending(path: "state_5.sqlite").path, &db)
-        sqlite3_exec(db, sql, nil, nil, nil)
+        let opened = sqlite3_open(home.appending(path: "state_5.sqlite").path, &db)
+        precondition(opened == SQLITE_OK, "Codex fixture database could not be opened (\(opened))")
+        let filled = sqlite3_exec(db, sql, nil, nil, nil)
+        precondition(filled == SQLITE_OK, "Codex fixture database could not be filled (\(filled))")
         sqlite3_close(db)
         return home
     }
@@ -67,8 +70,8 @@ public enum Fixtures {
     public static func claudeHome() -> (home: URL, desktop: URL) {
         let base = temp("claude")
         let home = base.appending(path: "home"), desktop = base.appending(path: "desktop")
-        try? FileManager.default.copyItem(at: root.appending(path: "claude/home"), to: home)
-        try? FileManager.default.copyItem(at: root.appending(path: "claude/desktop"), to: desktop)
+        try! FileManager.default.copyItem(at: root.appending(path: "claude/home"), to: home)
+        try! FileManager.default.copyItem(at: root.appending(path: "claude/desktop"), to: desktop)
         let pid = getpid()
         let template = home.appending(path: "sessions/PID.json")
         let record = (try? String(contentsOf: template, encoding: .utf8))?.replacingOccurrences(of: "{PID}", with: String(pid)) ?? ""

@@ -357,11 +357,11 @@ public final class ApprovalServer: @unchecked Sendable {
             for (i, b) in bytes.enumerated() { raw[i] = b }
             raw[bytes.count] = 0
         }
-        let old = umask(0o177)
+        // No umask around bind: it is process-wide, and a folder another thread made meanwhile
+        // came out without its execute bit. The 0700 folder already keeps others off the socket.
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
-        umask(old)
         guard bound == 0, listen(fd, 8) == 0 else { close(fd); throw POSIXError(.EADDRINUSE) }
         chmod(path, 0o600)
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)

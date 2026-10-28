@@ -56,6 +56,17 @@ public struct AskAnswer: Equatable, Sendable {
         if !named.isEmpty { parts.append("\(sourcesLabel): " + named.joined(separator: ", ")) }
         return parts.filter { !$0.isEmpty }.joined(separator: "\n\n") + "\n"
     }
+
+    /// The answer as one line of the notes inbox, which folds every line break: the question, an
+    /// arrow, the answer, and the sources in brackets ("Preis? → 30 Euro. (Sources: Kickoff (2026-10-12))").
+    public func inboxLine(asked: String? = nil, sourcesLabel: String = "Sources") -> String {
+        func flat(_ text: String) -> String { text.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+        let title = flat(asked ?? question)
+        var line = title.isEmpty ? flat(text) : "\(title) → \(flat(text))"
+        let named = sources.map { source in source.date.map { "\(source.title) (\($0))" } ?? source.title }
+        if !named.isEmpty { line += " (\(sourcesLabel): " + named.joined(separator: ", ") + ")" }
+        return line
+    }
 }
 
 /// What `agent.py` says back to Ask Tara. Lines it doesn't care about give `nil`.

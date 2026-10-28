@@ -573,3 +573,5 @@
 "Couldn't save" = "Sichern fehlgeschlagen";
 "Add the question and answer to your notes inbox" = "Frage und Antwort in den Eingang deiner Notizen schreiben";
 "Save the question and answer as a note in the notepad" = "Frage und Antwort als Notiz im Notizblock sichern";
+/* Wave 3: Ask Tara falls back from Wispr Flow */
+"Wispr Flow didn't start, so Apple's recognizer listens" = "Wispr Flow ist nicht gestartet, deshalb hört Apples Spracherkennung zu";

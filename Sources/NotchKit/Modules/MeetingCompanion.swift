@@ -27,6 +27,8 @@ final class MeetingCompanion: NSObject {
     @ObservationIgnored var onOpenCard: (Int) -> Void = { _ in }
     /// Ask Tara: her question bubble shows beside her while it's open; a click on her opens it.
     @ObservationIgnored var ask: AskTara?
+    /// The question bubble takes the keyboard; not for screenshots and previews (`--capturable`, `--preview`).
+    @ObservationIgnored var takesKeyboard = true
     @ObservationIgnored var onTapFigure: (() -> Void)?
     /// Let go somewhere other than the notch (Ask Tara: on a window, to ask about it); AppKit coordinates.
     @ObservationIgnored var onDrop: ((CGPoint) -> Void)?
@@ -132,6 +134,7 @@ final class MeetingCompanion: NSObject {
         guard let panel else { return }
         if panel.frame.size == Self.size { originBeforeAsk = panel.frame.origin }
         resize(panel, to: Self.askSize(on: panel.screen))
+        guard takesKeyboard else { return panel.orderFrontRegardless() }
         panel.acceptsKey = true
         panel.makeKeyAndOrderFront(nil)
     }

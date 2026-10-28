@@ -1,3 +1,4 @@
+import AppKit
 import NotchCore
 import SwiftUI
 
@@ -23,7 +24,16 @@ struct AskTaraView: View {
         .frame(width: Self.width, alignment: .trailing)
         .animation(Theme.snappy, value: showsReply)
         .onAppear { focused = true }
-        .onChange(of: ask.focusRequest) { _, _ in focused = true }
+        .onChange(of: ask.focusRequest) { _, _ in
+            let wasFocused = focused
+            focused = true
+            guard !wasFocused else { return }
+            // Focusing the field selects its text: the caret goes to the end, so Wispr Flow's paste adds to it.
+            DispatchQueue.main.async {
+                guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.isFieldEditor else { return }
+                editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+            }
+        }
     }
 
     private var showsReply: Bool {
@@ -44,6 +54,14 @@ struct AskTaraView: View {
                 attachmentChip.transition(.opacity)
             }
             input
+            if let notice = ask.notice {
+                Text(notice)
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 4)
+                    .transition(.opacity)
+            }
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
@@ -55,6 +73,7 @@ struct AskTaraView: View {
         .animation(Theme.snappy, value: listening)
         .animation(Theme.snappy, value: ask.text.isEmpty)
         .animation(Theme.snappy, value: ask.attachment)
+        .animation(Theme.snappy, value: ask.notice)
         .help("Drop Tara on a window to ask about it")
     }
 
@@ -190,14 +209,14 @@ struct AskTaraView: View {
             Text(LocalizedStringKey(ask.offlineReason == nil ? "Simple rules, no Claude: Settings › Meeting agent"
                                                              : "Tara's model isn't reachable, so simple rules answered"))
                 .font(Theme.font(12))
-                .foregroundStyle(Theme.textTertiary)
+                .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         if !answer.sources.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sources")
                     .font(Theme.font(12, .medium))
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
                     .padding(.bottom, 2)
                 ForEach(answer.sources.prefix(4)) { source in
                     SourceRow(source: source, expanded: ask.expanded == source.id) { ask.openSource(source) }
@@ -275,30 +294,41 @@ struct AskTaraView: View {
 
 // MARK: Pieces
 
+private let answerScrollSpace = "answer-scroll"
+
 /// The card's scroll area: as tall as its content, at most what the window leaves, scrolled to
 /// the start of each new answer; its bottom edge fades only while there is more below.
 private struct AnswerScroll<Content: View>: View {
     let identity: String
     @ViewBuilder var content: Content
     @State private var contentHeight: CGFloat = 0
+    /// Where the content ends in the visible area: below its bottom while there's more to scroll to.
+    @State private var contentBottom: CGFloat = 0
     @State private var shownHeight: CGFloat = 0
 
     private static var bottom: CGFloat { 16 }
 
     var body: some View {
         let overflows = contentHeight > shownHeight - Self.bottom + 1
+        let moreBelow = contentBottom > shownHeight - Self.bottom + 1
         ScrollView(.vertical) {
             content
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(answerScrollSpace)) } action: { frame in
+                    contentHeight = frame.height
+                    contentBottom = frame.maxY
+                }
         }
+        .coordinateSpace(name: answerScrollSpace)
         .contentMargins(.bottom, Self.bottom, for: .scrollContent)
+        // The scroller keeps clear of the card's rounded corners and its rim.
+        .contentMargins(.vertical, AskTaraView.cardRadius - 6, for: .scrollIndicators)
         .scrollIndicators(overflows ? .automatic : .never)
         .scrollBounceBehavior(.basedOnSize)
         .defaultScrollAnchor(.top)
         .id(identity)  // a new answer starts at its first line, never where the last one was left
         .mask(VStack(spacing: 0) {
             Color.black
-            LinearGradient(colors: [.black, overflows ? .clear : .black], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.black, moreBelow ? .clear : .black], startPoint: .top, endPoint: .bottom)
                 .frame(height: 28)
         })
         .frame(maxHeight: contentHeight + Self.bottom)
@@ -328,6 +358,10 @@ struct IridescentRim: View {
     /// Brighter while it has something to say: focused, listening or thinking.
     var lit: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The angle it stands at; it turns on from there and stays where it got to.
+    @State private var held = IridescentRim.restAngle
+    /// Turning since then.
+    @State private var since: Date?
 
     /// Two prismatic highlights on brushed chrome, opposite each other.
     static let sheen = AngularGradient(gradient: Gradient(stops: [
@@ -361,9 +395,8 @@ struct IridescentRim: View {
         GeometryReader { geo in
             // The gradient's square covers the whole shape at any angle.
             let side = (geo.size.width * geo.size.width + geo.size.height * geo.size.height).squareRoot()
-            TimelineView(.animation(minimumInterval: 1 / 30, paused: !turning)) { context in
-                let elapsed = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.turn)
-                let angle = Self.restAngle + (turning ? elapsed / Self.turn * 360 : 0)
+            TimelineView(.animation(minimumInterval: 1 / 30, paused: since == nil)) { context in
+                let angle = self.angle(at: context.date)
                 ZStack {
                     if moving {
                         // A soft glow just outside the rim while she works.
@@ -381,14 +414,28 @@ struct IridescentRim: View {
         }
         .animation(.easeOut(duration: 0.3), value: lit)
         .animation(.easeOut(duration: 0.3), value: moving)
+        .onAppear { if turning { since = Date() } }
+        .onChange(of: turning) { _, now in
+            if now {
+                since = Date()
+            } else {
+                held = angle(at: Date()).truncatingRemainder(dividingBy: 360)
+                since = nil
+            }
+        }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private func angle(at date: Date) -> Double {
+        held + (since.map { date.timeIntervalSince($0) / Self.turn * 360 } ?? 0)
     }
 
     private func sheet(side: CGFloat, angle: Double, in size: CGSize) -> some View {
         Rectangle().fill(Self.sheen)
             .frame(width: side, height: side)
             .rotationEffect(.degrees(angle))
+            .transaction { $0.animation = nil }  // never whips round with a state change's animation
             .frame(width: size.width, height: size.height)
     }
 }
@@ -448,7 +495,7 @@ private struct Thinking: View {
                     if elapsed >= 2 {
                         Text(verbatim: "\(elapsed) s")
                             .font(Theme.font(13).monospacedDigit())
-                            .foregroundStyle(Theme.textTertiary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
@@ -486,7 +533,7 @@ private struct SourceRow: View {
                     if let day = Self.day(source.date) {
                         Text(day)
                             .font(Theme.font(12))
-                            .foregroundStyle(Theme.textTertiary)
+                            .foregroundStyle(Theme.textSecondary)
                             .lineLimit(1)
                             .layoutPriority(1)
                     }
@@ -517,7 +564,7 @@ private struct SourceRow: View {
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                         if let speaker = source.speaker {
-                            Text(speaker).font(Theme.font(12)).foregroundStyle(Theme.textTertiary)
+                            Text(speaker).font(Theme.font(12)).foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }

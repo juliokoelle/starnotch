@@ -47,14 +47,24 @@ final class AskTara {
     /// Where "Save to notes" put the answer, or that it couldn't.
     enum Saved: Equatable { case notepad, inbox, failed }
     private(set) var saved: Saved?
+    /// A short word under the field, such as Wispr Flow not starting; it goes after a few seconds.
+    private(set) var notice: String?
 
     /// The bubble opens beside Tara: the companion comes out if needed and takes the keyboard.
     @ObservationIgnored var onOpen: () -> Void = {}
     @ObservationIgnored var onClose: () -> Void = {}
-    /// Wispr Flow: while it runs, the mic starts its hands-free dictation, which pastes into the field.
-    @ObservationIgnored var wispr: DictationModule?
+    /// Wispr Flow: when it's installed, the mic starts its hands-free dictation (launching it if
+    /// needed), which pastes into the field.
+    @ObservationIgnored var wispr: DictationModule? {
+        didSet { wispr?.onPhase = { [weak self] phase in self?.wisprChanged(phase) } }
+    }
     /// The mic started Wispr Flow from here (its own state says whether it still listens).
     private var dictatingHere = false
+    /// Wispr Flow didn't start from this bubble: the mic uses Apple's recognizer until it closes.
+    @ObservationIgnored private var wisprDidntStart = false
+    /// Esc or quitting while Wispr Flow dictates: the bubble waits for its paste before it goes.
+    @ObservationIgnored private var closingAfterDictation = false
+    @ObservationIgnored private var noticeReset: Task<Void, Never>?
     /// The notepad, where "Save to notes" writes when no notes vault is connected.
     @ObservationIgnored var notes: NotesStore?
     @ObservationIgnored private var copiedReset: Task<Void, Never>?
@@ -150,7 +160,15 @@ final class AskTara {
     }
 
     func close() {
-        guard isOpen else { return }
+        guard isOpen, !closingAfterDictation else { return }
+        if isDictating {
+            closingAfterDictation = true
+            finishDictation { [weak self] in
+                self?.closingAfterDictation = false
+                self?.close()
+            }
+            return
+        }
         holdTask?.cancel()
         cancelSpeech()
         stopDictating()
@@ -165,6 +183,8 @@ final class AskTara {
             phase = .idle
         }
         resetActions()
+        setNotice(nil)
+        wisprDidntStart = false
         conversation.clear()
         removeAttachment()
         removeSentImage()
@@ -227,15 +247,18 @@ final class AskTara {
 
     // MARK: Speaking
 
-    /// The mic: Wispr Flow's hands-free dictation while Wispr Flow runs (a second press stops it and it
-    /// pastes the words into the field), else Apple's recognizer. Holding ⌃⌥T always uses the recognizer.
+    /// The mic: Wispr Flow's hands-free dictation when Wispr Flow is installed, opened if it isn't
+    /// running (a second press stops it and it pastes the words into the field), else Apple's
+    /// recognizer. Holding ⌃⌥T always uses the recognizer.
     func toggleListening() {
         if isDictating { return stopDictating() }
         if isListening { return stopListening(andSend: true) }
-        if let wispr, wispr.isRunning, !isThinking {
+        guard !isThinking else { return }
+        if let wispr, wispr.isInstalled, !wisprDidntStart, !previewing {
             focusRequest += 1  // the field has the keyboard, so Wispr's paste lands there
             dictatingHere = true
-            wispr.start()
+            // Not running: the URL launches it first, which takes some seconds more.
+            wispr.start(patience: wispr.isRunning ? 2.5 : 12)
         } else {
             startListening()
         }
@@ -247,6 +270,50 @@ final class AskTara {
         guard wasDictating else { return }
         wispr?.stop()
         focusRequest += 1
+    }
+
+    /// Wispr Flow has no cancel: stopping it always pastes what it heard where the keyboard is. So
+    /// the bubble keeps the keyboard until the words land in the field (or 2.5 s pass), then `done`.
+    func finishDictation(then done: @escaping @MainActor () -> Void) {
+        guard isDictating else { return done() }
+        let before = text
+        stopDictating()
+        Task { [weak self] in
+            let deadline = Date().addingTimeInterval(2.5)
+            while Date() < deadline {
+                guard let self, self.text == before else { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            try? await Task.sleep(for: .milliseconds(150))  // the rest of the paste
+            done()
+        }
+    }
+
+    private func wisprChanged(_ phase: DictationModule.Phase) {
+        guard dictatingHere else { return }
+        switch phase {
+        case .starting, .listening:
+            break
+        case .idle:
+            dictatingHere = false  // it finished by itself and pastes
+        case .sent, .unavailable:
+            // The microphone never came up: no permission, signed out, or it didn't launch.
+            dictatingHere = false
+            wisprDidntStart = true
+            setNotice(Localization.string("Wispr Flow didn't start, so Apple's recognizer listens"))
+            startListening()
+        }
+    }
+
+    private func setNotice(_ message: String?) {
+        noticeReset?.cancel()
+        withAnimation(Theme.snappy) { notice = message }
+        guard message != nil else { return }
+        noticeReset = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(Theme.snappy) { self?.notice = nil }
+        }
     }
 
     func startListening() {
@@ -383,7 +450,8 @@ final class AskTara {
         if previewing {
             result = Self.savesToInbox ? .inbox : .notepad
         } else if Self.savesToInbox, let inbox = CaptureInbox.markdownFile {
-            let capture = Capture(text: question + " " + answer.text, route: .note)
+            let capture = Capture(text: answer.inboxLine(asked: question, sourcesLabel: Localization.string("Sources")),
+                                  route: .note)
             result = CaptureInbox.appendMarkdown(capture, to: inbox) ? .inbox : .failed
         } else if let notes, notes.add(answer.note(asked: question, sourcesLabel: Localization.string("Sources"))) {
             result = .notepad

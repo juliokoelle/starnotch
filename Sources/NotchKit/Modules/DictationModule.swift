@@ -32,6 +32,8 @@ final class DictationModule: NotchModule {
     static let bundleID = "com.electron.wispr-flow"
 
     private(set) var phase = Phase.idle
+    /// Every change of phase, for Ask Tara, which dictates with it.
+    @ObservationIgnored var onPhase: ((Phase) -> Void)?
     @ObservationIgnored private var watchTask: Task<Void, Never>?
     let cast: AvatarCast
 
@@ -58,7 +60,9 @@ final class DictationModule: NotchModule {
         }
     }
 
-    func start() {
+    /// Opening the URL launches Wispr Flow when it isn't running; `patience` is how long its
+    /// microphone gets to come up before the start counts as sent but not heard.
+    func start(patience: TimeInterval = 2.5) {
         guard isInstalled else {
             set(.unavailable)
             return
@@ -66,7 +70,7 @@ final class DictationModule: NotchModule {
         open("wispr-flow://start-hands-free")
         Haptics.confirm()
         set(.starting)
-        watch()
+        watch(patience: patience)
     }
 
     func stop() {
@@ -86,7 +90,10 @@ final class DictationModule: NotchModule {
     }
 
     /// Follows the microphone for this one dictation, four times a second, then stops polling.
-    private func watch() {
+    /// Wispr Flow says nothing back, so listening is read from the microphone: when another app (a
+    /// call, Starnotch's own meeting agent) already uses it, this reads as listening at once and
+    /// ends only with a stop.
+    private func watch(patience: TimeInterval) {
         watchTask?.cancel()
         watchTask = Task { [weak self] in
             let started = Date()
@@ -101,7 +108,7 @@ final class DictationModule: NotchModule {
                 } else if !running, sawMic {
                     self.set(.idle)  // Wispr finished and is pasting
                     return
-                } else if !sawMic, Date().timeIntervalSince(started) > 2.5 {
+                } else if !sawMic, Date().timeIntervalSince(started) > patience {
                     self.set(.sent)
                     try? await Task.sleep(for: .seconds(1.4))
                     if self.phase == .sent { self.set(.idle) }
@@ -114,6 +121,7 @@ final class DictationModule: NotchModule {
 
     private func set(_ phase: Phase) {
         withAnimation(Theme.peek) { self.phase = phase }
+        onPhase?(phase)
     }
 
     // MARK: NotchModule

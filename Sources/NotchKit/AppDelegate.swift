@@ -239,6 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         meeting.onMemoryChanged = { [weak ask] in ask?.reloadMemory() }
         ask.onClose = { companion.hideAsk() }
+        // Screenshots and previews never take the keyboard from the app the user types in.
+        if options.capturable || preview { companion.takesKeyboard = false }
         if let name = options.preview, name.hasPrefix("ask-") { ask.preview(name) }
         meeting.onCard = { [weak self] entry in
             // Popped out, the bubble beside the character takes the sneak's place.
@@ -448,6 +450,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let order = ModuleOrder.sorted(available.map(\.kind), by: state.settings.moduleOrder)
         let shown = order.compactMap { kind in available.first { $0.kind == kind } }
         return shown.isEmpty ? allModules.filter { $0.kind == .calendar } : shown
+    }
+
+    /// Quitting while Wispr Flow dictates into Ask Tara: its paste lands in the bubble first, not in
+    /// the app behind it (Wispr Flow can't cancel, only stop and paste).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let ask, ask.isDictating else { return .terminateNow }
+        ask.finishDictation { NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

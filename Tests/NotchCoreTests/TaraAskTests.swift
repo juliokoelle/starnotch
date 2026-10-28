@@ -101,4 +101,15 @@ import TestSupport
         #expect(AskAnswer(question: "Preis?", text: "30 Euro.").note() == "# Preis?\n\n30 Euro.\n")
         #expect(AskAnswer(question: "", text: "30 Euro.").note() == "30 Euro.\n")
     }
+
+    @Test func answerSavedToTheInboxKeepsQuestionAnswerAndSourcesApart() {
+        let answer = AskAnswer(question: "Preis?", text: "30 Euro im Monat.\n\nJonas hat es bestätigt.\n", sources: [
+            AskSource(id: "0", kind: .meeting, title: "Kickoff", quote: "30 Euro.", date: "2026-10-12"),
+            AskSource(id: "1", kind: .note, title: "Pricing"),
+        ], brain: "claude-code")
+        #expect(answer.inboxLine(asked: "Was haben wir\nbeim Preis entschieden?", sourcesLabel: "Quellen")
+            == "Was haben wir beim Preis entschieden? → 30 Euro im Monat. Jonas hat es bestätigt. (Quellen: Kickoff (2026-10-12), Pricing)")
+        #expect(AskAnswer(question: "Preis?", text: "30 Euro.").inboxLine() == "Preis? → 30 Euro.")
+        #expect(AskAnswer(question: "", text: "30 Euro.").inboxLine() == "30 Euro.")
+    }
 }

@@ -16,11 +16,14 @@ public struct MediaSnapshot: Equatable, Sendable {
     public var timestamp: Date?
     public var rate: Double
     public var isPlaying: Bool
-    /// The cover, only in the lines where it changed.
+    /// The cover, only in the lines where it changed (the next track of an album leaves it out).
     public var artwork: Data?
+    /// Which cover the item has, in every line that has one (see `MediaArtwork`).
+    public var artworkHash: String?
 
     public init(appID: String, title: String, artist: String = "", album: String = "", duration: Double = 0,
-                elapsed: Double = 0, timestamp: Date? = nil, rate: Double = 1, isPlaying: Bool = true, artwork: Data? = nil) {
+                elapsed: Double = 0, timestamp: Date? = nil, rate: Double = 1, isPlaying: Bool = true, artwork: Data? = nil,
+                artworkHash: String? = nil) {
         self.appID = appID
         self.title = title
         self.artist = artist
@@ -31,6 +34,7 @@ public struct MediaSnapshot: Equatable, Sendable {
         self.rate = rate
         self.isPlaying = isPlaying
         self.artwork = artwork
+        self.artworkHash = artworkHash
     }
 
     /// One track: players hand out a new identifier with every update, so title, artist and album
@@ -70,8 +74,32 @@ public struct MediaSnapshot: Equatable, Sendable {
             timestamp: number("timestamp").map { Date(timeIntervalSince1970: $0) },
             rate: number("rate") ?? 1,
             isPlaying: (object["playing"] as? Bool) ?? ((number("rate") ?? 0) > 0),
-            artwork: (object["artwork"] as? String).flatMap { Data(base64Encoded: $0) }
+            artwork: (object["artwork"] as? String).flatMap { Data(base64Encoded: $0) },
+            artworkHash: (object["artworkHash"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         ))
+    }
+}
+
+/// The cover the helper sent last. The helper sends a cover's data only when it differs from the
+/// one before, across tracks too (every track of an album has the same), and names it by its hash
+/// in every line; a line whose hash matches gets the data kept here.
+public struct MediaArtwork: Equatable, Sendable {
+    public private(set) var hash: String?
+    public private(set) var data: Data?
+
+    public init() {}
+
+    public mutating func remember(_ snapshot: MediaSnapshot) {
+        guard let artwork = snapshot.artwork else { return }
+        hash = snapshot.artworkHash
+        data = artwork
+    }
+
+    /// The cover for this line: its own data, else the kept one when the hash matches.
+    public func artwork(for snapshot: MediaSnapshot) -> Data? {
+        if let artwork = snapshot.artwork { return artwork }
+        guard let wanted = snapshot.artworkHash, wanted == hash else { return nil }
+        return data
     }
 }
 

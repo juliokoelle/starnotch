@@ -35,7 +35,7 @@ enum ModuleAvailability {
             default: return Status(available: false, detail: "Calendar access is off in System Settings")
             }
         case .nowPlaying:
-            if MediaRemoteBridge.library != nil { return Status(available: true, detail: "Any app that plays, browsers included") }
+            if MediaRemoteBridge.isUsable { return Status(available: true, detail: "Any app that plays, browsers included") }
             let found = PlayerBridge.bundleIDs.values.contains {
                 NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
             }
@@ -92,12 +92,12 @@ enum ToolInfo {
     }
 
     /// What it does, in one line.
-    static func line(_ item: ToolItem) -> String {
+    @MainActor static func line(_ item: ToolItem) -> String {
         switch item {
         case .module(.agents): "Your coding agents, their approvals and plan limits"
         case .module(.calendar): "Your next meeting, its countdown and Join"
-        case .module(.nowPlaying): MediaRemoteBridge.library != nil ? "What plays on this Mac, from any app, with controls"
-                                                                     : "What plays in Spotify or Music, with controls"
+        case .module(.nowPlaying): MediaRemoteBridge.isUsable ? "What plays on this Mac, from any app, with controls"
+                                                              : "What plays in Spotify or Music, with controls"
         case .module(.meeting): "Tara listens in meetings and remembers what was said"
         case .module(.today): "Tasks and reminders due today"
         case .module(.system): "CPU, GPU, memory and the apps behind them"

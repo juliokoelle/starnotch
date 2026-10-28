@@ -13,14 +13,13 @@ import NotchCore
 final class MediaRemoteBridge {
     /// The newest report: nil until the first line, `.nothing` while nothing plays.
     private(set) var current: MediaSnapshot.Line?
-    /// The latest cover per track, kept across lines that leave it out.
-    private(set) var artwork: (key: String, data: Data)?
+    /// The cover sent last, kept for the lines that leave its data out.
+    private var artwork = MediaArtwork()
     var onUpdate: (() -> Void)?
 
-    private var process: Process?
-    private var input: Pipe?
-    private var buffer = Data()
-    private var failures = 0
+    private var stream: LineProcess?
+    private var startedAt = Date()
+    private var restarts = HelperRestarts()
     private var restart: Task<Void, Never>?
 
     /// The helper library inside the app.
@@ -39,76 +38,73 @@ final class MediaRemoteBridge {
     DynaLoader::dl_install_xsub("main::run", $s); &main::run;
     """
 
+    /// The helper gave up (it failed three times); for the copy that promises any app.
+    private(set) static var gaveUp = false
+    /// The system-wide source works on this Mac, as far as anyone knows yet.
+    static var isUsable: Bool { library != nil && !gaveUp }
+
     /// Streaming, or about to be: false without the helper or after it failed three times.
-    var isAvailable: Bool { Self.library != nil && failures < 3 }
+    var isAvailable: Bool { Self.library != nil && !restarts.gaveUp }
 
     func start() {
-        guard process == nil, let library = Self.library, failures < 3 else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: Self.perl)
-        process.arguments = ["-e", Self.loader, library.path, "starnotch_mr_stream"]
-        let output = Pipe(), input = Pipe()
-        process.standardOutput = output
-        process.standardInput = input  // the helper exits when this closes, even after a crash
-        process.standardError = FileHandle.nullDevice
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            Task { @MainActor in self?.receive(data) }
-        }
-        process.terminationHandler = { [weak self] ended in
-            let status = ended.terminationStatus
-            Task { @MainActor in self?.ended(status) }
-        }
+        guard stream == nil, let library = Self.library, !restarts.gaveUp else { return }
+        restart?.cancel()
+        restart = nil
+        let stream = LineProcess(executable: URL(fileURLWithPath: Self.perl),
+                                 arguments: ["-e", Self.loader, library.path, "starnotch_mr_stream"])
         do {
-            try process.run()
-            self.process = process
-            self.input = input
+            try stream.start(queue: .main, onLine: { [weak self] line in
+                MainActor.assumeIsolated { self?.receive(line, from: stream) }
+            }, onExit: { [weak self] status in
+                MainActor.assumeIsolated { self?.ended(status, from: stream) }
+            })
+            self.stream = stream
+            startedAt = Date()
         } catch {
-            failures = 3
+            giveUp()
             Log.app.error("MediaRemote helper didn't start: \(error.localizedDescription, privacy: .public)")
         }
     }
 
+    /// Stops streaming (Music switched off); `start()` brings it back.
     func stop() {
         restart?.cancel()
-        guard let process else { return }
-        self.process = nil
-        try? input?.fileHandleForWriting.close()
-        input = nil
-        if process.isRunning { process.terminate() }
-    }
-
-    private func receive(_ data: Data) {
-        guard !data.isEmpty else { return }
-        buffer.append(data)
-        var changed = false
-        while let newline = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[buffer.startIndex..<newline]
-            buffer.removeSubrange(buffer.startIndex...newline)
-            guard let parsed = MediaSnapshot.parse(Data(line)) else { continue }
-            failures = 0
-            if case .playing(let snapshot) = parsed, let data = snapshot.artwork {
-                artwork = (snapshot.trackKey, data)
-            }
-            current = parsed
-            changed = true
-        }
-        if changed { onUpdate?() }
-    }
-
-    private func ended(_ status: Int32) {
-        guard process != nil else { return }  // stopped on purpose
-        process = nil
-        input = nil
+        restart = nil
+        guard let stream else { return }
+        self.stream = nil
+        stream.stop()
         current = nil
-        failures += 1
-        Log.app.error("MediaRemote helper ended (\(status, privacy: .public)), try \(self.failures, privacy: .public)")
+    }
+
+    private func receive(_ line: Data, from stream: LineProcess) {
+        guard stream === self.stream, let parsed = MediaSnapshot.parse(line) else { return }
+        if case .playing(let snapshot) = parsed { artwork.remember(snapshot) }
+        current = parsed
         onUpdate?()
-        guard failures < 3 else { return }
+    }
+
+    /// The cover for this report, also when its line left the data out (same cover as before).
+    func artwork(for snapshot: MediaSnapshot) -> Data? { artwork.artwork(for: snapshot) }
+
+    private func ended(_ status: Int32, from stream: LineProcess) {
+        guard stream === self.stream else { return }  // stopped on purpose
+        self.stream = nil
+        current = nil
+        let again = restarts.ended(after: Date().timeIntervalSince(startedAt))
+        Log.app.error("MediaRemote helper ended (\(status, privacy: .public)), failures \(self.restarts.failures, privacy: .public)")
+        if !again { giveUp() }
+        onUpdate?()
+        guard again else { return }
         restart = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
             self?.start()
         }
+    }
+
+    private func giveUp() {
+        restarts.failedToStart()
+        Self.gaveUp = true
     }
 
     /// The commands MediaRemote knows (`MRCommand`).

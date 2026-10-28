@@ -129,13 +129,25 @@ final class NowPlayingModule: NotchModule {
         }
     }
 
-    /// Any app through MediaRemote, updated as it changes; Spotify and Music through AppleScript
-    /// when MediaRemote has nothing (or isn't there), polled every 1.5 s while one of them runs.
-    /// Nothing is sent to an app that isn't running, so the Automation prompt appears only once
-    /// the user plays music there and MediaRemote can't see it.
+    /// Music's switch in the Tools gallery: off, the helper and the clock stop and no track
+    /// reaches the notch.
+    var musicOn = true {
+        didSet {
+            guard live, musicOn != oldValue else { return }
+            if musicOn { resumeLive() } else { pauseLive() }
+        }
+    }
+
+    /// Any app through MediaRemote, updated as it changes. Only when the system-wide source isn't
+    /// there (or gave up), Spotify and Music through AppleScript, polled every 1.5 s while one of
+    /// them runs; nothing is sent to an app that isn't running.
     func startLive() {
         live = true
         remote.onUpdate = { [weak self] in self?.refresh(fromRemote: true) }
+        if musicOn { resumeLive() }
+    }
+
+    private func resumeLive() {
         remote.start()
         clock?.cancel()
         clock = Task { [weak self] in
@@ -144,12 +156,23 @@ final class NowPlayingModule: NotchModule {
                 self.ticks += 1
                 if self.remoteSnapshot != nil {
                     self.refresh(fromRemote: false)
-                } else if self.ticks % 3 == 0 || self.track?.remote == true {
+                } else if !self.remote.isAvailable, self.ticks % 3 == 0 || self.track?.remote == true {
                     await self.poll()
                 }
                 try? await Task.sleep(for: .milliseconds(500))
             }
         }
+    }
+
+    private func pauseLive() {
+        clock?.cancel()
+        clock = nil
+        remote.stop()
+        lastStatus = nil
+        remoteCover = nil
+        track = nil
+        isPlaying = false
+        loadLyrics()
     }
 
     private var remoteSnapshot: MediaSnapshot? {
@@ -160,7 +183,7 @@ final class NowPlayingModule: NotchModule {
     /// MediaRemote's view: a new line (`fromRemote`) or the clock moving the position on.
     private func refresh(fromRemote: Bool) {
         guard let snapshot = remoteSnapshot else {
-            // MediaRemote lost the player: the AppleScript poll decides on the next tick.
+            // Nothing plays (or the helper ended); without the helper, the AppleScript poll decides.
             if fromRemote, track?.remote == true { withAnimation(Theme.close) { track = nil; isPlaying = false } }
             return
         }
@@ -176,10 +199,9 @@ final class NowPlayingModule: NotchModule {
             withAnimation(Theme.snappy) { isPlaying = snapshot.isPlaying }
         }
         let key = snapshot.trackKey
-        let artwork = remote.artwork.flatMap { $0.key == key ? NSImage(data: $0.data) : nil }
         if track?.id == key {
             // The cover often comes a moment after the title.
-            if let artwork, remoteCover != key, var current = track {
+            if remoteCover != key, var current = track, let artwork = remote.artwork(for: snapshot).flatMap(NSImage.init(data:)) {
                 remoteCover = key
                 current.cover = artwork
                 current.color = DominantColor.of(artwork)
@@ -187,6 +209,7 @@ final class NowPlayingModule: NotchModule {
             }
             return
         }
+        let artwork = remote.artwork(for: snapshot).flatMap(NSImage.init(data:))
         remoteCover = artwork == nil ? nil : key
         let cover = artwork ?? MockCovers.placeholder()
         let new = Track(id: key, title: snapshot.title, artist: snapshot.artist, duration: snapshot.duration,
@@ -475,8 +498,8 @@ private struct NowPlayingBody: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Nothing playing").font(Theme.font(18, .semibold)).foregroundStyle(Theme.textPrimary)
-                    Text(MediaRemoteBridge.library != nil ? "Play something in any app and it shows up here."
-                                                          : "Play something in Spotify or Music and it shows up here.")
+                    Text(MediaRemoteBridge.isUsable ? "Play something in any app and it shows up here."
+                                                    : "Play something in Spotify or Music and it shows up here.")
                         .font(Theme.font(13)).foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

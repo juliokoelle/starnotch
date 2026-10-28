@@ -36,6 +36,25 @@ import Testing
         #expect(snapshot.trackKey == "com.spotify.client|A||")
     }
 
+    @Test func theNextTrackOfAnAlbumKeepsTheCover() throws {
+        // The helper sends the cover's data once; the next track with the same cover only names it.
+        let first = #"{"title":"Track One","album":"Album","bundleID":"com.apple.Music","artwork":"AAEC","artworkHash":"5f2"}"#
+        let second = #"{"title":"Track Two","album":"Album","bundleID":"com.apple.Music","artworkHash":"5f2"}"#
+        let other = #"{"title":"Elsewhere","bundleID":"com.apple.Music","artworkHash":"9a0"}"#
+        var artwork = MediaArtwork()
+        guard case .playing(let one)? = MediaSnapshot.parse(Data(first.utf8)),
+              case .playing(let two)? = MediaSnapshot.parse(Data(second.utf8)),
+              case .playing(let three)? = MediaSnapshot.parse(Data(other.utf8)) else { Issue.record("no track"); return }
+        artwork.remember(one)
+        artwork.remember(two)
+        #expect(one.trackKey != two.trackKey)
+        #expect(artwork.artwork(for: one) == Data([0, 1, 2]))
+        #expect(artwork.artwork(for: two) == Data([0, 1, 2]))
+        // A cover not sent yet isn't the old one.
+        #expect(artwork.artwork(for: three) == nil)
+        #expect(artwork.artwork(for: MediaSnapshot(appID: "x", title: "No cover")) == nil)
+    }
+
     @Test func nothingAndNoise() {
         #expect(MediaSnapshot.parse(Data(#"{"title":""}"#.utf8)) == .nothing)
         #expect(MediaSnapshot.parse(Data("MediaRemote not available".utf8)) == nil)
@@ -150,5 +169,60 @@ import Testing
         #expect(levels.adjusted == ["a", "b"])
         #expect(AppVolume.label(0) == "Muted")
         #expect(AppVolume.label(0.4) == "40 %")
+    }
+}
+
+@Suite struct HelperProcessTests {
+    @Test func failuresCountShortRunsEvenWithLines() {
+        var restarts = HelperRestarts()
+        #expect(restarts.ended(after: 1))
+        #expect(restarts.ended(after: 5))
+        #expect(!restarts.ended(after: 2))
+        #expect(restarts.gaveUp)
+        // A run that lasted starts the count over.
+        var lasting = HelperRestarts()
+        #expect(lasting.ended(after: 1))
+        #expect(lasting.ended(after: 2))
+        #expect(lasting.ended(after: 600))
+        #expect(lasting.failures == 1)
+        lasting.failedToStart()
+        #expect(lasting.gaveUp)
+    }
+
+    @Test func linesThenOneExitFromAHelperThatEnds() async throws {
+        final class Seen: @unchecked Sendable {
+            let lock = NSLock()
+            var lines: [String] = []
+            var exits: [Int32] = []
+        }
+        let seen = Seen()
+        let queue = DispatchQueue(label: "test.lines")
+        // One line split across two writes, a last line without its newline, then exit 2.
+        let helper = LineProcess(executable: URL(fileURLWithPath: "/bin/sh"),
+                                 arguments: ["-c", #"printf '{"title":'; sleep 0.1; printf '"A"}\nlast'; exit 2"#])
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            do {
+                try helper.start(queue: queue, onLine: { line in
+                    seen.lock.withLock { seen.lines.append(String(decoding: line, as: UTF8.self)) }
+                }, onExit: { status in
+                    seen.lock.withLock { seen.exits.append(status) }
+                    done.resume()
+                })
+            } catch {
+                done.resume(throwing: error)
+            }
+        }
+        // Long enough for a handler stuck at the end of output to pile up callbacks.
+        try await Task.sleep(for: .milliseconds(300))
+        seen.lock.withLock {
+            #expect(seen.lines == [#"{"title":"A"}"#, "last"])
+            #expect(seen.exits == [2])
+        }
+    }
+
+    @Test func splitKeepsTheUnfinishedLine() {
+        var buffer = Data("one\ntwo\nthr".utf8)
+        #expect(LineProcess.split(&buffer) == [Data("one".utf8), Data("two".utf8)])
+        #expect(buffer == Data("thr".utf8))
     }
 }

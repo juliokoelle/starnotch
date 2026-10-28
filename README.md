@@ -59,7 +59,7 @@ The second step of the first launch lists what it found (Claude Code, Codex, cal
 |---|---|---|
 | none | The island, hover, click, swipes, ⌃⌥Space, quick capture | — |
 | Calendars | The calendar module | The module hides |
-| Automation (Spotify, Music) | Now playing, only when the system-wide source can't see the player | The module stays quiet |
+| Automation (Spotify, Music) | Now playing, only when the system-wide source isn't available (a build without the helper, or a macOS that blocks it) | The module stays quiet |
 | System Audio Recording (optional) | Volume per app, asked the first time you move an app's slider | The mixer points to System Settings; apps keep their own volume |
 | Accessibility (optional) | Escape cancels the wheel while you hold the notch over other apps; the open island ends between two menu bar icons instead of cutting one | Release in the center to cancel; the island keeps its fixed width |
 | Automation (System Events, optional) | The dark mode switch in the System tab, asked the first time you use it | The switch flips back and the notch points to System Settings › Privacy & Security › Automation |

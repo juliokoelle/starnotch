@@ -8,7 +8,8 @@
 // Starnotch's needs, not a copy. Everything stays on the Mac: the library only prints to stdout.
 //
 //   starnotch_mr_stream    one JSON object per line whenever the now-playing item changes,
-//                          until stdin closes (the app quit) or SIGTERM
+//                          until stdin closes (the app quit) or SIGTERM; `artworkHash` in every
+//                          line with a cover, `artwork` (base64) only when that hash changed
 //   starnotch_mr_control   env STARNOTCH_MR_COMMAND (MRCommand id) or STARNOTCH_MR_SEEK (seconds)
 //
 // Build (scripts/build-app.sh): clang -dynamiclib -fobjc-arc -framework Foundation -framework AppKit
@@ -62,7 +63,7 @@ static dispatch_queue_t queue;
 static NSUInteger lastArtworkHash;
 static BOOL scheduled;
 
-/// Reads everything MediaRemote knows and prints one snapshot; artwork only when it changed.
+/// Reads everything MediaRemote knows and prints one snapshot; the artwork's data only when it changed.
 static void snapshot(void) {
     __block NSDictionary *info;
     __block int pid = 0;
@@ -115,6 +116,9 @@ static void snapshot(void) {
             NSData *artwork = info[@"kMRMediaRemoteNowPlayingInfoArtworkData"];
             if ([artwork isKindOfClass:NSData.class] && artwork.length > 0) {
                 NSUInteger hash = artwork.length ^ [[artwork subdataWithRange:NSMakeRange(0, MIN(artwork.length, 4096))] hash];
+                // Every line names its cover; the data comes only when it changed, so the next
+                // track of an album (same cover) finds it under the same hash in the app.
+                out[@"artworkHash"] = [NSString stringWithFormat:@"%lx", (unsigned long)hash];
                 if (hash != lastArtworkHash) {
                     lastArtworkHash = hash;
                     out[@"artwork"] = [artwork base64EncodedStringWithOptions:0];

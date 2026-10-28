@@ -396,7 +396,12 @@ final class NotchController {
         leaveTask?.cancel()
         leaveTask = nil
         if let module, module != model.module {
-            model.module = module
+            // Already open: the island springs to the new tab's panel size instead of jumping.
+            if model.interaction == .expanded {
+                withAnimation(Theme.snappy) { model.module = module }
+            } else {
+                model.module = module
+            }
         }
         self.pinned = pinned
         if model.interaction != .expanded {

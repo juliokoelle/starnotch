@@ -243,109 +243,109 @@ private struct NowPlayingBody: View {
 
     /// Nothing playing: the same layout with an empty cover; the output and its volume still work.
     private var idle: some View {
-        HStack(alignment: .center, spacing: 22) {
+        HStack(alignment: .center, spacing: 16) {
             RoundedRectangle(cornerRadius: Self.cover * 0.22, style: .continuous)
                 .fill(Theme.cardHover)
                 .frame(width: Self.cover, height: Self.cover)
                 .overlay {
                     Image(systemName: "music.note")
-                        .font(.system(size: 34, weight: .semibold))
+                        .font(.system(size: 26, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
                 }
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Nothing playing").font(Theme.font(18, .semibold)).foregroundStyle(Theme.textPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Nothing playing").font(Theme.font(15, .semibold)).foregroundStyle(Theme.textPrimary)
                     Text("Play something in Spotify or Music and it shows up here.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.textSecondary)
+                        .font(Theme.font(12)).foregroundStyle(Theme.textSecondary)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 12)
-                outputRow
+                Spacer(minLength: 8)
+                HStack(spacing: 10) {
+                    Spacer(minLength: 0)
+                    outputRow
+                }
             }
             .frame(maxHeight: Self.cover)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Self.inset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    /// Volume across, the output device at the end; a click on it opens the list.
+    /// Volume, then the output device as its symbol; a click on it opens the list (the device's
+    /// name is in the list and the help tag).
     private var outputRow: some View {
-        HStack(spacing: 12) {
-            VolumeSlider(output: module.output, width: nil)
+        HStack(spacing: 8) {
+            VolumeSlider(output: module.output, width: 64)
             OutputButton(output: module.output, open: Binding(get: { module.showsOutputs },
-                                                              set: { module.showsOutputs = $0 }))
-                .layoutPriority(1)
+                                                              set: { module.showsOutputs = $0 }),
+                         showsName: false)
         }
     }
 
-    /// The full panel: a large cover, then title, artist and album, the scrubber, the controls,
-    /// and the output with its volume along the bottom.
+    /// The compact panel: the cover on the left; title and artist with the listening character,
+    /// the scrubber, then the controls with volume and output on one line.
     private func player(_ track: NowPlayingModule.Track) -> some View {
-        ZStack(alignment: .topTrailing) {
-            HStack(alignment: .center, spacing: 22) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 40, style: .continuous)
-                        .fill(track.color.opacity(0.5))
-                        .frame(width: Self.cover, height: Self.cover)
-                        .blur(radius: 30)
-                    CoverView(track: track, size: Self.cover, badge: true)
-                        .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
-                }
-                .id(track.id)
-                .transition(.blurSlide(x: 40 * module.direction, scale: 0.92))
+        HStack(alignment: .center, spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(track.color.opacity(0.5))
+                    .frame(width: Self.cover, height: Self.cover)
+                    .blur(radius: 22)
+                CoverView(track: track, size: Self.cover, badge: true)
+                    .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
+            }
+            .id(track.id)
+            .transition(.blurSlide(x: 30 * module.direction, scale: 0.92))
 
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(track.title)
-                            .font(Theme.font(18, .semibold))
+                            .font(Theme.font(15, .semibold))
                             .foregroundStyle(Theme.textPrimary)
                         Text(track.album.isEmpty ? track.artist : "\(track.artist) · \(track.album)")
-                            .font(Theme.font(13))
+                            .font(Theme.font(12))
                             .foregroundStyle(Theme.textSecondary)
                     }
                     .lineLimit(1)
-                    // Room for the character in the corner: long titles end in … before it.
-                    .padding(.trailing, 64)
                     .id(track.id)
-                    .transition(.blurSlide(x: 24 * module.direction))
-
-                    Spacer(minLength: 12)
-
-                    Scrubber(position: module.position, duration: track.duration) { module.seek(to: $0) }
-
-                    HStack(spacing: 10) {
-                        control("backward.fill", size: 15, label: "Previous") { module.previous() }
-                        control(module.isPlaying ? "pause.fill" : "play.fill", size: 21,
-                                label: module.isPlaying ? "Pause" : "Play") { module.togglePlay() }
-                            .contentTransition(.symbolEffect(.replace))
-                        control("forward.fill", size: 15, label: "Next") { module.next() }
-                    }
-                    .padding(.top, 8)
-                    .padding(.leading, -7)
-
-                    outputRow
-                        .padding(.top, 10)
+                    .transition(.blurSlide(x: 20 * module.direction))
+                    Spacer(minLength: 0)
+                    // The main character listens along with headphones.
+                    AvatarView(character: module.cast.main, mood: .music, height: 34,
+                               colorway: module.cast.colorway, emergeOnAppear: false)
+                        .frame(width: 40, height: 36, alignment: .top)
                 }
-                .frame(maxHeight: Self.cover)
-            }
-            .padding(.horizontal, 24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
-            // The main character listens along with headphones, in the top corner beside the title.
-            AvatarView(character: module.cast.main, mood: .music, height: 54,
-                       colorway: module.cast.colorway, emergeOnAppear: false)
-                .frame(width: 62, alignment: .top)
-                .padding(.top, 14)
-                .padding(.trailing, 14)
+                Spacer(minLength: 4)
+
+                Scrubber(position: module.position, duration: track.duration) { module.seek(to: $0) }
+
+                HStack(spacing: 4) {
+                    control("backward.fill", size: 13, label: "Previous") { module.previous() }
+                    control(module.isPlaying ? "pause.fill" : "play.fill", size: 18,
+                            label: module.isPlaying ? "Pause" : "Play") { module.togglePlay() }
+                        .contentTransition(.symbolEffect(.replace))
+                    control("forward.fill", size: 13, label: "Next") { module.next() }
+                    Spacer(minLength: 8)
+                    outputRow
+                }
+                .padding(.leading, -7)
+            }
+            .frame(maxHeight: Self.cover)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, Self.inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(Theme.open, value: track.id)
     }
 
-    static let cover: CGFloat = 200
+    /// Sized for the compact panel (150 high): the cover fills it with an even margin.
+    static let cover: CGFloat = 118
+    static let inset: CGFloat = 16
 
     private func control(_ symbol: String, size: CGFloat, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {

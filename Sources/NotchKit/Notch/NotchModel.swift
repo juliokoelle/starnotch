@@ -107,27 +107,32 @@ final class NotchModel {
     /// empty without Accessibility permission or on a display without a notch.
     var menuBarItems: [ClosedRange<CGFloat>] = []
 
+    /// The open panel's size class: the current tab's, large while an approval card shows.
+    var panelSize: PanelSize { approvals?.current != nil ? .large : current.panelSize }
+
     var layout: NotchLayout {
-        NotchLayout(presentation: presentation, notch: notchSize,
-                    bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? NotchLayout.panelHeight,
-                    earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom,
-                    menuBarItems: menuBarItems)
+        let panel = panelSize
+        return NotchLayout(presentation: presentation, notch: notchSize, panel: panel,
+                           bodyHeight: approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? panel.height,
+                           earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom,
+                           menuBarItems: menuBarItems)
     }
 }
 
 /// Sizes of the island per presentation. The width includes the two concave flares at the top.
 struct NotchLayout: Equatable {
-    /// Every tab opens in one panel size, so switching tabs never resizes the island; a module
-    /// fills it, and what is longer scrolls inside. Only an approval card asks for less.
-    static let expandedWidth: CGFloat = 640
-    /// The open panel narrows or widens within these bounds so its edges end between two menu
+    /// Tabs open in one of two panel sizes (`PanelSize`, picked per module): content tabs large,
+    /// music, dictation and tools compact. A module fills its panel, and what is longer scrolls
+    /// inside. Only an approval card asks for less. These are the large panel's numbers.
+    static let expandedWidth: CGFloat = PanelSize.large.width
+    /// The open panel narrows or widens within its size's range so its edges end between two menu
     /// bar icons instead of cutting one in half (`MenuBarFit`).
-    static let minExpandedWidth: CGFloat = 592
-    static let maxExpandedWidth: CGFloat = expandedWidth + 24
+    static let minExpandedWidth: CGFloat = PanelSize.large.widthRange.lowerBound
+    static let maxExpandedWidth: CGFloat = PanelSize.large.widthRange.upperBound
     /// Quick capture, fitted the same way.
     static let captureWidth: CGFloat = 520
     /// The middle between the old Agents (about 180) and Calendar (about 386) panels.
-    static let panelHeight: CGFloat = 280
+    static let panelHeight: CGFloat = PanelSize.large.height
     /// An ear narrower than this shows nothing rather than a sliver of a figure.
     static let minEarWidth: CGFloat = 14
     /// Compact ears stay inside the gap between the hardware notch and the first menu extra
@@ -139,7 +144,9 @@ struct NotchLayout: Equatable {
 
     var presentation: NotchModel.Presentation
     var notch: CGSize
-    /// The panel body: `panelHeight` for every tab, less for an approval card.
+    /// The open panel's size class.
+    var panel: PanelSize = .large
+    /// The panel body: the size class's height, less for an approval card.
     var bodyHeight: CGFloat = NotchLayout.panelHeight
     /// Width of each ear at rest (the ear module may ask for more than the default).
     var earWidth: CGFloat = NotchLayout.earWidth
@@ -175,7 +182,7 @@ struct NotchLayout: Equatable {
         case .peek, .sneak: notch.width + 2 * besideNotch
         // The straight sides are what runs through the icons; the flares only touch the top rows.
         case .expanded:
-            MenuBarFit.width(preferred: Self.expandedWidth, in: Self.minExpandedWidth ... Self.maxExpandedWidth, items: menuBarItems)
+            MenuBarFit.width(preferred: panel.width, in: panel.widthRange, items: menuBarItems)
         case .capture:
             MenuBarFit.width(preferred: Self.captureWidth, in: Self.captureWidth - 48 ... Self.captureWidth + 24, items: menuBarItems)
         }
@@ -198,7 +205,7 @@ struct NotchLayout: Equatable {
         case .closed, .compact: notch.height
         case .peek: notch.height + 40
         case .sneak: notch.height + 36
-        case .expanded: notch.height + Self.bodyTop + min(bodyHeight, Self.panelHeight) + Self.bodyBottom
+        case .expanded: notch.height + Self.bodyTop + min(bodyHeight, panel.height) + Self.bodyBottom
         case .capture: notch.height + 8 + 44 + 9 + 24 + 14
         }
     }

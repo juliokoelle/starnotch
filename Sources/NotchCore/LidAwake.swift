@@ -170,6 +170,21 @@ public enum LidAwakeCommands {
         return "do shell script \(literal(shell)) with prompt \(literal(prompt)) with administrator privileges"
     }
 
+    /// Stands for "no message from osascript"; the app shows its own line for it.
+    public static let unknownFailure = "?"
+
+    /// What `osascript -e <appleScript>` said: nil when it ran, "" when the user cancelled the
+    /// password dialog (error -128), the message otherwise (`unknownFailure` without one).
+    public static func adminFailure(status: Int32, output: String) -> String? {
+        guard status != 0 else { return nil }
+        let text = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasSuffix("(-128)") { return "" }
+        // "0:12: execution error: The administrator user name or password was incorrect. (-60007)"
+        var message = text.range(of: "execution error: ").map { String(text[$0.upperBound...]) } ?? text
+        if let code = message.range(of: #" \(-?\d+\)$"#, options: .regularExpression) { message.removeSubrange(code) }
+        return message.isEmpty ? unknownFailure : message
+    }
+
     /// `SleepDisabled` from `pmset -g`; nil when the line is missing.
     public static func sleepDisabled(pmsetOutput: String) -> Bool? {
         for line in pmsetOutput.split(separator: "\n") {

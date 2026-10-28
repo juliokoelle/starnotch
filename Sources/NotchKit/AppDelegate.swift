@@ -425,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setup.lidAwake = lid
         lid.cleanUpAfterLaunch()
         lid.onPower = { [weak self] in self?.battery.state?.pluggedIn ?? false }
-        lid.installRule = { [weak self] in await self?.setup.installLidRule() ?? false }
+        lid.installRule = { [weak self] in await self?.setup.installLidRule() ?? .cancelled }
         lid.onChange = { [weak system] state, busy in
             withAnimation(Theme.snappy) {
                 system?.lidAwake = state
@@ -442,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .needsPower: title = "Only on the power adapter"
             case .alreadyOff: title = "Sleep was already switched off elsewhere"
             case .failed: title = "Couldn't keep the Mac awake with the lid closed"
+            case .ruleFailed: title = "Couldn't set up keeping awake with the lid closed"
             }
             self?.notch.sneak(Sneak(visual: .symbol("laptopcomputer", tint: notice.isEnd ? .neutral : .waiting),
                                     title: Localization.string(title), detail: detail.map(Localization.string), duration: 3.4),

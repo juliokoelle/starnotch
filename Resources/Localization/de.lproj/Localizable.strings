@@ -87,5 +87,7 @@
 "%@ needs your password once to keep the Mac awake with the lid closed. It may then switch sleep off and on, nothing else." = "%@ braucht einmal dein Passwort, um den Mac mit geschlossenem Deckel wach zu halten. Danach darf es nur den Ruhezustand aus- und einschalten, sonst nichts.";
 "%@ removes its rule for keeping the Mac awake with the lid closed." = "%@ entfernt seine Regel, die den Mac mit geschlossenem Deckel wach hält.";
 "macOS didn't allow it." = "macOS hat es nicht erlaubt.";
+"Couldn't set up keeping awake with the lid closed" = "Wach halten mit geschlossenem Deckel ließ sich nicht einrichten";
+"The rule is in place, but sudo doesn't accept it." = "Die Regel ist installiert, aber sudo nimmt sie nicht an.";
 "Lid closed until %@" = "Deckel zu bis %@";
 "Lid closed until unplugged" = "Deckel zu bis zum Ausstecken";

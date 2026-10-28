@@ -4,6 +4,10 @@ import NotchCore
 /// "Keep awake with the lid closed": runs the state machine (`LidAwake`) and its commands.
 /// pmset runs through `sudo -n` off the main thread (on quit right away, so it is done before
 /// the app is gone). A marker in the support folder exists exactly while Starnotch keeps sleep off.
+///
+/// The state machine says what pmset should be; `apply` brings pmset there, one command at a
+/// time, and looks at the state again after each one. So a switch, an unplug or the timer that
+/// lands while pmset runs never leaves sleep off behind a switch that says off.
 @MainActor
 final class LidAwakeController {
     enum Notice {
@@ -13,19 +17,27 @@ final class LidAwakeController {
         /// Sleep was already off before (set outside Starnotch): left alone.
         case alreadyOff
         case failed
+        /// The rule didn't go in, or `sudo -n` doesn't accept it (not a cancel in the dialog).
+        case ruleFailed
 
         var isEnd: Bool { if case .ended = self { true } else { false } }
     }
 
+    enum RuleInstall { case installed, cancelled, failed }
+
     private var machine = LidAwake()
     private let marker: URL
     private var timer: Task<Void, Never>?
+    /// What Starnotch last set pmset to (`disablesleep 1` = true).
+    private var applied = false
+    /// The one pmset run in flight; a second change waits for it instead of running beside it.
+    private var applying: Task<Void, Never>?
     private(set) var busy = false
     /// The state changed, or `busy` (asking for the password, running pmset).
     var onChange: ((LidAwake.State, Bool) -> Void)?
     var onNotice: ((Notice) -> Void)?
-    /// Asks for the password once and installs the rule; true when `sudo -n` works afterwards.
-    var installRule: (() async -> Bool)?
+    /// Asks for the password once and installs the rule; `.installed` when `sudo -n` works afterwards.
+    var installRule: (() async -> RuleInstall)?
     /// On the power adapter right now.
     var onPower: () -> Bool = { false }
 
@@ -38,20 +50,31 @@ final class LidAwakeController {
         guard !busy else { return }
         setBusy(true)
         Task {
-            var action = machine.handle(.switchOn(limit, onPower: onPower(), ruleInstalled: await Self.ruleWorks()), now: Date())
-            if action == .installRule, await installRule?() == true {
-                action = machine.handle(.switchOn(limit, onPower: onPower(), ruleInstalled: true), now: Date())
-            }
-            if action == .enable, await Self.sleepDisabledAlready(), !FileManager.default.fileExists(atPath: marker.path) {
-                // Someone else switched sleep off: switching it back on later would undo their choice.
-                _ = machine.handle(.failed, now: Date())
-                onNotice?(.alreadyOff)
-            } else {
-                await perform(action)
-            }
+            await switchOn(limit, ruleInstalled: await Self.ruleWorks())
             schedule()
             setBusy(false)
         }
+    }
+
+    /// Every await comes before the one `handle` that may switch on, and the power is read right
+    /// there: an unplug during the checks is never missed (`powerChanged` ignores it while off).
+    private func switchOn(_ limit: LidAwakeLimit, ruleInstalled: Bool) async {
+        var ruleInstalled = ruleInstalled
+        // Off the adapter the last `handle` says so; the password isn't asked for first.
+        if !ruleInstalled, onPower() {
+            switch await installRule?() ?? .cancelled {
+            case .installed: ruleInstalled = true
+            case .cancelled: return
+            case .failed: onNotice?(.ruleFailed); return
+            }
+        }
+        if !machine.isOn, ruleInstalled, onPower(), !applied, await Self.sleepDisabledAlready(), !applied,
+           !FileManager.default.fileExists(atPath: marker.path) {
+            // Someone else switched sleep off: switching it back on later would undo their choice.
+            onNotice?(.alreadyOff)
+            return
+        }
+        await perform(machine.handle(.switchOn(limit, onPower: onPower(), ruleInstalled: ruleInstalled), now: Date()))
     }
 
     func switchOff() {
@@ -69,10 +92,11 @@ final class LidAwakeController {
         Task { await perform(machine.handle(.power(onPower: onPower), now: Date())) }
     }
 
-    /// The app quits: sleep comes back before it is gone.
+    /// The app quits: sleep comes back before it is gone. A pmset still running finishes first
+    /// (`runPmset` takes turns), so this one is always the last word.
     func quit() {
         let action = machine.handle(.quit, now: Date())
-        guard action != .none || FileManager.default.fileExists(atPath: marker.path) else { return }
+        guard action != .none || applied || applying != nil || FileManager.default.fileExists(atPath: marker.path) else { return }
         timer?.cancel()
         if Self.runPmset(false) { try? FileManager.default.removeItem(at: marker) }
     }
@@ -95,22 +119,48 @@ final class LidAwakeController {
         case .needsPower:
             onNotice?(.needsPower)
         case .enable:
-            if await Task.detached(priority: .userInitiated, operation: { Self.runPmset(true) }).value {
-                try? FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? Date().ISO8601Format().write(to: marker, atomically: true, encoding: .utf8)
-            } else {
-                _ = machine.handle(.failed, now: Date())
-                onNotice?(.failed)
-            }
+            await apply()
         case .disable(let reason):
             timer?.cancel()
-            // The marker stays when pmset fails, so the next launch tries again.
-            if await Task.detached(priority: .userInitiated, operation: { Self.runPmset(false) }).value {
-                try? FileManager.default.removeItem(at: marker)
-            }
+            await apply()
             if reason == .unplugged || reason == .timeUp { onNotice?(.ended(reason)) }
         }
         onChange?(machine.state, busy)
+    }
+
+    /// Brings pmset to the state machine: one run at a time, and after each the state is read
+    /// again, so the last change wins whatever order the events came in. A caller while a run is
+    /// in flight waits for that run, which then also covers its change.
+    private func apply() async {
+        if let applying { return await applying.value }
+        let marker = marker
+        let run = Task { [weak self] in
+            while let self, self.applied != self.machine.isOn {
+                let want = self.machine.isOn
+                let done = await Task.detached(priority: .userInitiated) { Self.runPmset(want) }.value
+                if done {
+                    self.applied = want
+                    if want {
+                        try? FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try? Date().ISO8601Format().write(to: marker, atomically: true, encoding: .utf8)
+                    } else {
+                        try? FileManager.default.removeItem(at: marker)
+                    }
+                } else if want {
+                    if self.machine.isOn {
+                        _ = self.machine.handle(.failed, now: Date())
+                        self.timer?.cancel()
+                        self.onNotice?(.failed)
+                    }
+                } else {
+                    // Sleep didn't come back: the marker stays, so the next launch tries again.
+                    break
+                }
+            }
+            self?.applying = nil
+        }
+        applying = run
+        await run.value
     }
 
     /// Wakes at the limit; a wake a moment early sleeps again for the rest.
@@ -130,8 +180,13 @@ final class LidAwakeController {
         onChange?(machine.state, busy)
     }
 
+    /// pmset runs take turns, also the one at quit on the main thread.
+    nonisolated private static let pmsetTurn = NSLock()
+
     nonisolated private static func runPmset(_ disableSleep: Bool) -> Bool {
-        SetupActions.processRunner(LidAwakeCommands.sudo, LidAwakeCommands.sudoArguments(disableSleep), [:]).status == 0
+        pmsetTurn.withLock {
+            SetupActions.processRunner(LidAwakeCommands.sudo, LidAwakeCommands.sudoArguments(disableSleep), [:]).status == 0
+        }
     }
 
     nonisolated private static func ruleWorks() async -> Bool {

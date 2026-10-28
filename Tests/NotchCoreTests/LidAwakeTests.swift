@@ -100,6 +100,13 @@ import Testing
         #expect(LidAwakeCommands.sleepDisabled(pmsetOutput: "Currently in use:\n sleep 1") == nil)
     }
 
+    @Test func readsWhatOsascriptSaid() {
+        #expect(LidAwakeCommands.adminFailure(status: 0, output: "") == nil)
+        #expect(LidAwakeCommands.adminFailure(status: 1, output: "0:120: execution error: User canceled. (-128)\n") == "")
+        #expect(LidAwakeCommands.adminFailure(status: 1, output: "0:12: execution error: visudo: syntax error (1)\n") == "visudo: syntax error")
+        #expect(LidAwakeCommands.adminFailure(status: 1, output: "") == LidAwakeCommands.unknownFailure)
+    }
+
     @Test func theLedgerKnowsIt() {
         #expect(SetupItem.lidAwake.isRemovable)
         #expect(SetupItem.lidAwake.title == "Keep awake with the lid closed")

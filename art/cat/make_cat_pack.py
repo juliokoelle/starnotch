@@ -206,7 +206,7 @@ def main():
             states["peek"] = sprites["peek-max"]
         levels[level] = {"name": name, "states": states}
     manifest = {
-        "format": 1, "id": "cat", "name": "Cat", "version": "1.0", "license": "Apache-2.0",
+        "format": 1, "id": "cat", "name": "Cat", "version": "1.0", "license": "Copyright © 2026 Julio Koelle. All rights reserved. See LICENSE in this pack.",
         "author": "The Starnotch authors",
         "note": "Effort levels change the eyes while the cat works; expressions bring their own eyes.",
         "characters": [{
@@ -216,8 +216,8 @@ def main():
             "levels": levels,
         }],
     }
-    with open(os.path.join(OUT, "manifest.json"), "w") as f:
-        json.dump(manifest, f, indent=2)
+    with open(os.path.join(OUT, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
     print("wrote", OUT, "frame", union)
 
 

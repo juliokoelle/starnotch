@@ -1,0 +1,13 @@
+Copyright © 2026 Julio Koelle. All rights reserved.
+
+The Cat, a Starnotch character: the files in this folder (artwork and the scripts
+that build it) are not covered by the Apache License 2.0 that covers the Starnotch
+code. You may use them only as part of Starnotch as distributed by its authors: the
+released app, or this repository built as it is. You may not copy, modify or
+redistribute them on their own or in other projects, forks included, without
+written permission.
+
+Versions published before 29 October 2026 keep the Apache License 2.0 they came with.
+
+The Starnotch characters are trademarks of Julio Koelle. See TRADEMARKS.md at the
+repository root.

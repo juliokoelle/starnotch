@@ -94,6 +94,7 @@ for colour in colours {
     }
 }
 let scale = targetHeight / frame.height
+let license = try? Data(contentsOf: output.appending(path: "LICENSE"))  // kept across the rebuild
 try? fm.removeItem(at: output)
 
 var sprites: [String: [String: [String: Any]]] = [:]   // colour → state → sprite
@@ -117,7 +118,7 @@ for colour in colours {
     levels[colour.level] = variant
 }
 let manifest: [String: Any] = [
-    "format": 1, "id": "astra", "name": "Astra", "version": "1.0", "license": "Apache-2.0",
+    "format": 1, "id": "astra", "name": "Astra", "version": "1.0", "license": "Copyright © 2026 Julio Koelle. All rights reserved. See LICENSE in this pack.",
     "author": "The Starnotch authors",
     "recipes": [
         ["key": "astra_mint", "name": "Mint (tint)", "tint": "#3ED6A0", "tintAmount": 0.75],
@@ -135,4 +136,5 @@ let manifest: [String: Any] = [
 ]
 let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
 try data.write(to: output.appending(path: "manifest.json"))
+if let license { try license.write(to: output.appending(path: "LICENSE")) }
 print("Wrote \(output.path): \(colours.count) colours × \(assets.count) images, frame \(Int(frame.width))×\(Int(frame.height)) → \(Int(frame.width * scale))×\(Int(targetHeight))")

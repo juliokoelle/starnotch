@@ -387,7 +387,7 @@
   ],
   "format" : 1,
   "id" : "astra",
-  "license" : "Apache-2.0",
+  "license" : "Copyright © 2026 Julio Koelle. All rights reserved. See LICENSE in this pack.",
   "name" : "Astra",
   "recipes" : [
     {

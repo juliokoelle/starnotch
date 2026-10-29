@@ -29,7 +29,7 @@ BUNDLE_ID="${BUNDLE_ID:-app.$LOWER.mac}"
 SUPPORT_FOLDER="${SUPPORT_FOLDER:-$BRAND}"
 URL_SCHEME="${URL_SCHEME:-$LOWER}"
 OUT="${NOTCH_OUT:-$REPO/build}"
-COPYRIGHT="${COPYRIGHT:-Apache License 2.0}"
+COPYRIGHT="${COPYRIGHT:-Code under the Apache License 2.0. Tara and the Cat © 2026 Julio Koelle, all rights reserved.}"
 VERSION="${VERSION:-0.1.0}"
 BUILD_NUMBER="$(git -C "$REPO" rev-list --count HEAD 2>/dev/null || echo 1)"
 

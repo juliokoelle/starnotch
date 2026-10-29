@@ -2,6 +2,11 @@
 
 What changed in Starnotch, newest first: one section per day an update landed, grouped by theme. Each feature keeps the name the app uses. Smaller fixes are in the commit history.
 
+## 29 October 2026
+
+### Characters
+- **Changed:** Tara and the Cat are no longer under the Apache License: they are all rights reserved and come only with Starnotch. The code and Pebbles stay Apache 2.0, and earlier versions keep the license they came with. Starnotch, Tara and the characters are trademarks; see TRADEMARKS.md.
+
 ## 28 October 2026
 
 ### Tara's memory and privacy

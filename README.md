@@ -172,4 +172,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[Apache License 2.0](LICENSE), including the three character packs: Tara (the default), the Cat and Pebbles (drawn by `scripts/make-pebbles.swift`).
+The code is under the [Apache License 2.0](LICENSE), and so is the Pebbles character pack (drawn by `scripts/make-pebbles.swift`).
+
+Tara (the default character) and the Cat are not: Copyright © 2026 Julio Koelle, all rights reserved. They may be used only as part of Starnotch as distributed by its authors. See the `LICENSE` file in `Resources/Characters/astra.notchpack`, `Resources/Characters/cat.notchpack`, `art/astra` and `art/cat`. Versions published before 29 October 2026 keep the Apache License 2.0 they came with.
+
+Starnotch™ and Tara™, and the characters Tara and the Cat, are trademarks of Julio Koelle; a fork you distribute needs another name and no Tara or Cat. See [TRADEMARKS.md](TRADEMARKS.md).

@@ -54,7 +54,7 @@ mine.notchpack/
 - **`tint`** colours the character's accents (rings, chips).
 - **`sourceHeight`** is the figure's height in pixels in that file. Small figures look soft when drawn big, so the app falls back to the portrait when a sprite is less than half the drawn height.
 - **Sprites** are PNGs with transparency. The bottom edge of the image is where the figure stands: the app lines it up with the edge of the card or the notch. 240 px tall works well for every size the app draws.
-- **`license`** is shown nowhere yet, but say it: only ship characters you may redistribute.
+- **`license`** is shown nowhere yet, but say it: only ship characters you may redistribute. Pebbles is Apache 2.0 and fine to build on; Tara and the Cat are all rights reserved (see the `LICENSE` in their packs), so don't reuse their images.
 
 ## Effort levels
 

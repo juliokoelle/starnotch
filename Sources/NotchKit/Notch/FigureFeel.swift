@@ -14,6 +14,10 @@ private struct FigureOrderKey: EnvironmentKey {
     static let defaultValue = 0
 }
 
+private struct TaraRestingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 private struct HandlePressedKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -29,6 +33,14 @@ extension EnvironmentValues {
     var figureOrder: Int {
         get { self[FigureOrderKey.self] }
         set { self[FigureOrderKey.self] = newValue }
+    }
+
+    /// Tara in the island is the screen-reading mark: awake while screen context reads; dimmed
+    /// (and asleep where she has no other news) while Tara's memory is paused or screen context is
+    /// off. Set by the island for its ears, peek and sneak only, never for the open panel.
+    var taraResting: Bool {
+        get { self[TaraRestingKey.self] }
+        set { self[TaraRestingKey.self] = newValue }
     }
 
     /// The closed island is being pressed: Tara, its handle, squashes.
@@ -92,12 +104,17 @@ struct PressSquash: ViewModifier {
     }
 }
 
-/// Squashes with the island's press (`handlePressed`): for Tara in the ears.
+/// Squashes with the island's press (`handlePressed`): for Tara in the ears. Dimmed while she
+/// doesn't read the screen (`taraResting`).
 private struct HandleSquash: ViewModifier {
     @Environment(\.handlePressed) private var pressed
+    @Environment(\.taraResting) private var resting
 
     func body(content: Content) -> some View {
         content.modifier(PressSquash(pressed: pressed))
+            .saturation(resting ? 0.35 : 1)
+            .opacity(resting ? 0.5 : 1)
+            .animation(.easeInOut(duration: 0.3), value: resting)
     }
 }
 

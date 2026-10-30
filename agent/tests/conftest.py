@@ -48,6 +48,12 @@ def no_real_privacy_file(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_meeting_sources(tmp_path, monkeypatch):
+    """Tests never read the app's meeting-sources.json: a file of their own, absent unless a test writes it."""
+    monkeypatch.setenv("STARNOTCH_MEETING_SOURCES", str(tmp_path / "meeting-sources.json"))
+
+
+@pytest.fixture(autouse=True)
 def no_real_apple_helper(monkeypatch):
     """Tests never find the helper a local `swift build` left in .build, nor one the environment names."""
     monkeypatch.setattr(claude, "APPLE_HELPERS", ())
@@ -79,3 +85,15 @@ def memory_dir(tmp_path: Path) -> Path:
     target = tmp_path / "memory"
     shutil.copytree(DEMO, target)
     return target
+
+
+@pytest.fixture
+def local_tz(monkeypatch):
+    """This Mac's time zone is Berlin (UTC+1 in late October) for the test."""
+    import time
+
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()

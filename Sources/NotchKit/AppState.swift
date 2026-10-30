@@ -18,7 +18,11 @@ final class AppState {
                 onModulesChanged?()
             }
             if settings.islandDisplay != oldValue.islandDisplay { onDisplayChanged?() }
-            if settings.earsMode != oldValue.earsMode { onEarsModeChanged?(settings.earsMode) }
+            if settings.eyeStyle != oldValue.eyeStyle { GazeCenter.shared.style = settings.eyeStyle }
+            if settings.earsMode != oldValue.earsMode || settings.detailedEars != oldValue.detailedEars
+                || settings.taraAlways != oldValue.taraAlways {
+                onEarsModeChanged?(settings.earsMode)
+            }
             if settings.disabledProviders != oldValue.disabledProviders { onProvidersChanged?(Set(settings.disabledProviders)) }
             if settings.brain != oldValue.brain { onBrainChanged?() }
             if settings.privacy != oldValue.privacy { onPrivacyChanged?(oldValue.privacy) }
@@ -40,7 +44,12 @@ final class AppState {
     @ObservationIgnored var memoryCount: ((MemorySource) -> Int)?
     /// Whether a source holds any file Delete would remove.
     @ObservationIgnored var memoryHasFiles: ((MemorySource) -> Bool)?
+    /// Accessibility was allowed or taken away (screen context follows).
+    @ObservationIgnored var onAccessibilityChanged: (() -> Void)?
     private(set) var isAccessibilityTrusted = AXIsProcessTrusted()
+    /// Accessibility was allowed once (remembered across launches) and macOS doesn't trust the app
+    /// now: most likely the grant went stale with a new signature while the switch still shows on.
+    private(set) var accessibilityGrantIsStale = false
     private(set) var loginItemStatus = SMAppService.mainApp.status
     private(set) var loginItemError: String?
     /// Bundle identifiers of running apps, kept current through NSWorkspace notifications.
@@ -49,6 +58,9 @@ final class AppState {
     @ObservationIgnored private let store: SettingsStore
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    /// The system prompt was shown in this run; another click opens the pane instead.
+    @ObservationIgnored private var promptedAccessibility = false
+    private static let accessibilityWasTrustedKey = "accessibility.wasTrusted"
 
     init(store: SettingsStore = SettingsStore()) {
         self.store = store
@@ -69,6 +81,7 @@ final class AppState {
             })
         }
 
+        refreshAccessibility()
         // There is no notification for Accessibility changes, so poll cheaply.
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -100,11 +113,26 @@ final class AppState {
 
     func refreshAccessibility() {
         let trusted = AXIsProcessTrusted()
-        if trusted != isAccessibilityTrusted { isAccessibilityTrusted = trusted }
+        let defaults = UserDefaults.standard
+        if trusted && !defaults.bool(forKey: Self.accessibilityWasTrustedKey) { defaults.set(true, forKey: Self.accessibilityWasTrustedKey) }
+        let stale = !trusted && defaults.bool(forKey: Self.accessibilityWasTrustedKey)
+        if stale != accessibilityGrantIsStale { accessibilityGrantIsStale = stale }
+        if trusted != isAccessibilityTrusted {
+            isAccessibilityTrusted = trusted
+            onAccessibilityChanged?()
+        }
     }
 
-    /// Shows the system prompt that adds the app to the Accessibility list.
+    /// On a click only, never at launch. The system prompt that adds the app to the Accessibility
+    /// list comes once per run and only while the app never had the permission: with a stale grant
+    /// macOS would show it although the switch is on, so the pane opens instead.
     func requestAccessibility() {
+        guard !AXIsProcessTrusted() else { return }
+        if accessibilityGrantIsStale || promptedAccessibility {
+            openAccessibilitySettings()
+            return
+        }
+        promptedAccessibility = true
         // "AXTrustedCheckOptionPrompt" is the value of kAXTrustedCheckOptionPrompt.
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
     }

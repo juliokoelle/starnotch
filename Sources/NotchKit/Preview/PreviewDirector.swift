@@ -17,7 +17,7 @@ import SwiftUI
 @MainActor
 final class PreviewDirector {
     static let names = ["usage", "usage-detail", "np-output", "r6-agents", "tour", "live-tour", "live-agents", "live-detail", "agents-compact", "loops-list", "loop-detail", "np-compact", "np-peek", "np-expanded", "np-sneak",
-                        "capture-empty", "capture-typed", "capture-dictate", "capture-sent",
+                        "capture-empty", "capture-typed", "capture-dictate", "capture-sent", "tara-always", "shelf-tara", "tara-eyes", "tara-eyes-round",
                         "loops-strip", "loops-timeline", "loops-sneak", "quota", "quota-warn",
                         "watch-peek", "watch-sneak", "watch-summary", "providers", "approval-codex", "extras", "media-compact", "media-peek", "limit-sneak", "shell-sneak",
                         "battery-sneak", "capture-event", "setup-consent", "setup-done",
@@ -28,7 +28,12 @@ final class PreviewDirector {
                         // Strand agents.
                         "agents-more", "approval-cursor", "setup-agents",
                         // Tara's memory: paused, with the switch in the System tab and the badge beside the tabs.
-                        "memory-paused", "memory-settings", "memory-settings-paused"]
+                        "memory-paused", "memory-settings", "memory-settings-paused",
+                        // The memory map with a made-up memory: settling, a search, a meeting's and a note's
+                        // details, the graph settings.
+                        "memory-map", "memory-map-search", "memory-map-detail", "memory-map-note", "memory-map-settings",
+                        // Plan limits in the agents header: one tool, two, one gone quiet; with the popover.
+                        "limits-one", "limits-two", "limits-stale", "limits-popover", "limits-popover-stale"]
 
     let notch: NotchController
     let agents: AgentsModule
@@ -366,19 +371,31 @@ final class PreviewDirector {
     }
 
     func run(_ name: String) {
+        // The notch's look, as a suffix to any name: `+details` the richer ears (Settings ›
+        // Details beside the notch), `+reading` / `+off` screen context reading or not (Tara awake
+        // or resting), `+paused` Tara's memory paused. Without, the quiet look.
+        let parts = name.split(separator: "+").map(String.init)
+        notch.model.detailedEars = parts.contains("details")
+        notch.model.previewScreenReading = parts.contains("reading") ? true : parts.contains("off") ? false : nil
+        if parts.contains("paused") { notch.model.memoryPaused = true }
+        let name = parts.first ?? name
         if name.hasPrefix("levels:") { runLevels(name); return }
         if name.hasPrefix("palette") || name.hasPrefix("inbox") { runCommand(name); return }
         if name.hasPrefix("system") {
-            // system | system:tight | system:compact | system:peek
+            // system | system:tight | system:compact | system:peek | system:peek-after (hovered
+            // after the System tab was the last one open, memory tight, a session waiting)
             let parts = name.split(separator: ":").map(String.init)
             let state = parts.count > 1 ? parts[1] : "expanded"
             useSystemSample(tight: state != "expanded")
-            agents.usePreview(Self.snapshot(agentsActive: false))
+            agents.usePreview(Self.snapshot(agentsActive: state == "peek-after"))
             Task {
                 await pause(0.8)
                 switch state {
                 case "compact", "agents": break
                 case "peek": notch.tourPeek()
+                case "peek-after":
+                    notch.model.module = .system
+                    notch.tourPeek()
                 default: notch.expand(.system, pinned: true)
                 }
             }
@@ -568,6 +585,23 @@ final class PreviewDirector {
             }
             return
         }
+        if name.hasPrefix("limits-") {
+            agents.cast.previewCharacter = "astra"
+            agents.usePreview(Self.providerSnapshot())
+            let now = Date()
+            agents.previewPlan = StatusSnapshot(
+                sessionID: "preview", fiveHour: .init(usedPercentage: 66, resetsAt: now.addingTimeInterval(2 * 3600 + 23 * 60)),
+                sevenDay: .init(usedPercentage: 59, resetsAt: now.addingTimeInterval(4 * 86_400)), capturedAt: now)
+            let stale = name.hasSuffix("stale")
+            agents.previewUsages = name == "limits-one" ? [] : [AgentUsage(
+                provider: CodexProvider.id, displayName: CodexProvider.displayName,
+                primary: .init(usedPercent: 12, minutes: 300, resetsAt: now.addingTimeInterval(stale ? -3600 : 39 * 60)),
+                secondary: .init(usedPercent: 3, minutes: 10_080, resetsAt: now.addingTimeInterval(5 * 86_400)),
+                plan: "plus", capturedAt: now.addingTimeInterval(stale ? -26 * 3600 : -5 * 60))]
+            agents.previewShowsLimits = name.hasPrefix("limits-popover")
+            Task { await pause(0.8); notch.expand(.agents, pinned: true) }
+            return
+        }
         if name == "providers" || name == "approval-codex" {
             // Claude Code and Codex in the same projects, both tools' plan limits; or a Codex
             // permission prompt.
@@ -727,6 +761,15 @@ final class PreviewDirector {
             await pause(0.6)
             withAnimation(Theme.snappy) { music.showsMixer = true }
         case "capture-empty": notch.openCapture()
+        // Settings › Notch › Tara beside the notch: Always, with nothing going on.
+        case "tara-always": notch.model.taraAlways = true
+        // A file dropped on Tara beside the shelf, waiting for Remember or Ask.
+        case "shelf-tara":
+            guard let tools = notch.model.module(.tools) as? ToolsModule else { break }
+            tools.askAboutFile = tools.askAboutFile ?? { _ in }
+            tools.tab = .shelf
+            tools.taraFile = .waiting(URL(fileURLWithPath: "/tmp/Proposal.pdf"))
+            notch.expand(.tools, pinned: true)
         case "capture-typed":
             notch.openCapture()
             await type("Angebot für Ada bis Freitag schicken")

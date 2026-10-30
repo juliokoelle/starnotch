@@ -44,6 +44,14 @@ final class QuickCapture {
     /// Start of an event the text describes ("Call Ada tomorrow at 15:00").
     var eventStart: Date? { parse.eventStart(calendar: .current) }
 
+    /// The next or previous of Task, Question, Note (wrapping), with a tick.
+    func step(_ by: Int) {
+        let all = Route.allCases
+        let index = all.firstIndex(of: route) ?? 0
+        Haptics.tick()
+        withAnimation(Theme.snappy) { route = all[(index + by + all.count) % all.count] }
+    }
+
     private func reparse() {
         parse = CaptureParser.parse(text, now: Date(), calendar: .current, people: people)
     }
@@ -73,6 +81,9 @@ struct CaptureView: View {
     let onSend: () -> Void
     let onMic: () -> Void
     var onEvent: (() -> Void)?
+    /// The confirmation's buttons: the Notepad on "Tara's notes", the Markdown inbox.
+    var onShowNotes: () -> Void = {}
+    var onOpenInbox: () -> Void = {}
     @FocusState private var focused: Bool
     @Namespace private var chips
 
@@ -152,7 +163,12 @@ struct CaptureView: View {
             .padding(.leading, 14)
             .padding(.trailing, 6)
             .frame(height: 44)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            // The whole field takes a click, not only the line of text.
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Theme.card)
+                    .onTapGesture { focused = true }
+            }
             .animation(Theme.snappy, value: capture.text.isEmpty)
             .animation(Theme.snappy, value: capture.dictating)
 
@@ -163,6 +179,7 @@ struct CaptureView: View {
                     Button {
                         Haptics.tick()
                         withAnimation(Theme.snappy) { capture.route = route }
+                        focused = true  // the cursor stays in the field
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: route.symbol).font(.system(size: 10.5, weight: .semibold))
@@ -178,6 +195,7 @@ struct CaptureView: View {
                                     .matchedGeometryEffect(id: "route", in: chips)
                             }
                         }
+                        .padding(.vertical, 3)  // a larger target than the chip
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(PressScale())
@@ -254,6 +272,17 @@ struct CaptureView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+            // Where it went, one click away: the note flies into the Notepad.
+            if capture.eventAdded == nil {
+                HStack(spacing: 6) {
+                    SentButton(symbol: "note.text", title: "Notepad", help: "Show it in Tools › Notepad › Tara's notes",
+                               landing: true, action: onShowNotes)
+                    if capture.outcome == .delivered, let file = capture.inboxFile {
+                        SentButton(symbol: "doc.text", title: LocalizedStringKey(file.lastPathComponent),
+                                   help: "Open \(file.path)", action: onOpenInbox)
+                    }
+                }
+            }
             if let cast {
                 NoddingAvatar(character: cast.main, colorway: cast.colorway)
                     .frame(width: 70, height: 64, alignment: .bottom)
@@ -269,19 +298,69 @@ struct CaptureView: View {
 extension CaptureView {
     var sentTitle: String {
         if capture.eventAdded != nil { return "Added to Calendar" }
-        if case .queued = capture.outcome { return "Saved" }
-        return "In the inbox"
+        if capture.outcome == .delivered, capture.inboxFile == nil { return "In the inbox" }
+        return "Saved"
     }
 
+    /// Says where it is: "Kept on this Mac" told nobody where to find it again.
     var sentDetail: String {
         if let when = capture.eventAdded { return when }
-        if case .queued(let reason) = capture.outcome {
-            return "as \(capture.route.rawValue.lowercased()) · kept on this Mac (\(reason))"
+        let kind = capture.route.rawValue.lowercased()
+        // Connector inbox: no buttons, the text itself.
+        if capture.outcome == .delivered, capture.inboxFile == nil { return "\(kind) · \(capture.text)" }
+        // The buttons beside it name the places.
+        return "as \(kind), find it here"
+    }
+}
+
+/// A small button in the confirmation. `landing`: a note glyph flies into it once, then it
+/// gives a little bump, so the eye follows the capture to where it went.
+private struct SentButton: View {
+    let symbol: String
+    let title: LocalizedStringKey
+    let help: String
+    var landing = false
+    let action: () -> Void
+    @State private var flight: CGFloat = 0
+    @State private var bump = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 10.5, weight: .semibold))
+                Text(title).font(Theme.font(12, .medium)).lineLimit(1).fixedSize()
+            }
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 9)
+            .frame(height: 26)
+            .background(Theme.accent.opacity(bump ? 0.26 : 0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .scaleEffect(bump ? 1.08 : 1)
+            .contentShape(Rectangle())
         }
-        if let file = capture.inboxFile {
-            return "as \(capture.route.rawValue.lowercased()) · in \(file.lastPathComponent)"
+        .buttonStyle(PressScale())
+        .help(help)
+        .overlay {
+            if landing && flight < 1 && !reduceMotion {
+                // From the left of the card, in a low arc, shrinking into the button.
+                Image(systemName: "note.text")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .scaleEffect(1.3 - 0.6 * flight)
+                    .offset(x: -230 * (1 - flight), y: -16 * sin(.pi * flight))
+                    .opacity(flight < 0.85 ? 1 : Double((1 - flight) / 0.15))
+                    .allowsHitTesting(false)
+            }
         }
-        return "as \(capture.route.rawValue.lowercased()) · \(capture.text)"
+        .task {
+            guard landing, !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.55)) { flight = 1 }
+            try? await Task.sleep(for: .milliseconds(520))
+            Haptics.tick()
+            withAnimation(.spring(duration: 0.25, bounce: 0.5)) { bump = true }
+            try? await Task.sleep(for: .milliseconds(200))
+            withAnimation(.spring(duration: 0.3)) { bump = false }
+        }
     }
 }
 

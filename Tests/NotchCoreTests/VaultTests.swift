@@ -139,6 +139,88 @@ import TestSupport
         #expect(DailyNote.body("---\na: 1\n---\nHello world", limit: 5) == "Hello…")
     }
 
+    @Test func briefingSectionOfTheDailyNote() {
+        let note = "---\ndate: 2026-10-28\n---\n# 2026-10-28\n\n## Daily Briefing\nNews\n## ☀️ Morning Brief\n- **Focus:** ship\n### Detail\nmore\n## Notes\n"
+        let briefing = DailyNote.briefing(note)
+        // A morning one first, its subheadings included, up to the next heading of its level.
+        #expect(briefing?.title == "☀️ Morning Brief")
+        #expect(briefing?.body == "- **Focus:** ship\n### Detail\nmore")
+        #expect(DailyNote.briefing("# Day\n## Plan\n## Log\n") == nil)
+        #expect(DailyNote.briefing("## Briefing\n```\n## Notes\n```\ntext")?.body == "```\n## Notes\n```\ntext")
+
+        #expect(DailyNote.linkedNote("[[2026-10-28-morning|☀️ Morning Brief]]") == "2026-10-28-morning")
+        #expect(DailyNote.linkedNote("- ![[briefings/today#Top]]\n") == "briefings/today")
+        #expect(DailyNote.linkedNote("See [[today]] first") == nil)
+        #expect(DailyNote.linkedNote("") == nil)
+    }
+
+    @Test func briefingFromItsOwnNote() throws {
+        let now = Date()
+        let day = RunLog.day(now)
+        let daily = "---\ndate: \(day)\n---\n# \(day)\n\n## ☀️ Morning Brief\n[[\(day)-morning|☀️ Morning Brief]]\n\n## Notes\n"
+        let brief = "---\ntype: brief\n---\n# Morning Brief\n\n## Focus\n- [ ] Ship it\n"
+        let root = try Self.folder(["Tasks.md": "- [ ] x\n", "Daily/\(day).md": daily, "Outputs/briefings/\(day)-morning.md": brief])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = VaultConnector(config: ConfigSection(values: [
+            "folder": .string(root.path), "tasks": .string("Tasks.md"), "daily": .string("Daily/YYYY-MM-DD.md"),
+        ]), defaults: UserDefaults(suiteName: "app.starnotch.tests")!, snapshotURL: nil)
+        let found = DispatchSemaphore(value: 0)
+        vault.onNoteFound = { found.signal() }
+        // Not known yet: the section shows at once, the note is looked for off this thread.
+        let first = vault.today(now: now)
+        #expect(first.brief?.title == "☀️ Morning Brief")
+        #expect(first.brief?.markdown == "[[\(day)-morning|☀️ Morning Brief]]")
+        #expect(found.wait(timeout: .now() + 5) == .success)
+        let feed = vault.today(now: now)
+        #expect(feed.brief?.markdown == "## Focus\n- [ ] Ship it")
+        #expect(feed.brief?.url?.path.hasSuffix("Outputs/briefings/\(day)-morning.md") == true)
+        #expect(vault.note(named: "\(day)-morning")?.lastPathComponent == "\(day)-morning.md")
+    }
+
+    @Test func aMissingNoteIsRememberedUntilTheVaultChanges() throws {
+        let root = try Self.folder(["Tasks.md": "- [ ] x\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = VaultConnector(config: ConfigSection(values: ["folder": .string(root.path), "tasks": .string("Tasks.md")]),
+                                   defaults: UserDefaults(suiteName: "app.starnotch.tests")!, snapshotURL: nil)
+        #expect(vault.note(named: "later") == nil)
+        try FileManager.default.createDirectory(at: root.appending(path: "deep"), withIntermediateDirectories: true)
+        try Data("# Later\n".utf8).write(to: root.appending(path: "deep/later.md"))
+        // Not walked again: the answer stays until the vault changes.
+        #expect(vault.note(named: "later") == nil)
+        #expect(vault.knownNote(named: "later") == nil)
+        vault.forgetMissingNotes()
+        #expect(vault.note(named: "later")?.lastPathComponent == "later.md")
+        #expect(vault.knownNote(named: "later")?.lastPathComponent == "later.md")
+    }
+
+    @Test func notesOffReadsNothingForToday() throws {
+        let now = Date()
+        let day = RunLog.day(now)
+        let daily = "# \(day)\n## Morning Brief\n[[\(day)-morning]]\n"
+        let root = try Self.folder(["Tasks.md": "- [ ] Ship it 📅 \(day)\n", "Daily/\(day).md": daily,
+                                    "Inbox.md": "- [ ] idea\n", "briefings/\(day)-morning.md": "Focus\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = ConfigSection(values: [
+            "folder": .string(root.path), "tasks": .string("Tasks.md"), "daily": .string("Daily/YYYY-MM-DD.md"), "inbox": .string("Inbox.md"),
+        ])
+        let defaults = UserDefaults(suiteName: "app.starnotch.tests")!
+        let id = try #require(VaultConnector(config: config, defaults: defaults, snapshotURL: nil).today(now: now).now.first?.id)
+
+        let vault = VaultConnector(config: config, defaults: defaults, snapshotURL: nil)
+        var privacy = MemoryPrivacy()
+        privacy.set(.notes, on: false)
+        vault.readsNotes = { privacy.shares(.notes) }
+        let looked = DispatchSemaphore(value: 0)
+        vault.onNoteFound = { looked.signal() }
+        let feed = vault.today(now: now)
+        #expect(feed.now.isEmpty && feed.followUps.isEmpty && feed.counters.isEmpty)
+        #expect(feed.brief?.markdown == "" && feed.brief?.text == "" && feed.brief?.url == nil)
+        #expect(feed.emptyText == "Your notes are off in Tara's memory.")
+        // The tasks were never read (nothing to tick off), the linked note never looked for.
+        #expect(!vault.canComplete(id))
+        #expect(looked.wait(timeout: .now() + 0.5) == .timedOut)
+    }
+
     @Test func detectsTheFilesInAFolder() throws {
         let root = try Self.folder([
             "Inbox.md": "- [ ] one\n",
@@ -192,6 +274,8 @@ import TestSupport
         #expect(feed.now.map(\.title) == ["Late", "Today"])
         #expect(feed.followUps.map(\.title) == ["Soon"])
         #expect(feed.brief?.text == "Plan · Log")
+        // No briefing in the note yet: the card says so instead of listing headings.
+        #expect(feed.brief?.markdown == "")
         #expect(feed.counters.map(\.value) == [4, 1])
 
         // Ticking off writes "- [x]" into that line only.

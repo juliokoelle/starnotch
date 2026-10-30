@@ -24,7 +24,7 @@ final class SettingsWindowController {
     func show() {
         if window == nil {
             let hosting = NSHostingController(rootView: SettingsView(state: state, catalog: catalog, cast: cast, setup: setup, jamie: jamie,
-                                                                  openSetup: openSetup))
+                                                                  openSetup: openSetup).dashboardControls())
             hosting.sizingOptions = [.preferredContentSize]
             let window = NSWindow(contentViewController: hosting)
             window.title = Brand.displayName

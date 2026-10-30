@@ -57,12 +57,37 @@ enum VaultSamples {
             ---
             # \(day(0))
 
+            ## Morning Brief
+            [[\(day(0))-morning|Morning Brief]]
+
             ## Plan
             - Design review at 12:30
 
             ## Notes
 
             ## Log
+
+            """,
+            "Briefings/\(day(0))-morning.md": """
+            ---
+            type: brief
+            ---
+            # Morning Brief
+
+            ## The one thing
+            Send the review notes to Ada before the design review.
+
+            ## Top tasks
+            - [ ] **Draft the launch post**, under 300 words
+            - [ ] Book flights for the offsite
+            - [x] Order the new monitor
+
+            ## People
+            - Grace's birthday on Saturday, see [[People/Grace|Grace]]
+
+            ## Open loops
+            1. Board update: numbers from finance
+            2. Domain renewal is overdue
 
             """,
             "Inbox.md": """

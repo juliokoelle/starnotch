@@ -45,7 +45,7 @@ final class AgendaPreview {
         let base = parts[0], state = parts.count > 1 ? parts[1] : "expanded"
         if base == "agenda-tour" { await tour(); return }
         let module: ModuleKind = base.hasPrefix("cal") ? .calendar : .today
-        if module == .today { today.ambientOverride = 35 }
+        if module == .today { today.ambientOverride = 35 } else { DailyStore.shared.opensOnToday = false }
         switch state {
         case "saturday", "saturday-select":
             // A weekend day without meetings at 08:00; with "-select" an event picked.

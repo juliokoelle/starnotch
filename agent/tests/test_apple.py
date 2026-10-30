@@ -409,3 +409,17 @@ def test_claude_answers_are_left_as_they_are(memory_dir):
     agent = Agent(Memory(memory_dir), llm, [].append, TODAY, brain="claude-code")
     assert agent.ask("Was haben wir beim Preis entschieden?")["text"] == raw
     assert "in your own words" not in llm.calls[0].system
+
+
+def test_a_days_context_doesnt_change_the_language_or_the_retrieval(memory_dir):
+    llm = FakeLLM({"answer": "Ein ruhiger Tag.", "sources": []})
+    agent = Agent(big_memory(memory_dir), llm, [].append, TODAY, brain="apple")
+    # Asked together, these English words would outvote the German question.
+    context = ("- Agent session from 09:00: what I did with the calendar, and what is still open for the team\n"
+               + "- Time per app: Xcode 90 min " * 200)
+    agent.ask("Was habe ich an dem Tag gemacht und wer war dabei?", day="2026-10-19", extra=context)
+    call = llm.calls[0]
+    assert call.extra == {"locale": "de_DE"} and call.system.endswith("You MUST respond in German.")
+    assert "# Question\nWas habe ich an dem Tag gemacht und wer war dabei?\n\n# Also counted on this Mac that day\n- Agent session" in call.user
+    assert context[:APPLE_QUESTION_CHARS] in call.user and context[:APPLE_QUESTION_CHARS + 1] not in call.user
+    assert sent(call) <= WINDOW_CHARS

@@ -12,6 +12,7 @@ The Swift app starts these programs and reads their JSON lines; [PROTOCOL.md](PR
 | `agent.py` | The agent: utterances and commands on stdin, contradictions, questions, commitments, prep cards and answers on stdout |
 | `claude.py` | The model call: through the user's Claude Code on their Claude plan, the Anthropic API (Claude Sonnet 5.5, effort `low`, structured outputs, server-side fallback on refusals), or Apple's on-device model through the app's helper |
 | `jamie_sync.py` | Pulls meetings from [Jamie](https://meetjamie.ai) over its MCP server (OAuth login in the browser) into the memory |
+| `meeting_sources.py` | The other meeting tools (Granola, Wispr Flow over MCP; Fireflies, Fathom with a personal API key), which sources feed the memory, and one copy per meeting |
 | `transcribe.py` | Live transcription with Reson8 Realtime, from the microphone or an audio file streamed in real time |
 | `captures.py` | Reads Starnotch's quick-capture queue, so the agent knows the user's own tasks, questions and notes |
 | `connectors.py` | Reads the snapshots other tools leave in `connectors/*.json` (a vault's tasks and today's note), for Ask Tara |
@@ -172,6 +173,14 @@ uv run python jamie_sync.py --list-tools   # first run opens the Jamie login
 uv run python jamie_sync.py --limit 200    # pages through Jamie; full transcripts; unchanged meetings are skipped
 uv run python jamie_sync.py --logout       # forget the login (sign out at app.meetjamie.ai to switch accounts)
 uv run python jamie_sync.py --no-login     # never opens the browser (the app's automatic syncs)
+```
+
+Other meeting tools (only those picked in Integrations › Meetings, see PROTOCOL.md):
+
+```sh
+uv run python meeting_sources.py --source granola --list-tools   # first run opens the Granola login
+uv run python meeting_sources.py --source wispr --limit 200
+FATHOM_API_KEY=… uv run python meeting_sources.py --source fathom
 ```
 
 ## Tests

@@ -29,6 +29,12 @@ public enum Brand {
     /// Logging subsystem and queue labels.
     public static var identifier: String { Bundle.main.bundleIdentifier ?? "app.\(name.lowercased())" }
 
+    /// The visible folder for what the user writes down (`~/Documents/Starnotch`): plain Markdown
+    /// that people and any AI can read, unlike the support folder.
+    public static var documentsFolder: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appending(path: "Documents").appending(path: name)
+    }
+
     public static var supportFolder: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appending(path: "Library/Application Support")

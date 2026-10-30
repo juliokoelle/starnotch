@@ -32,7 +32,11 @@ EFFORT = os.environ.get("STARNOTCH_EFFORT", "low")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 TIMEOUT = 30  # live: better a rule now than Claude late
 
-BRAINS = ("auto", "claude-code", "api", "apple", "rules")
+BRAINS = ("auto", "claude-code", "codex", "api", "apple", "rules")
+CODEX_BINARIES = ("~/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex")
+# What would let Codex bill an API account instead of the user's ChatGPT plan.
+CODEX_BILLING_ENV = ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL")
+CODEX_FILES = "starnotch-codex-*"
 CODE_MODEL = "sonnet"  # Claude Code's alias for the newest Sonnet
 CLAUDE_BINARIES = ("~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude")
 BRAIN_FOLDER = Path.home() / "Library" / "Application Support" / "Starnotch" / "brain"
@@ -382,8 +386,115 @@ def _media_type(path: Path | str) -> str:
     return IMAGE_TYPES.get(Path(path).suffix.lower(), "image/png")
 
 
+def find_codex() -> str | None:
+    """The codex binary: on PATH, else where its installers put it."""
+    found = shutil.which("codex")
+    if found:
+        return found
+    for candidate in CODEX_BINARIES:
+        path = Path(candidate).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
+class CodexUnavailable(ClaudeCodeUnavailable):
+    """Codex isn't installed or isn't signed in."""
+
+
+def strict_schema(schema: Any) -> Any:
+    """A JSON schema as OpenAI's strict structured output wants it: every object closed, every property required."""
+    if isinstance(schema, list):
+        return [strict_schema(s) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {k: strict_schema(v) for k, v in schema.items()}
+    if out.get("type") == "object" and isinstance(out.get("properties"), dict):
+        out["additionalProperties"] = False
+        out["required"] = list(out["properties"])
+    return out
+
+
+class Codex:
+    """Structured-output calls through the user's Codex CLI (`codex exec`), counted against their ChatGPT plan, for
+    work that shouldn't spend the Claude plan (Tara's background summaries, if the user routes them here).
+
+    Each call is a bare, read-only session in the brain folder: no user config, rules or AGENTS.md, nothing saved.
+    Codex brings its own instructions (about 19,000 input tokens a call, measured 29.10.); that counts against the
+    plan, not a bill. Images go along with -i.
+    """
+
+    def __init__(self, binary: str | None = None, folder: Path | None = None, effort: str = EFFORT,
+                 timeout: float = 120):
+        self.binary = binary or find_codex()
+        if not self.binary:
+            raise CodexUnavailable("Codex isn't installed (no codex binary found)")
+        self.model = "codex"
+        self.effort = effort
+        self.folder = Path(folder or BRAIN_FOLDER)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        self.timeout = timeout
+        self.last_usage: dict[str, Any] | None = None
+
+    def args(self, schema_file: str, out_file: str, images: list[str]) -> list[str]:
+        return [
+            self.binary, "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
+            "-s", "read-only", "-C", str(self.folder),
+            "-c", "project_doc_max_bytes=0", "-c", f'model_reasoning_effort="{self.effort}"',
+            "--output-schema", schema_file, "--json", "-o", out_file,
+            *[part for image in images for part in ("-i", image)],
+            "-",  # the prompt on stdin
+        ]
+
+    def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 4000,
+             images: list[Path] | None = None) -> dict[str, Any] | None:
+        self.last_usage = None
+        env = {k: v for k, v in os.environ.items() if k not in CODEX_BILLING_ENV}
+        schema_fd, schema_file = tempfile.mkstemp(suffix=".json", prefix=CODEX_FILES[:-1], dir=self.folder)
+        out_fd, out_file = tempfile.mkstemp(suffix=".json", prefix=CODEX_FILES[:-1], dir=self.folder)
+        os.close(out_fd)
+        try:
+            with os.fdopen(schema_fd, "w", encoding="utf-8") as handle:
+                json.dump(strict_schema(schema), handle)
+            try:
+                proc = subprocess.run(self.args(schema_file, out_file, [str(i) for i in images or []]),
+                                      input=system + "\n\n" + user, capture_output=True, text=True, encoding="utf-8",
+                                      timeout=self.timeout, cwd=self.folder, env=env)
+            except subprocess.TimeoutExpired:
+                raise ClaudeCodeError(f"Codex took longer than {self.timeout:g} s") from None
+            events = []
+            for line in proc.stdout.splitlines():
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    continue
+            usage = next((e.get("usage") for e in reversed(events) if e.get("type") == "turn.completed"), None)
+            if isinstance(usage, dict):
+                cached = int(usage.get("cached_input_tokens") or 0)
+                self.last_usage = {"model": "codex", "input_tokens": max(0, int(usage.get("input_tokens") or 0) - cached),
+                                   "cache_creation_input_tokens": 0, "cache_read_input_tokens": cached,
+                                   "output_tokens": int(usage.get("output_tokens") or 0) + int(usage.get("reasoning_output_tokens") or 0),
+                                   "duration_ms": 0, "cost_usd": None}
+                print(f"codex: {usage.get('input_tokens')} tokens in, {usage.get('output_tokens')} out", file=sys.stderr)
+            failure = next((e for e in events if e.get("type") in ("turn.failed", "error")), None)
+            if proc.returncode != 0 or failure:
+                error = (failure or {}).get("error") or failure or {}
+                message = str(error.get("message") if isinstance(error, dict) else error or proc.stderr.strip()[:200])
+                if any(word in message.lower() for word in ("401", "unauthorized", "login", "log in", "not signed")):
+                    raise CodexUnavailable(f"Codex isn't signed in: {message[:200]}")
+                raise ClaudeCodeError(f"codex: {message[:200]}")
+            try:
+                answer = json.loads(Path(out_file).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+            return answer if isinstance(answer, dict) else None
+        finally:
+            for name in (schema_file, out_file):
+                Path(name).unlink(missing_ok=True)
+
+
 def make_brain(choice: str | None = None) -> tuple[str, JSONModel | None, str | None]:
-    """(brain, model, why it fell back) from STARNOTCH_BRAIN: auto (default) | claude-code | api | apple | rules.
+    """(brain, model, why it fell back) from STARNOTCH_BRAIN: auto (default) | claude-code | codex | api | apple | rules.
 
     auto: Claude Code when a claude binary is found, else the API when ANTHROPIC_API_KEY is set, else Apple's
     on-device model when the helper says it is available, else rules. A Claude Code that can't think on the user's
@@ -392,6 +503,11 @@ def make_brain(choice: str | None = None) -> tuple[str, JSONModel | None, str | 
     choice = (choice if choice is not None else os.environ.get("STARNOTCH_BRAIN", "")).strip().lower() or "auto"
     if choice not in BRAINS:
         return "rules", None, f"unknown STARNOTCH_BRAIN {choice!r}, using rules"
+    if choice == "codex":
+        try:
+            return "codex", Codex(), None
+        except CodexUnavailable as error:
+            return "rules", None, f"{error}; using rules"
     if choice == "claude-code" or (choice == "auto" and find_claude()):
         try:
             return "claude-code", ClaudeCode(), None

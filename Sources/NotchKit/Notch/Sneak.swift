@@ -17,7 +17,7 @@ struct Sneak: Hashable {
     enum SneakTint: String, Hashable, Sendable {
         case accent, ok, waiting, critical, neutral
 
-        var color: Color {
+        @MainActor var color: Color {
             switch self {
             case .accent: Theme.accent
             case .ok: Theme.ok

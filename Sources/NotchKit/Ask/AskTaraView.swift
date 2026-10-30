@@ -8,6 +8,8 @@ import SwiftUI
 struct AskTaraView: View {
     @Bindable var ask: AskTara
     @FocusState private var focused: Bool
+    /// A file is dragged over the bubble.
+    @State private var dropping = false
 
     static let width: CGFloat = 380
     static let cardRadius: CGFloat = 20
@@ -22,6 +24,11 @@ struct AskTaraView: View {
             field
         }
         .frame(width: Self.width, alignment: .trailing)
+        // A file dropped on the card or around the field goes along as the file (the field itself
+        // hands over its path, which AskTara picks up).
+        .onDrop(of: FileDrop.types, isTargeted: $dropping) { providers in
+            FileDrop.load(providers) { ask.attach(file: $0) }
+        }
         .animation(Theme.snappy, value: showsReply)
         .onAppear { focused = true }
         .onChange(of: ask.focusRequest) { _, _ in
@@ -37,9 +44,10 @@ struct AskTaraView: View {
     }
 
     private var showsReply: Bool {
+        if ask.showsChats { return true }
         switch ask.phase {
-        case .idle, .listening: ask.answer != nil
-        case .thinking, .answered, .failed: true
+        case .idle, .listening: return ask.answer != nil
+        case .thinking, .answered, .failed: return true
         }
     }
 
@@ -52,6 +60,9 @@ struct AskTaraView: View {
         VStack(alignment: .leading, spacing: 8) {
             if ask.attachment != nil || ask.capturing {
                 attachmentChip.transition(.opacity)
+            }
+            if let document = ask.document {
+                documentChip(document).transition(.opacity)
             }
             input
             if let notice = ask.notice {
@@ -69,12 +80,42 @@ struct AskTaraView: View {
         .frame(minHeight: 50)
         .background(Glass(cornerRadius: Self.fieldRadius))
         // The rim turns while she listens; while she thinks, the card's rim does.
-        .overlay(IridescentRim(cornerRadius: Self.fieldRadius, moving: listening, lit: focused || listening))
+        .overlay(IridescentRim(cornerRadius: Self.fieldRadius, moving: listening || dropping, lit: focused || listening || dropping))
+        .scaleEffect(dropping ? 1.02 : 1)
+        .animation(Theme.snappy, value: dropping)
+        .modifier(LandingBounce(trigger: ask.received))
         .animation(Theme.snappy, value: listening)
         .animation(Theme.snappy, value: ask.text.isEmpty)
         .animation(Theme.snappy, value: ask.attachment)
+        .animation(Theme.snappy, value: ask.document)
         .animation(Theme.snappy, value: ask.notice)
         .help("Drop Tara on a window to ask about it")
+    }
+
+    /// A document dropped on Tara in the notch, going with the next question as its text.
+    private func documentChip(_ document: AskDocument) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+            Text(document.name)
+                .font(Theme.font(13, .medium))
+                .foregroundStyle(Theme.textBody)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Button { ask.removeDocument() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScale())
+            .help("Don't send the document")
+        }
+        .padding(.leading, 10)
+        .frame(height: 28)
+        .background(Theme.accent.opacity(0.14), in: Capsule())
     }
 
     /// The window Tara was dropped on, going with the next question.
@@ -83,7 +124,8 @@ struct AskTaraView: View {
             if ask.capturing {
                 ProgressView().controlSize(.mini)
             } else {
-                Image(systemName: "macwindow")
+                // A picture dropped on her in the notch, or the window she was dropped on.
+                Image(systemName: ask.attachment.map { TaraDocument.isImage(URL(fileURLWithPath: $0.app)) } == true ? "photo" : "macwindow")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Theme.accent)
             }
@@ -111,6 +153,20 @@ struct AskTaraView: View {
 
     private var input: some View {
         HStack(spacing: 8) {
+            // Earlier chats: the list in the card, a second click back to this one.
+            if ask.keepsHistory {
+                Button { ask.toggleChats() } label: {
+                    Image(systemName: ask.showsChats ? "xmark" : "clock.arrow.circlepath")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ask.showsChats ? Theme.accent : Theme.textSecondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(PressScale())
+                .padding(.leading, -8)
+                .help(ask.showsChats ? "Back to this chat" : "Earlier chats")
+            }
             TextField(listening && ask.text.isEmpty ? LocalizedStringKey("Listening…") : LocalizedStringKey("Ask Tara…"),
                       text: $ask.text, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -156,22 +212,49 @@ struct AskTaraView: View {
 
     private var card: some View {
         VStack(alignment: .leading, spacing: 0) {
-            AnswerScroll(identity: "\(ask.asked ?? "")|\(ask.answer?.text.count ?? -1)") { cardContent }
-            if showsActions { actions }
+            if ask.showsChats {
+                AnswerScroll(identity: "chats") { chatList }
+                    .transition(.blurSlide(x: -10))
+            } else {
+                AnswerScroll(identity: "\(ask.asked ?? "")|\(ask.answer?.text.count ?? -1)",
+                             anchor: ask.thread.turns.isEmpty ? nil : Self.currentTurn) { cardContent }
+                    .transition(.blurSlide(x: 10))
+                if showsActions { actions }
+            }
         }
         .frame(width: Self.width, alignment: .leading)
         .background(Glass(cornerRadius: Self.cardRadius))
         .overlay(IridescentRim(cornerRadius: Self.cardRadius, moving: ask.isThinking, lit: ask.isThinking))
     }
 
+    /// Where the card scrolls to for a new answer: the question on screen, below the earlier ones.
+    static let currentTurn = "current-turn"
+
     private var cardContent: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // The chat so far, quieter, above the question on screen; scrolling up shows it.
+            ForEach(ask.thread.turns) { turn in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(turn.question)
+                        .font(Theme.font(13))
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(turn.answer?.text ?? turn.failure ?? "")
+                        .font(Theme.font(14))
+                        .lineSpacing(3)
+                        .foregroundStyle(Theme.textBody)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+            }
             if let asked = ask.asked {
                 Text(asked)
                     .font(Theme.font(13))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
+                    .id(Self.currentTurn)
             }
             switch ask.phase {
             case .thinking(let since):
@@ -193,6 +276,30 @@ struct AskTaraView: View {
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Earlier chats, newest first: a click carries on with one, the cross forgets it.
+    private var chatList: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Earlier chats")
+                .font(Theme.font(12, .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+            if ask.chats.isEmpty {
+                Text("Your chats with Tara show here once she has answered.")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+            }
+            ForEach(ask.chats) { chat in
+                ChatRow(chat: chat, onOpen: { ask.resume(chat) }, onDelete: { ask.deleteChat(chat.id) })
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -300,6 +407,8 @@ private let answerScrollSpace = "answer-scroll"
 /// the start of each new answer; its bottom edge fades only while there is more below.
 private struct AnswerScroll<Content: View>: View {
     let identity: String
+    /// A view id to start at instead of the top (the question on screen, below the earlier ones).
+    var anchor: String?
     @ViewBuilder var content: Content
     @State private var contentHeight: CGFloat = 0
     /// Where the content ends in the visible area: below its bottom while there's more to scroll to.
@@ -311,12 +420,18 @@ private struct AnswerScroll<Content: View>: View {
     var body: some View {
         let overflows = contentHeight > shownHeight - Self.bottom + 1
         let moreBelow = contentBottom > shownHeight - Self.bottom + 1
-        ScrollView(.vertical) {
-            content
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(answerScrollSpace)) } action: { frame in
-                    contentHeight = frame.height
-                    contentBottom = frame.maxY
-                }
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                content
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(answerScrollSpace)) } action: { frame in
+                        contentHeight = frame.height
+                        contentBottom = frame.maxY
+                    }
+            }
+            .onAppear {
+                guard let anchor else { return }
+                DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .top) }
+            }
         }
         .coordinateSpace(name: answerScrollSpace)
         .contentMargins(.bottom, Self.bottom, for: .scrollContent)
@@ -342,10 +457,13 @@ private struct Glass: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        shape.fill(Color(hex: 0x0B0B0E))
-            .overlay(shape.fill(LinearGradient(colors: [Color.white.opacity(0.07), .clear],
+        // See-through: what is behind shows blurred under a dark tint, so the card sits on the
+        // screen instead of covering it.
+        GlassBlur(cornerRadius: cornerRadius)
+            .overlay(shape.fill(Color(hex: 0x0B0B0E).opacity(0.32)))
+            .overlay(shape.fill(LinearGradient(colors: [Color.white.opacity(0.08), .clear],
                                                startPoint: .top, endPoint: .center)))
-            .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
+            .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
     }
 }
 
@@ -585,6 +703,7 @@ private struct SourceRow: View {
         case .meeting: "person.2.fill"
         case .capture: "square.and.pencil"
         case .note: "doc.text"
+        case .screen: "text.viewfinder"
         }
     }
 
@@ -598,5 +717,80 @@ private struct SourceRow: View {
     static func day(_ text: String?) -> String? {
         guard let text, let date = try? Date(text + "T12:00:00Z", strategy: .iso8601) else { return nil }
         return date.formatted(.dateTime.day().month(.abbreviated))
+    }
+}
+
+
+/// Behind-window blur in a rounded rectangle of any size (a stretchable mask).
+private struct GlassBlur: NSViewRepresentable {
+    let cornerRadius: CGFloat
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.appearance = NSAppearance(named: .darkAqua)
+        let side = cornerRadius * 2 + 1
+        let mask = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+            return true
+        }
+        mask.capInsets = NSEdgeInsets(top: cornerRadius, left: cornerRadius, bottom: cornerRadius, right: cornerRadius)
+        mask.resizingMode = .stretch
+        view.maskImage = mask
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+/// One earlier chat: its first question, when, and how many questions; the cross on hover.
+private struct ChatRow: View {
+    let chat: AskChat
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(chat.title)
+                        .font(Theme.font(14))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Text(detail)
+                        .font(Theme.font(12))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                Spacer(minLength: 0)
+                Button(action: onDelete) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .opacity(hovering ? 1 : 0)
+                .help("Forget this chat")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(Color.white.opacity(hovering ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .onHover { hovering = $0 }
+        .animation(Theme.snappy, value: hovering)
+    }
+
+    /// "Today 14:05 · 2 questions"
+    private var detail: String {
+        let when = chat.started.formatted(.relative(presentation: .named))
+        let count = chat.turns.count
+        return "\(when) · \(count) " + Localization.string(count == 1 ? "question" : "questions")
     }
 }

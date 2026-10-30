@@ -3,11 +3,14 @@ import SwiftUI
 
 /// Design tokens for the notch. One accent (blue) for action, selection and live work;
 /// status tints only where a state means something; identity colors only on agent faces.
+/// No amber: what waits for the user, or wants a look, is in Tara's colour; a high value is said
+/// with a heavier text weight; only a critical state is red.
 enum Theme {
     static let accent = Color(hex: 0x4C8DFF)
 
     static let ok = Color(hex: 0x4CC38A)
-    static let waiting = Color(hex: 0xE9A23B)
+    /// Something waits for the user (your turn, a loop to check): Tara's colour (`TaraAccent`).
+    @MainActor static var waiting: Color { TaraAccent.current }
     static let critical = Color(hex: 0xF0645A)
 
     static let textPrimary = Color.white.opacity(0.94)

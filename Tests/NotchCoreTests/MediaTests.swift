@@ -179,6 +179,16 @@ import Testing
         #expect(AppVolume.label(0) == "Muted")
         #expect(AppVolume.label(0.4) == "40 %")
     }
+
+    @Test func aNudgeNearOneHundredPercentTapsNothing() throws {
+        // Saved before the wider range: Safari at 105 %, Chrome at 95 %, Spotify at 150 %.
+        let saved = Data(#"{"values":{"safari":1.051,"chrome":0.953,"spotify":1.5}}"#.utf8)
+        let levels = try JSONDecoder().decode(AppVolume.Levels.self, from: saved)
+        #expect(levels.adjusted == ["spotify"])
+        var moved = AppVolume.Levels()
+        moved.set(0.93, for: "a")
+        #expect(moved.adjusted == ["a"])
+    }
 }
 
 @Suite struct HelperProcessTests {

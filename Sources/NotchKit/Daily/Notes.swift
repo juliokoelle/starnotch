@@ -29,6 +29,9 @@ final class NotesStore {
         }
     }
     private(set) var notes: [Note] = []
+    /// The Notepad shows "Tara's notes" (quick captures) instead of the user's own notes; set
+    /// from outside too, by the capture confirmation's Notepad button.
+    var showsTara = false
     /// The open note; nil is a new one not saved yet.
     private(set) var selected: URL?
     /// The open note's text; saved shortly after each change.
@@ -275,11 +278,47 @@ final class NotesStore {
 // MARK: Views
 
 /// The notes in the Tools tab: the list on the left, the open note on the right.
+/// The Notepad: the user's own notes, and beside them in a second tab what Tara keeps from
+/// quick capture (⌃⌥N), so the two aren't mistaken for each other.
 struct NotesCard: View {
     @Bindable var store: NotesStore
     @FocusState private var focused: Bool
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 2) {
+                tab("My notes", selected: !store.showsTara) { store.showsTara = false }
+                tab("Tara's notes", selected: store.showsTara) { store.showsTara = true }
+            }
+            .padding(2)
+            .background(Color.white.opacity(0.05), in: Capsule())
+            if store.showsTara {
+                TaraNotesCard()
+                    .transition(.blurSlide(x: 10))
+            } else {
+                notes
+            }
+        }
+        .animation(Theme.snappy, value: store.showsTara)
+    }
+
+    private func tab(_ title: LocalizedStringKey, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.tick()
+            action()
+        } label: {
+            Text(title)
+                .font(Theme.font(11, .semibold))
+                .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
+                .padding(.horizontal, 10)
+                .frame(height: 22)
+                .background(Color.white.opacity(selected ? 0.14 : 0), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressScale())
+    }
+
+    private var notes: some View {
         HStack(spacing: 8) {
             NotchCard(padding: 6) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -350,6 +389,123 @@ struct NotesCard: View {
         .onAppear { store.load() }
         // The focus goes with the view without a change: the panel must not stay held open.
         .onDisappear { store.editing = false }
+    }
+}
+
+/// What Tara keeps from quick capture (⌃⌥N), newest first: tasks, questions and notes, read from
+/// the capture queue the agent reads too. Removing one here forgets it.
+private struct TaraNotesCard: View {
+    struct Entry: Identifiable, Equatable {
+        var id: String
+        var route: String
+        var text: String
+        var created: Date
+    }
+
+    @State private var entries: [Entry] = []
+
+    var body: some View {
+        NotchCard(padding: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("What you noted with ⌃⌥N; Tara remembers these.")
+                        .font(Theme.font(11)).foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let file = CaptureInbox.markdownFile {
+                        Button("Open inbox") { CaptureInbox.openMarkdown(file) }
+                            .buttonStyle(PressScale())
+                            .font(Theme.font(11)).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .padding(.horizontal, 6)
+                if entries.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Nothing noted yet").font(Theme.font(13, .medium)).foregroundStyle(Theme.textBody)
+                        Text("Press ⌃⌥N anywhere and type a task, a question or a thought.")
+                            .font(Theme.font(11.5)).foregroundStyle(Theme.textTertiary)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.top, 4)
+                    Spacer(minLength: 0)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 1) {
+                            ForEach(entries) { entry in
+                                TaraNoteRow(entry: entry) { forget(entry) }
+                            }
+                        }
+                    }
+                    .scrollEdgeFade(bottom: 10)
+                }
+            }
+        }
+        .onAppear { entries = Self.read() }
+    }
+
+    private func forget(_ entry: Entry) {
+        Haptics.tick()
+        withAnimation(Theme.snappy) { entries.removeAll { $0.id == entry.id } }
+        Self.remove(entry.id)
+    }
+
+    /// The queue's lines Tara keeps (not those marked `memory: false`), newest first.
+    static func read(from file: URL = CaptureInbox.queueFile) -> [Entry] {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+        let dates = ISO8601DateFormatter()
+        return text.split(separator: "\n").compactMap { line -> Entry? in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  object["memory"] as? Bool != false,
+                  let id = object["id"] as? String, let body = object["text"] as? String,
+                  let created = (object["created"] as? String).flatMap(dates.date(from:)) else { return nil }
+            return Entry(id: id, route: object["route"] as? String ?? "note", text: body, created: created)
+        }
+        .sorted { $0.created > $1.created }
+    }
+
+    /// Drops one capture from the queue (the Markdown inbox keeps its line).
+    static func remove(_ id: String, from file: URL = CaptureInbox.queueFile) {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return }
+        let kept = text.split(separator: "\n", omittingEmptySubsequences: true).filter { line in
+            (try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])?["id"] as? String != id
+        }
+        try? (kept.joined(separator: "\n") + (kept.isEmpty ? "" : "\n")).write(to: file, atomically: true, encoding: .utf8)
+        // The atomic write makes a new file: only the user may read it, as before.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+}
+
+private struct TaraNoteRow: View {
+    let entry: TaraNotesCard.Entry
+    let forget: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: entry.route == "task" ? "circle" : entry.route == "question" ? "questionmark.circle" : "note.text")
+                .font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.textSecondary)
+                .frame(width: 18)
+            Text(entry.text).font(Theme.font(12.5)).foregroundStyle(Theme.textBody)
+                .lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 4)
+            if hovering {
+                Button(action: forget) {
+                    Image(systemName: "trash").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .help("Tara forgets this")
+            } else {
+                Text(entry.created.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)))
+                    .font(Theme.font(10.5)).foregroundStyle(Theme.textTertiary).fixedSize()
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 30)
+        .background(Color.white.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onHover { hovering = $0 }
     }
 }
 

@@ -62,6 +62,8 @@ final class VaultLive {
             if self?.privacy().records(.notes, at: Date()) == true {
                 _ = await Task.detached(priority: .utility) { connector.writeSnapshot() }.value
             }
+            // A briefing's linked note that wasn't there may be now.
+            connector.forgetMissingNotes()
             self?.onChange?()
         }
     }

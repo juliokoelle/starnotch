@@ -65,14 +65,22 @@ private struct WeatherSettings: View {
                 }
                 .buttonStyle(.plain)
             }
-        } else if daily.locationDenied {
-            Text("Location is off for \(Brand.bundleName) in System Settings › Privacy & Security › Location Services. Type a city instead.")
-                .font(.callout).foregroundStyle(.secondary)
+        } else if !daily.locationAllowed || daily.weatherStatus == .needsPlace {
+            LabeledContent {
+                Button("Use my location") { daily.useMyLocation() }
+            } label: {
+                if daily.locationDenied {
+                    Text("Location is off")
+                    Text("Opens System Settings › Privacy & Security › Location Services: turn on \(Brand.bundleName) there. Or type a city instead.")
+                } else {
+                    Text("Location")
+                    Text("macOS asks once, on this click. Approximate is enough.")
+                }
+            }
         }
-        Picker("Unit", selection: $daily.settings.unit) {
-            ForEach(TemperatureUnit.allCases, id: \.self) { Text($0.title).tag($0) }
+        LabeledContent("Unit") {
+            GlassSegmented(label: Localization.string("Unit"), selection: $daily.settings.unit, options: TemperatureUnit.allCases.map { ($0, $0.title) })
         }
-        .pickerStyle(.segmented)
         Toggle(isOn: $daily.settings.weatherInEar) {
             Text("Weather beside the notch")
             Text("Symbol and temperature at rest, while nothing else needs the space.")

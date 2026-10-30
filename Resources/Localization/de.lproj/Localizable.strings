@@ -1,22 +1,12 @@
-/* German interface strings. Keys are the English text as written in the code.
-   Missing keys fall back to English. */
 
-/* Onboarding */
 "Welcome to %@" = "Willkommen bei %@";
-"The notch becomes a small island: hover to peek, click to open, ⌃⌥Space from the keyboard. Choose what it shows." = "Die Notch wird zur kleinen Insel: darüberfahren für einen Blick, klicken zum Öffnen, ⌃⌥Leertaste per Tastatur. Wähle, was sie zeigt.";
 "Modules" = "Module";
 "Permissions" = "Berechtigungen";
 "Calendar access" = "Kalenderzugriff";
-"Allow…" = "Erlauben…";
 "Open Settings" = "Einstellungen öffnen";
 "Allowed" = "Erlaubt";
-"For your next meeting, its countdown and Join" = "Für dein nächstes Meeting, den Countdown und Beitreten";
-"Off. Turn it on in System Settings › Privacy & Security › Calendars." = "Aus. In den Systemeinstellungen unter Datenschutz & Sicherheit › Kalender einschalten.";
-"Nothing leaves this Mac. No telemetry; connectors you add decide what they talk to." = "Nichts verlässt diesen Mac. Keine Telemetrie; Connectoren, die du hinzufügst, bestimmen selbst, womit sie sprechen.";
-"Change this anytime in Settings." = "Das lässt sich jederzeit in den Einstellungen ändern.";
 "Done" = "Fertig";
 
-/* Modules */
 "Agents" = "Agenten";
 "Today" = "Heute";
 "Dictate" = "Diktieren";
@@ -24,7 +14,6 @@
 "Now playing" = "Musik";
 "Claude Code sessions on this Mac" = "Claude-Code-Sitzungen auf diesem Mac";
 "Claude Code isn't set up on this Mac" = "Claude Code ist auf diesem Mac nicht eingerichtet";
-"Needs a connector (see docs/SDK.md)" = "Braucht einen Connector (siehe docs/SDK.md)";
 "Your calendars, next meeting and Join" = "Deine Kalender, das nächste Meeting und Beitreten";
 "Asks for calendar access when you open it" = "Fragt beim ersten Öffnen nach Kalenderzugriff";
 "Calendar access is off in System Settings" = "Kalenderzugriff ist in den Systemeinstellungen aus";
@@ -41,9 +30,7 @@
 "Starts and stops it here" = "Startet und stoppt hier";
 "Hold in any app" = "In jeder App halten";
 "Nothing copied yet" = "Noch nichts kopiert";
-"Copied text shows up here. Click an entry to copy it again. Copies from password apps are never kept, and the list lives in memory only." = "Kopierter Text erscheint hier. Ein Klick auf einen Eintrag kopiert ihn erneut. Kopien aus Passwort-Apps werden nie behalten, und die Liste lebt nur im Arbeitsspeicher.";
 
-/* Settings */
 "Projects" = "Projekte";
 "Colour scale" = "Farbskala";
 "Slots" = "Plätze";
@@ -51,18 +38,18 @@
 "Behavior" = "Verhalten";
 "Display" = "Bildschirm";
 "Island on" = "Insel auf";
+"Details beside the notch" = "Details neben der Notch";
+"Resume Tara's memory" = "Taras Gedächtnis fortsetzen";
+"Counts, the other sessions and a second ear right of the notch. Off, only Tara sits beside it, and she shows when something waits." = "Zahlen, die anderen Sitzungen und ein zweites Ohr rechts der Notch. Aus sitzt nur Tara daneben und zeigt selbst, wenn etwas wartet.";
 "Notch" = "Notch";
 "Main display" = "Hauptbildschirm";
 "With pointer" = "Mit Mauszeiger";
-"Modules hide themselves when what they need isn't on this Mac." = "Module blenden sich aus, wenn auf diesem Mac fehlt, was sie brauchen.";
 "On a display without a notch, the island is a small pill at the top center." = "Auf einem Bildschirm ohne Notch ist die Insel eine kleine Pille oben in der Mitte.";
 "Quit" = "Beenden";
 
-/* Music */
 "Nothing playing" = "Gerade läuft nichts";
 "Play something in Spotify or Music and it shows up here." = "Spiel etwas in Spotify oder Musik ab, dann erscheint es hier.";
 
-/* System */
 "Network" = "Netzwerk";
 "Wi-Fi and Ethernet, down and up" = "WLAN und Ethernet, herunter und hoch";
 "Open Activity Monitor" = "Aktivitätsanzeige öffnen";
@@ -76,7 +63,6 @@
 "Dark mode needs permission to control System Events" = "Dunkelmodus braucht die Erlaubnis, System Events zu steuern";
 "System Settings › Privacy & Security › Automation" = "Systemeinstellungen › Datenschutz & Sicherheit › Automation";
 
-/* Keep awake with the lid closed */
 "Lid closed" = "Deckel zu";
 "Click to switch off" = "Klicken zum Ausschalten";
 "Stay awake with the lid closed for" = "Mit geschlossenem Deckel wach für";
@@ -96,14 +82,12 @@
 "Couldn't set up keeping awake with the lid closed" = "Wach halten mit geschlossenem Deckel ließ sich nicht einrichten";
 "The rule is in place, but sudo doesn't accept it." = "Die Regel ist installiert, aber sudo nimmt sie nicht an.";
 "Lid closed until %@" = "Deckel zu bis %@";
-/* Onboarding */
 "Your agents" = "Deine Agenten";
 "Meetings" = "Meetings";
 "Tools" = "Tools";
 "Meet Tara" = "Das ist Tara";
 "%@ turns the notch into a calm place for your agents, meetings and music. Tara lives there and comes out when something needs you." = "%@ macht die Notch zu einem ruhigen Ort für deine Agenten, Meetings und Musik. Tara wohnt dort und kommt heraus, wenn dich etwas braucht.";
 "What %@ found on this Mac. One click connects it; every change keeps a backup and can be undone in Settings." = "Was %@ auf diesem Mac gefunden hat. Ein Klick verbindet es; jede Änderung hat ein Backup und lässt sich in den Einstellungen rückgängig machen.";
-"Meetings and Tara's brain" = "Meetings und Taras Gehirn";
 "Tara remembers what was said in your meetings and points out contradictions, open questions and promises." = "Tara merkt sich, was in deinen Meetings gesagt wurde, und zeigt Widersprüche, offene Fragen und Zusagen.";
 "Switch on what you want in the notch; the rest stays out of the way. Settings › Tools has the same switches." = "Schalte ein, was du in der Notch willst; der Rest bleibt aus dem Weg. Einstellungen › Tools hat dieselben Schalter.";
 "Back" = "Zurück";
@@ -117,8 +101,6 @@
 "Colour" = "Farbe";
 "%@ keeps its own colours." = "%@ behält die eigenen Farben.";
 "No coding agents yet. %@ picks up Claude Code and Codex as soon as they're installed." = "Noch keine Coding-Agenten. %@ erkennt Claude Code und Codex, sobald sie installiert sind.";
-"For your agents" = "Für deine Agenten";
-"On this Mac" = "Auf diesem Mac";
 "Show exactly what changes" = "Genau zeigen, was sich ändert";
 "Hide the details" = "Details ausblenden";
 "Set up" = "Eingerichtet";
@@ -186,7 +168,6 @@
 "In the notch" = "In der Notch";
 "Small tools" = "Kleine Tools";
 
-/* Tools gallery */
 "Calendar" = "Kalender";
 "Music" = "Musik";
 "Meeting agent" = "Meeting-Agent";
@@ -215,7 +196,6 @@
 "A tool is off until you switch it on; the notch shows only the ones that are on. Tabs hide themselves when what they need isn't on this Mac." = "Ein Tool ist aus, bis du es einschaltest; die Notch zeigt nur, was an ist. Tabs blenden sich aus, wenn auf diesem Mac fehlt, was sie brauchen.";
 "Drop files here. Drag them out again or AirDrop them." = "Dateien hier ablegen. Wieder herausziehen oder per AirDrop senden.";
 
-/* Strand daily: weather, day progress, notes, sleep and recovery */
 "Weather" = "Wetter";
 "Day progress" = "Tagesfortschritt";
 "Notes" = "Notizen";
@@ -242,8 +222,6 @@
 "Now" = "Jetzt";
 "Offline, from %@" = "Offline, Stand %@";
 "Location is off for %@. Type a city in Settings › Daily." = "Ortungsdienste sind für %@ aus. Gib in den Einstellungen unter Tagesablauf eine Stadt ein.";
-"No location yet. Type a city in Settings › Daily." = "Noch kein Ort. Gib in den Einstellungen unter Tagesablauf eine Stadt ein.";
-"Offline. The weather comes back with the connection." = "Offline. Das Wetter kommt mit der Verbindung zurück.";
 "Looking up the weather…" = "Wetter wird abgerufen…";
 "Weather, your day and last night" = "Wetter, dein Tag und die letzte Nacht";
 "Back (Esc)" = "Zurück (Esc)";
@@ -260,8 +238,6 @@
 "Recovery %@" = "Erholung %@";
 "Sleep %@" = "Schlaf %@";
 "Fetching last night…" = "Letzte Nacht wird abgerufen…";
-"Pick Oura or WHOOP in Settings › Daily." = "Wähle Oura oder WHOOP in den Einstellungen unter Tagesablauf.";
-"Connect it in Settings › Daily." = "Verbinde es in den Einstellungen unter Tagesablauf.";
 "WHOOP signed you out: connect again" = "WHOOP hat dich abgemeldet: neu verbinden";
 "WHOOP sent no token" = "WHOOP hat kein Token geschickt";
 "WHOOP didn't accept the app's client id or secret" = "WHOOP hat Client-ID oder Secret der App nicht akzeptiert";
@@ -283,7 +259,9 @@
 "A city" = "Eine Stadt";
 "City" = "Stadt";
 "Type a city" = "Stadt eingeben";
-"Location is off for %@ in System Settings › Privacy & Security › Location Services. Type a city instead." = "Ortungsdienste sind für %@ in den Systemeinstellungen unter Datenschutz & Sicherheit › Ortungsdienste aus. Gib stattdessen eine Stadt ein.";
+"Location" = "Standort";
+"Opens System Settings › Privacy & Security › Location Services: turn on %@ there. Or type a city instead." = "Öffnet Systemeinstellungen › Datenschutz & Sicherheit › Ortungsdienste: Schalte %@ dort ein. Oder gib stattdessen eine Stadt ein.";
+"macOS asks once, on this click. Approximate is enough." = "macOS fragt einmal, bei diesem Klick. Ungefähr genügt.";
 "Unit" = "Einheit";
 "Weather beside the notch" = "Wetter neben der Notch";
 "Symbol and temperature at rest, while nothing else needs the space." = "Symbol und Temperatur in Ruhe, solange nichts anderes den Platz braucht.";
@@ -330,7 +308,6 @@
 "Connect Oura" = "Oura verbinden";
 "Register an app at cloud.ouraring.com with the redirect URL above and the daily scope, then enter its client ID and secret here." = "Registriere auf cloud.ouraring.com eine App mit der Weiterleitungs-URL oben und dem Scope daily, dann trage hier Client-ID und Secret ein.";
 "Personal access token instead" = "Stattdessen persönliches Zugriffstoken";
-/* Strand vault: notes connector */
 "Your notes" = "Deine Notizen";
 "An Obsidian vault or any Markdown folder: your tasks and today's note in the notch, and Tara reads along." = "Ein Obsidian-Vault oder ein beliebiger Markdown-Ordner: deine Aufgaben und die heutige Notiz in der Notch, und Tara liest mit.";
 "An Obsidian vault or any Markdown folder. Tasks are checkboxes (- [ ]) with an optional due date (📅 2026-10-28 or [due:: 2026-10-28]); ticking one off in the notch writes - [x] into its line. Tara reads your tasks and today's note on this Mac." = "Ein Obsidian-Vault oder ein beliebiger Markdown-Ordner. Aufgaben sind Checkboxen (- [ ]) mit optionalem Fälligkeitsdatum (📅 2026-10-28 oder [due:: 2026-10-28]); hakst du eine in der Notch ab, steht danach - [x] in ihrer Zeile. Tara liest deine Aufgaben und die heutige Notiz auf diesem Mac.";
@@ -370,9 +347,7 @@
 "Changed elsewhere, not ticked off" = "Woanders geändert, nicht abgehakt";
 "Couldn't write to the file" = "Datei ließ sich nicht schreiben";
 "Choose your tasks in Settings › Notes." = "Wähle deine Aufgaben unter Einstellungen › Notizen.";
-"Meetings and notes" = "Meetings und Notizen";
 "Needs your notes folder (Settings › Notes) or Apple Reminders" = "Braucht deinen Notizordner (Einstellungen › Notizen) oder Apple Erinnerungen";
-/* Media strand: Now Playing from any app, synced lyrics, volume per app */
 "Synced lyrics" = "Synchronisierte Songtexte";
 "Lyrics on hover" = "Songtext beim Überfahren";
 "Volume per app" = "Lautstärke pro App";
@@ -389,7 +364,6 @@
 "Unmute" = "Ton an";
 "Lyrics" = "Songtext";
 "Needs macOS 14.2 or later" = "Braucht macOS 14.2 oder neuer";
-/* Command palette and agents inbox (strand cmdk) */
 "Search tabs, sessions, events and tools" = "Tabs, Sitzungen, Termine und Tools durchsuchen";
 "No matches" = "Keine Treffer";
 "Tab" = "Tab";
@@ -424,7 +398,6 @@
 "Watch mode on" = "Watch-Modus an";
 "Watch mode off" = "Watch-Modus aus";
 "Set up your agents" = "Deine Agenten einrichten";
-"Set up meetings and Tara's brain" = "Meetings und Taras Gehirn einrichten";
 "Choose tools" = "Tools auswählen";
 "Choose Tara's look" = "Taras Aussehen wählen";
 "Setup" = "Einrichtung";
@@ -447,7 +420,6 @@
 "The agent hears that you didn't answer" = "Der Agent erfährt, dass du nicht geantwortet hast";
 "%d skipped" = "%d übersprungen";
 "Still waiting, back when the inbox opens next" = "Wartet weiter, beim nächsten Öffnen wieder da";
-/* Strand agents: Cursor, Copilot CLI, Gemini CLI, opencode, exact jumps, pace */
 "Cursor status" = "Cursor: Status";
 "Copilot CLI status" = "Copilot CLI: Status";
 "Gemini CLI status" = "Gemini CLI: Status";
@@ -474,7 +446,6 @@
 "Answer Copilot CLI in the notch" = "Copilot CLI in der Notch beantworten";
 "Every shell and MCP command asks in the notch first" = "Jeder Shell- und MCP-Befehl fragt zuerst in der Notch";
 "Copilot's requests ask in the notch first" = "Anfragen von Copilot fragen zuerst in der Notch";
-/* Strand ask: Ask Tara */
 "Ask about your meetings and notes, on ⌃⌥T or a click on Tara" = "Frag nach deinen Meetings und Notizen, mit ⌃⌥T oder einem Klick auf Tara";
 "Ask Tara…" = "Frag Tara …";
 "Stop and ask" = "Stoppen und fragen";
@@ -500,7 +471,6 @@
 "Don't send the window" = "Fenster nicht mitschicken";
 "Tara needs Screen Recording to see a window: System Settings › Privacy & Security › Screen Recording" = "Tara braucht Bildschirmaufnahme, um ein Fenster zu sehen: Systemeinstellungen › Datenschutz & Sicherheit › Bildschirmaufnahme";
 "Couldn't take a picture of that window" = "Von diesem Fenster ließ sich kein Bild machen";
-/* Strand sync: Jamie syncs on its own */
 "Last synced" = "Zuletzt abgeglichen";
 "Jamie syncs on its own every 30 minutes, after the Mac wakes and after your meetings" = "Jamie gleicht sich alle 30 Minuten von selbst ab, nach dem Aufwachen des Mac und nach deinen Meetings";
 "%@ · nothing new" = "%@ · nichts Neues";
@@ -508,8 +478,6 @@
 "%@ · %lld new meetings" = "%@ · %lld neue Meetings";
 "Sync now" = "Jetzt abgleichen";
 "Jamie signed you out; connect again to keep your meetings in sync" = "Jamie hat dich abgemeldet; verbinde dich erneut, damit deine Meetings abgeglichen bleiben";
-"Jamie isn't reachable; check your internet connection" = "Jamie ist nicht erreichbar; prüfe deine Internetverbindung";
-/* Wave 3: Tara's usage in Settings */
 "Tara's usage" = "Taras Verbrauch";
 "What Tara's calls would cost at API prices. On a Claude plan they count against your plan's limits instead of costing money; with an API key this is what you pay. A + means some calls used a model without a known price." = "Was Taras Aufrufe zu API-Preisen kosten würden. Mit einem Claude-Abo zählen sie gegen die Limits deines Abos und kosten kein Geld; mit einem API-Schlüssel zahlst du genau das. Ein + heißt: Einige Aufrufe liefen über ein Modell ohne bekannten Preis.";
 "Last 7 days" = "Letzte 7 Tage";
@@ -519,7 +487,6 @@
 "%lld calls" = "%lld Aufrufe";
 "%@ · %@ tokens · ≈ %@ at API prices" = "%1$@ · %2$@ Tokens · ≈ %3$@ zu API-Preisen";
 "Meeting analysis" = "Meeting-Analyse";
-/* Wave 3: Apple Intelligence as Tara's free brain */
 "Apple Intelligence (on this Mac, free)" = "Apple Intelligence (auf diesem Mac, kostenlos)";
 "Apple's model on this Mac, free; simpler answers than Claude." = "Apples Modell auf diesem Mac, kostenlos; einfachere Antworten als mit Claude.";
 "Claude Code when it's there, else an API key, else Apple Intelligence, else simple rules." = "Claude Code, wenn vorhanden, sonst ein API-Schlüssel, sonst Apple Intelligence, sonst einfache Regeln.";
@@ -534,10 +501,8 @@
 "Unavailable" = "Nicht verfügbar";
 "Needs Apple Intelligence on this Mac." = "Braucht Apple Intelligence auf diesem Mac.";
 "Tara's model isn't reachable, so simple rules answered" = "Taras Modell ist nicht erreichbar, deshalb haben einfache Regeln geantwortet";
-/* Wave 3: the approvals plugin registration heals itself */
 "Registered again from the app's copy. Restart running sessions." = "Erneut aus der Kopie der App registriert. Laufende Sitzungen neu starten.";
 "Installed again. Restart running sessions." = "Erneut installiert. Laufende Sitzungen neu starten.";
-/* Wave 3: keep awake with the lid closed, also on battery */
 "Also stay awake with the lid closed" = "Auch mit geschlossenem Deckel wach bleiben";
 "Until off" = "Bis zum Ausschalten";
 "Awake with the lid closed until you switch it off" = "Mit geschlossenem Deckel wach, bis du ausschaltest";
@@ -559,9 +524,7 @@
 "Couldn't let the Mac sleep again with the lid closed" = "Der Mac konnte mit geschlossenem Deckel nicht wieder schlafen";
 "Trying again in a minute" = "Neuer Versuch in einer Minute";
 "Your Mac stays awake with the lid closed, on power or on battery" = "Dein Mac bleibt zugeklappt wach, am Strom oder im Akkubetrieb";
-/* Wave 3: Ask Tara dictates with Wispr Flow */
 "Stop dictating" = "Diktat beenden";
-/* Wave 3: Ask Tara's answer card */
 "Listening…" = "Hört zu …";
 "Sources" = "Quellen";
 "Copy" = "Kopieren";
@@ -573,9 +536,7 @@
 "Couldn't save" = "Sichern fehlgeschlagen";
 "Add the question and answer to your notes inbox" = "Frage und Antwort in den Eingang deiner Notizen schreiben";
 "Save the question and answer as a note in the notepad" = "Frage und Antwort als Notiz im Notizblock sichern";
-/* Wave 3: Ask Tara falls back from Wispr Flow */
 "Wispr Flow didn't start, so Apple's recognizer listens" = "Wispr Flow ist nicht gestartet, deshalb hört Apples Spracherkennung zu";
-/* Wave 4: onboarding v2, one card per step, and Tara's welcome */
 "Your calendar" = "Dein Kalender";
 "Optional" = "Optional";
 "Skip for now" = "Vorerst überspringen";
@@ -628,13 +589,12 @@
 "Open the notch" = "Notch öffnen";
 "Close" = "Schließen";
 "Pick the folder; the files in it are found by themselves." = "Wähle den Ordner; die Dateien darin werden von selbst erkannt.";
-/* Wave 4: Tara's memory, privacy controls and the memory server for AI apps */
 "Tara's memory" = "Taras Gedächtnis";
 "Meetings and calendar" = "Meetings und Kalender";
 "Quick captures" = "Schnellnotizen";
 "Notes vault" = "Notizen-Vault";
 "Agent sessions" = "Agent-Sitzungen";
-"Transcripts, meetings synced from Jamie, today's calendar" = "Transkripte, aus Jamie geholte Meetings, der heutige Kalender";
+"Transcripts, meetings synced from your meeting tools, today's calendar" = "Transkripte, aus deinen Meeting-Tools geholte Meetings, der heutige Kalender";
 "Tasks, questions and notes you jot down with ⌃⌥N" = "Aufgaben, Fragen und Gedanken, die du mit ⌃⌥N festhältst";
 "Tasks and today's note from your vault, snapshots from other tools" = "Aufgaben und die heutige Notiz aus deinem Vault, Momentaufnahmen anderer Werkzeuge";
 "What you copy, kept in memory until Starnotch quits" = "Was du kopierst, nur im Arbeitsspeicher, bis Starnotch endet";
@@ -682,7 +642,6 @@
 "Tara's memory is paused. Click to resume" = "Taras Gedächtnis ist pausiert. Klicken zum Fortsetzen";
 "Tara's memory is paused" = "Taras Gedächtnis ist pausiert";
 "Resumes it" = "Setzt es fort";
-"Tara paused" = "Tara pausiert";
 "Pause Tara" = "Tara pausieren";
 "Tara's memory is paused: nothing new is recorded. Click to resume" = "Taras Gedächtnis ist pausiert: nichts Neues wird festgehalten. Klicken zum Fortsetzen";
 "Pause Tara's memory: no meetings, captures, notes or clipboard until you resume" = "Taras Gedächtnis pausieren: keine Meetings, Schnellnotizen, Vault-Daten oder Zwischenablage, bis du fortsetzt";
@@ -691,7 +650,6 @@
 "Meetings are switched off in Settings › Tara's memory." = "Meetings sind unter Einstellungen › Taras Gedächtnis ausgeschaltet.";
 "Not saved: meetings are off in Settings › Tara's memory, or nothing was heard before the pause" = "Nicht gespeichert: Meetings sind unter Einstellungen › Taras Gedächtnis aus, oder vor der Pause wurde nichts gehört";
 "Tara's memory in your AI apps" = "Taras Gedächtnis in deinen KI-Apps";
-/* Merge of Tara's memory into onboarding v2: the AI apps' own step */
 "Claude, ChatGPT and Cursor can look things up in your meetings, captures and notes when you ask them. Choose the apps; they can read, never change." = "Claude, ChatGPT und Cursor können in deinen Meetings, Schnellnotizen und Notizen nachschlagen, wenn du sie fragst. Wähle die Apps; sie können lesen, nie ändern.";
 "Read only, from this Mac. What an app looks up goes to its AI provider with your chat; Settings › Tara's memory decides what it sees." = "Nur lesend, von diesem Mac aus. Was eine App nachschlägt, geht mit deinem Chat an ihren KI-Anbieter; Einstellungen › Taras Gedächtnis bestimmt, was sie sieht.";
 "Share Tara's memory with your AI apps" = "Taras Gedächtnis mit deinen KI-Apps teilen";
@@ -703,3 +661,427 @@
 "Open Claude Desktop once first." = "Öffne zuerst einmal Claude Desktop.";
 "Start a task on your Mac in ChatGPT once first: it keeps its local tools in ~/.codex." = "Starte zuerst einmal in ChatGPT eine Aufgabe auf deinem Mac: Es legt seine lokalen Werkzeuge in ~/.codex ab.";
 "%@ is on the ignore list in Settings › Tara's memory, so Tara doesn't look at it" = "%@ steht unter Einstellungen › Taras Gedächtnis auf der Ausnahmeliste, deshalb schaut Tara nicht hin";
+
+"Screen context" = "Bildschirm-Kontext";
+"The text of the app in front, read on this Mac, masked and encrypted" = "Der Text der App im Vordergrund, auf diesem Mac gelesen, maskiert und verschlüsselt";
+"Off until you switch it on" = "Aus, bis du es einschaltest";
+"1 day kept, encrypted" = "1 Tag gespeichert, verschlüsselt";
+"%d days kept, encrypted" = "%d Tage gespeichert, verschlüsselt";
+"Every day of screen context goes, with its key. What Tara learned from it stays in her memory, where you can delete it on its own." = "Alle Tage Bildschirm-Kontext werden gelöscht, samt Schlüssel. Was Tara daraus gelernt hat, bleibt in ihrem Gedächtnis und lässt sich dort einzeln löschen.";
+"Let %@ read your screen?" = "Darf %@ deinen Bildschirm lesen?";
+"%@ learns what you work on and with whom from the text on your screen. Nothing to import." = "%@ lernt aus dem Text auf deinem Bildschirm, woran du arbeitest und mit wem. Ohne Import.";
+"While %@ reads, the notch shows a small eye: a click pauses her. Kept %d days. Delete one app, one day or everything in the Dashboard." = "Solange %@ liest, zeigt die Notch ein kleines Auge: ein Klick pausiert sie. Aufbewahrt %d Tage. Im Dashboard löschst du eine App, einen Tag oder alles.";
+"Not now" = "Nicht jetzt";
+"Switch on" = "Einschalten";
+"%@ apps today · %@ masked · kept %@ days" = "%@ Apps heute · %@ maskiert · %@ Tage aufbewahrt";
+"Kept on this Mac" = "Auf diesem Mac gespeichert";
+"What Tara learned from it stays in her memory, where you can delete it on its own." = "Was Tara daraus gelernt hat, bleibt in ihrem Gedächtnis und lässt sich dort einzeln löschen.";
+"%@ masked · last %@" = "%@ maskiert · zuletzt %@";
+"%d apps" = "%d Apps";
+"%d reads" = "%d Lesungen";
+"%d days" = "%d Tage";
+"Older days are deleted on their own. %d days kept now, encrypted with a key in your Keychain." = "Ältere Tage werden von selbst gelöscht. Gerade %d Tage gespeichert, verschlüsselt mit einem Schlüssel in deinem Schlüsselbund.";
+"Delete everything read from %@?" = "Alles löschen, was aus %@ gelesen wurde?";
+"Delete screen context from %@?" = "Bildschirm-Kontext von %@ löschen?";
+"Screen" = "Bildschirm";
+"Windows" = "Fenster";
+
+"%d memories, %d links" = "%d Erinnerungen, %d Verbindungen";
+"People" = "Personen";
+"Person" = "Person";
+"Meeting" = "Meeting";
+"Note" = "Notiz";
+"Capture" = "Schnellnotiz";
+"Project" = "Projekt";
+"Question" = "Frage";
+"Task" = "Aufgabe";
+"Animate" = "Animieren";
+"Groups" = "Gruppen";
+"Orphans" = "Verwaiste";
+"Off in Settings: %@" = "In den Einstellungen aus: %@";
+"due %@" = "fällig %@";
+"Decisions" = "Entscheidungen";
+"Recent sessions" = "Letzte Sitzungen";
+"and %d more" = "und %d weitere";
+"Dashboard" = "Dashboard";
+"Dashboard…" = "Dashboard…";
+"Settings…" = "Einstellungen…";
+"Home" = "Start";
+"Timeline" = "Verlauf";
+"Privacy" = "Datenschutz";
+"Your Mac" = "Dein Mac";
+"Version %@" = "Version %@";
+"7 days" = "7 Tage";
+"Yesterday" = "Gestern";
+"Here's what %@ saw. Counted on this Mac, never sent anywhere." = "Das hat %@ gesehen. Auf diesem Mac gezählt, nie verschickt.";
+"Agent time" = "Agentenzeit";
+"%d sessions" = "%d Sitzungen";
+"Questions to %@" = "Fragen an %@";
+"Set up…" = "Einrichten…";
+"agent time" = "Agentenzeit";
+"1 meeting" = "1 Meeting";
+"%d meetings" = "%d Meetings";
+"1 capture" = "1 Schnellnotiz";
+"%d captures" = "%d Schnellnotizen";
+"%d questions" = "%d Fragen";
+"%d questions to Tara" = "%d Fragen an Tara";
+"%d meeting files couldn't be read." = "%d Meeting-Dateien ließen sich nicht lesen.";
+"Show all %d" = "Alle %d zeigen";
+"from %@, %@" = "aus %@, %@";
+"from %@" = "aus %@";
+"Captured %@" = "Notiert %@";
+"was due %@" = "war fällig %@";
+"Paused until %@" = "Pausiert bis %@";
+"Off" = "Aus";
+"Until %@" = "Bis %@";
+"Plan" = "Tarif";
+"%@ today" = "%@ heute";
+"%@ in 7 days" = "%@ in 7 Tagen";
+"Week" = "Woche";
+"%d calls" = "%d Aufrufe";
+"Loading" = "Wird geladen";
+"Nothing yet" = "Noch nichts";
+"Meeting with %@" = "Meeting mit %@";
+"Following %@" = "Folgt %@";
+"Reading %@" = "Liest %@";
+"An Obsidian vault or any Markdown folder: your tasks and today's note in the notch" = "Ein Obsidian-Vault oder ein beliebiger Markdown-Ordner: deine Aufgaben und die heutige Notiz in der Notch";
+"Not asked yet" = "Noch nicht gefragt";
+"Connectors" = "Connectoren";
+"Connected" = "Verbunden";
+"%d min" = "%d Min.";
+"%d h" = "%d Std.";
+"%d h %d min" = "%d Std. %d Min.";
+"Hide %@" = "%@ ausblenden";
+"Quit %@" = "%@ beenden";
+"Window" = "Fenster";
+"Brain" = "Gehirn";
+"Integrations" = "Integrationen";
+"Overview" = "Übersicht";
+"Ask %@" = "%@ fragen";
+"Sessions" = "Sitzungen";
+"Last sync" = "Letzter Abgleich";
+"Links" = "Verknüpfungen";
+"At most" = "Höchstens";
+"Claude Code's and Codex's session logs are read for their time stamps: lines less than five minutes apart count as active time, per day and project. Titles and folders reach %@'s memory; the transcripts stay where they are." = "Die Sitzungsprotokolle von Claude Code und Codex werden nur auf Zeitstempel gelesen: Zeilen, die weniger als fünf Minuten auseinanderliegen, zählen als aktive Zeit, pro Tag und Projekt. Titel und Ordner kommen in %@s Gedächtnis, die Transkripte bleiben, wo sie sind.";
+"Today's events are kept in one file for the AI apps that read %@'s memory, rewritten when your calendar changes. Nothing from earlier days is kept." = "Die heutigen Termine liegen in einer Datei für die KI-Apps, die %@s Gedächtnis lesen, und werden neu geschrieben, wenn sich dein Kalender ändert. Von früheren Tagen bleibt nichts.";
+"%d more meetings were recorded on this Mac." = "%d weitere Meetings wurden auf diesem Mac aufgenommen.";
+"The %d notes you changed last are read; their [[links]] connect people, meetings and projects in %@'s brain. Your vault is only read, never changed." = "Die %d zuletzt geänderten Notizen werden gelesen; ihre [[Links]] verbinden Personen, Meetings und Projekte in %@s Gehirn. Dein Vault wird nur gelesen, nie verändert.";
+"nothing" = "nichts";
+"Apps search %@'s memory read only, through a local MCP server: %@. What an app looks up goes to its AI provider with your chat." = "Apps durchsuchen %@s Gedächtnis nur lesend über einen lokalen MCP-Server: %@. Was eine App nachschlägt, geht mit deinem Chat an ihren KI-Anbieter.";
+"%@ plan" = "%@-Tarif";
+"%@, %@." = "%@, %@.";
+"Activity" = "Aktivität";
+"Questions" = "Fragen";
+"Where agent time went" = "Wohin die Agentenzeit ging";
+"quiet" = "ruhig";
+"about %@ active" = "etwa %@ aktiv";
+"Busiest around %@" = "Am aktivsten gegen %@";
+"In the background" = "Im Hintergrund";
+"1 new meeting" = "1 neues Meeting";
+"%d new meetings" = "%d neue Meetings";
+"%d meetings in memory" = "%d Meetings im Gedächtnis";
+"%d events" = "%d Termine";
+"%@ notes · %@ links" = "%@ Notizen · %@ Verknüpfungen";
+"%d tasks · %d questions · %d notes in 7 days" = "%d Aufgaben · %d Fragen · %d Notizen in 7 Tagen";
+"%d apps Tara never records" = "%d Apps, die Tara nie festhält";
+"%d open promises" = "%d offene Zusagen";
+
+"%@ of agent time in 7 days · %@ sessions" = "%@ Agentenzeit in 7 Tagen · %@ Sitzungen";
+"%d events today, kept for the AI apps" = "%d Termine heute, für die KI-Apps bereitgelegt";
+"%@ meetings · %@ people · %@ open promises" = "%@ Meetings · %@ Personen · %@ offene Zusagen";
+"%@ copies held in memory, never on disk" = "%@ Kopien im Arbeitsspeicher, nie auf der Platte";
+"%@ apps connected · they read %@ of %@ sources" = "%@ Apps verbunden · sie lesen %@ von %@ Quellen";
+"%@ connected · %@ snapshots" = "%@ verbunden · %@ Schnappschüsse";
+"What it does" = "Was es tut";
+"What's set up" = "Was eingerichtet ist";
+"Apps" = "Apps";
+"%@'s memory is paused: nothing new reaches it until you resume." = "%@s Gedächtnis ist pausiert: Nichts Neues kommt hinzu, bis du fortsetzt.";
+"General" = "Allgemein";
+"Characters" = "Figuren";
+"Notch and tools" = "Notch und Werkzeuge";
+"%@ answers from your meetings, captures and notes on this Mac, with the sources she used." = "%@ antwortet aus deinen Meetings, Schnellnotizen und Notizen auf diesem Mac, mit den Quellen, die sie genutzt hat.";
+"Thinks with: %@" = "Denkt mit: %@";
+"Speak" = "Sprechen";
+
+"Apps you use" = "Apps, die du nutzt";
+"Which app is in front and for how long, only while you use the Mac. Never window titles or what's on screen." = "Welche App vorne ist und wie lange, nur während du den Mac nutzt. Nie Fenstertitel oder was auf dem Bildschirm steht.";
+"Off until you turn it on. Kept on this Mac, a total per app and day." = "Aus, bis du es einschaltest. Bleibt auf diesem Mac, eine Summe pro App und Tag.";
+"Nothing counted yet" = "Noch nichts gezählt";
+"1 day kept" = "1 Tag gespeichert";
+"%d days kept" = "%d Tage gespeichert";
+"The time per app Tara counted goes. Nothing else was kept." = "Die Zeit pro App, die Tara gezählt hat, wird gelöscht. Mehr wurde nicht gespeichert.";
+"30 days" = "30 Tage";
+"%d active days" = "%d aktive Tage";
+"Help" = "Hilfe";
+"What's new" = "Neuigkeiten";
+"New" = "Neu";
+"Improved" = "Verbessert";
+"Fixed" = "Behoben";
+"Changed" = "Geändert";
+"Approvals" = "Freigaben";
+"Summary" = "Zusammenfassung";
+"Ask about %@…" = "Frag nach %@ …";
+"Ask" = "Fragen";
+"Morning" = "Morgens";
+"About %@ only" = "Nur über %@";
+
+"One character per project, as the Claude app groups sessions (by working folder). Sessions in a project share the character and differ by colour." = "Ein Charakter pro Projekt, so wie die Claude-App Sitzungen gruppiert (nach Arbeitsordner). Sitzungen eines Projekts teilen sich den Charakter und unterscheiden sich in der Farbe.";
+"Sessions show their effort level as colour, from light (low) to black (max). Two sessions on the same level differ slightly in hue and by their title." = "Sitzungen zeigen ihre Effort-Stufe als Farbe, von hell (niedrig) bis schwarz (max). Zwei Sitzungen auf derselben Stufe unterscheiden sich leicht im Farbton und durch ihren Titel.";
+"Hold the notch and flick toward a slot. A module opens in the notch; an app slot quits the apps in the other slots and opens the chosen one." = "Die Notch gedrückt halten und Richtung Platz schnippen. Ein Modul öffnet sich in der Notch; ein App-Platz beendet die Apps der anderen Plätze und öffnet die gewählte.";
+"Press and hold for %@ s" = "Gedrückt halten für %@ s";
+"Keyboard shortcut" = "Tastenkürzel";
+"Accessibility" = "Bedienungshilfen";
+"Remove undoes a change exactly: the status line you had before comes back, the hooks and the plugin go." = "Entfernen macht eine Änderung genau rückgängig: Deine vorherige Statuszeile kommt zurück, die Hooks und das Plugin gehen.";
+"Providers" = "Anbieter";
+"The agent tools found on this Mac. Their files are only read; the notch never changes a tool's settings." = "Die Agent-Tools auf diesem Mac. Ihre Dateien werden nur gelesen; die Notch ändert nie die Einstellungen eines Tools.";
+"Apple Reminders in Today" = "Apple Erinnerungen unter Heute";
+"Reminders due today and overdue. macOS asks once when you switch this on." = "Heute fällige und überfällige Erinnerungen. macOS fragt einmal, wenn du das einschaltest.";
+"Reminders access is off in System Settings › Privacy & Security › Reminders." = "Zugriff auf Erinnerungen ist aus: Systemeinstellungen › Datenschutz & Sicherheit › Erinnerungen.";
+"Never" = "Nie";
+"When it needs me" = "Wenn es mich braucht";
+"Always" = "Immer";
+"Watch mode for fullscreen and video" = "Watch-Modus bei Vollbild und Video";
+"The notch stays silent while a fullscreen app or a video is in front; only approvals and meetings about to start get through." = "Die Notch bleibt still, solange eine Vollbild-App oder ein Video vorne ist; nur Freigaben und gleich beginnende Meetings kommen durch.";
+"Watch mode by hand (⌃⌥W) lasts" = "Watch-Modus von Hand (⌃⌥W) dauert";
+"1 hour" = "1 Stunde";
+"2 hours" = "2 Stunden";
+"Until I turn it off" = "Bis ich ihn ausschalte";
+"Quiet" = "Ruhe";
+"By default the notch is just the notch: figures appear when something needs you, on hover, and for a moment when something happens." = "Standardmäßig ist die Notch einfach die Notch: Figuren erscheinen, wenn dich etwas braucht, beim Darüberfahren und kurz, wenn etwas passiert.";
+"Loops" = "Loops";
+"Recurring agents and jobs that write one line per run (2026-10-26 · morning-brief · ok · note) show as loops in the Agents panel, with their schedule when a <loop>.md next to the log has a cron in its front matter." = "Wiederkehrende Agenten und Jobs, die pro Lauf eine Zeile schreiben (2026-10-26 · morning-brief · ok · note), erscheinen als Loops im Agenten-Bereich, mit Zeitplan, wenn eine <loop>.md neben dem Log einen Cron im Front Matter hat.";
+"Keep the panel open until I click outside" = "Panel offen lassen, bis ich daneben klicke";
+"Otherwise it closes shortly after the pointer leaves it." = "Sonst schließt es sich kurz nachdem der Zeiger es verlässt.";
+"Force quit apps that don't quit" = "Apps sofort beenden, die nicht beenden";
+"After %lld seconds. Unsaved changes in those apps are lost." = "Nach %lld Sekunden. Ungesicherte Änderungen in diesen Apps gehen verloren.";
+"Local status API" = "Lokale Status-API";
+"Scripts and loops post to the notch: POST 127.0.0.1:%u/status with the token from Application Support/%@, or scripts/notch-status.sh." = "Skripte und Loops melden sich bei der Notch: POST 127.0.0.1:%u/status mit dem Token aus Application Support/%@, oder scripts/notch-status.sh.";
+"Launch at login" = "Beim Anmelden starten";
+"Approve %@ in System Settings › General › Login Items." = "%@ in den Systemeinstellungen › Allgemein › Anmeldeobjekte erlauben.";
+"Apple Intelligence" = "Apple Intelligence";
+"Installed" = "Installiert";
+"Get an Anthropic key" = "Anthropic-Key holen";
+"for live transcription" = "für die Live-Transkription";
+"Run log" = "Lauf-Log";
+"The log your loops write to, one line per run" = "Das Log, in das deine Loops schreiben, eine Zeile pro Lauf";
+"Allow Accessibility access" = "Zugriff auf Bedienungshilfen erlauben";
+"The notch and the shortcut work without it. It lets Escape cancel while you hold the wheel; until then, release in the center to cancel." = "Notch und Tastenkürzel funktionieren auch ohne. Damit bricht Escape ab, während du das Rad hältst; bis dahin in der Mitte loslassen, um abzubrechen.";
+"Privacy & Security › Accessibility › %@. After an update, remove the entry with − and add it again." = "Datenschutz & Sicherheit › Bedienungshilfen › %@. Nach einem Update den Eintrag mit − entfernen und wieder hinzufügen.";
+"Open Accessibility Settings" = "Bedienungshilfen öffnen";
+"Accessibility needs a fresh switch" = "Bedienungshilfen neu einschalten";
+"macOS needs you to switch %@ off and on again in Privacy & Security › Accessibility. The switch may still show on: macOS doesn't recognise this build of the app yet." = "Schalte %@ unter Datenschutz & Sicherheit › Bedienungshilfen einmal aus und wieder ein, das braucht macOS. Der Schalter kann noch an stehen: macOS erkennt diesen Build der App noch nicht.";
+"If that doesn't help, remove the entry with − and add it again." = "Hilft das nicht, entferne den Eintrag mit − und füge ihn wieder hinzu.";
+"Active" = "Aktiv";
+"Empty" = "Leer";
+"Every session of this project is this character; its colour shows the session's performance level (see Colour scale)." = "Jede Sitzung dieses Projekts ist dieser Charakter; seine Farbe zeigt die Effort-Stufe der Sitzung (siehe Farbskala).";
+"Notch apps" = "Notch-Apps";
+"Other app" = "Andere App";
+"Search apps" = "Apps suchen";
+"No app named “%@”" = "Keine App namens „%@“";
+"Choose App…" = "App wählen …";
+"Clear slot" = "Platz leeren";
+"Colour by" = "Farbe nach";
+"Performance" = "Effort";
+"Low" = "Niedrig";
+"Medium" = "Mittel";
+"High" = "Hoch";
+"Extra high" = "Sehr hoch";
+"Max" = "Max";
+"Ultra" = "Ultra";
+"Own" = "Eigen";
+"%@ effort" = "Effort: %@";
+"%@ keeps its colours; the effort shows in its look" = "%@ behält die eigenen Farben; der Effort zeigt sich am Aussehen";
+"The character's own look for this level" = "Das eigene Aussehen des Charakters für diese Stufe";
+"Sessions, subagents, context and plan limits from ~/.codex." = "Sitzungen, Subagenten, Kontext und Planlimits aus ~/.codex.";
+"Sessions and subagents from ~/.claude; titles and status from the Claude app when it's installed." = "Sitzungen und Subagenten aus ~/.claude; Titel und Status aus der Claude-App, wenn sie installiert ist.";
+"Copy command" = "Befehl kopieren";
+"From Apple Reminders" = "Aus Apple Erinnerungen";
+"Clipboard history (⌃⌥V), timers, file shelf" = "Zwischenablage-Verlauf (⌃⌥V), Timer, Dateiablage";
+"Clipboard history, timers, file shelf" = "Zwischenablage-Verlauf, Timer, Dateiablage";
+"Meeting agent: contradictions, questions, commitments" = "Meeting-Agent: Widersprüche, Fragen, Zusagen";
+"Choose what the %@ slot holds" = "Wählen, was der Platz %@ enthält";
+
+"Hold and drag to move" = "Halten und ziehen zum Verschieben";
+"Plan limits" = "Planlimits";
+"5-hour window" = "5-Stunden-Fenster";
+"Resets %@" = "Neu ab %@";
+"in %@" = "in %@";
+"Updated %@" = "Stand %@";
+"Last seen %@" = "Zuletzt gesehen %@";
+"Plan limits: click for every window and its reset" = "Planlimits: Klick zeigt jedes Fenster und seinen Reset";
+"Claude limits" = "Claude-Limits";
+"Show Claude's plan limits: one line in Claude Code's settings" = "Claudes Planlimits anzeigen: eine Zeile in den Einstellungen von Claude Code";
+"Resume Tara" = "Tara fortsetzen";
+"Awake" = "Wach";
+"Dark" = "Dunkel";
+"Icons" = "Symbole";
+"Top apps" = "Top-Apps";
+"Nothing matches “%@”" = "Nichts passt zu „%@“";
+"Search the clipboard" = "Zwischenablage durchsuchen";
+"Clear the search" = "Suche leeren";
+"Copied text, links and images show up here. Click an entry to copy it again. Copies from password apps are never kept, and the list lives in memory only." = "Kopierte Texte, Links und Bilder erscheinen hier. Ein Klick kopiert einen Eintrag erneut. Kopien aus Passwort-Apps werden nie behalten, und die Liste lebt nur im Arbeitsspeicher.";
+"Image" = "Bild";
+"Click to copy the image again" = "Klicken, um das Bild erneut zu kopieren";
+"Unpin" = "Loslösen";
+"Pin: stays on top and survives Clear" = "Anheften: bleibt oben und übersteht Leeren";
+"Clear" = "Leeren";
+"Removes everything but the pinned entries" = "Entfernt alles außer den angehefteten Einträgen";
+"1 entry" = "1 Eintrag";
+"%lld entries" = "%lld Einträge";
+"Today: to-dos, reminders, weather and last night" = "Heute: Aufgaben, Erinnerungen, Wetter und die letzte Nacht";
+"The calendar" = "Der Kalender";
+"Nothing due today" = "Heute ist nichts fällig";
+"%d to do" = "%d zu erledigen";
+"%d overdue" = "%d überfällig";
+"To do" = "Zu erledigen";
+"Tasks from your notes and reminders due today show up here." = "Aufgaben aus deinen Notizen und heute fällige Erinnerungen erscheinen hier.";
+"Apple Reminders" = "Apple Erinnerungen";
+"Ticked off here" = "Hier abhaken";
+"Show" = "Zeigen";
+"macOS asks once for access to your reminders" = "macOS fragt einmal nach Zugriff auf deine Erinnerungen";
+"Mark as completed in Reminders" = "In Erinnerungen als erledigt markieren";
+"Open in Reminders" = "In Erinnerungen öffnen";
+"Reminders" = "Erinnerungen";
+"Couldn't save in Reminders" = "Ließ sich in Erinnerungen nicht sichern";
+"Completed" = "Erledigt";
+"Not completed" = "Offen";
+"No room to pin more images" = "Kein Platz für weitere angeheftete Bilder";
+"Location is off" = "Ortungsdienste sind aus";
+"No location yet" = "Noch kein Ort";
+"Weather where this Mac is, or for a city you set." = "Wetter dort, wo dieser Mac ist, oder für eine Stadt deiner Wahl.";
+"Opens System Settings › Location Services: turn on %@ there." = "Öffnet Systemeinstellungen › Ortungsdienste: Schalte %@ dort ein.";
+"macOS has no location right now. Try again, or set a city." = "macOS kennt gerade keinen Standort. Versuch es noch mal oder leg eine Stadt fest.";
+"Use my location" = "Standort nutzen";
+"The weather comes back with the connection." = "Das Wetter kommt mit der Verbindung zurück.";
+"Set a city" = "Stadt festlegen";
+"Oura or WHOOP" = "Oura oder WHOOP";
+"Not connected yet" = "Noch nicht verbunden";
+"Rain %lld %%" = "Regen %lld %%";
+"overdue" = "überfällig";
+"today" = "heute";
+"tomorrow" = "morgen";
+"Stopwatch" = "Stoppuhr";
+"At this pace, %@" = "In diesem Tempo %@";
+
+"%d characters, from the packs on this Mac." = "%d Figuren, aus den Paketen auf diesem Mac.";
+"%@ together" = "%@ gemeinsam";
+"Hello" = "Hallo";
+"Idle" = "Ruhig";
+"Working" = "Arbeitet";
+"Your turn" = "Du bist dran";
+"%@ comes out of the notch for music, dictation and quick capture, and stands for every project without a character of its own." = "%@ kommt bei Musik, Diktat und Schnellnotiz aus der Notch und steht für jedes Projekt ohne eigene Figur.";
+"State" = "Zustand";
+"%@ keeps its own colours; the effort shows in its look." = "%@ behält ihre eigenen Farben; der Effort zeigt sich in ihrem Aussehen.";
+"Main" = "Haupt";
+"%@, main character" = "%@, Hauptfigur";
+"From the %@ pack." = "Aus dem Paket %@.";
+"Stands for %@." = "Steht für %@.";
+"Change the character of %@" = "Figur von %@ ändern";
+"%d sessions now" = "%d Sitzungen gerade";
+"%@ in 30 days" = "%@ in 30 Tagen";
+"Characters page" = "Seite Figuren";
+"%d effort looks" = "%d Effort-Looks";
+"Open in %@" = "In %@ öffnen";
+"No briefing in today's note yet." = "Noch kein Briefing in der heutigen Notiz.";
+"Your notes are off in Tara's memory." = "Deine Notizen sind in Taras Gedächtnis ausgeschaltet.";
+
+"%@ feeds Tara" = "%@ speist Tara";
+"%lld meetings" = "%lld Meetings";
+"synced %@" = "abgeglichen %@";
+"API key" = "API-Schlüssel";
+"Not picked as a meeting source" = "Nicht als Meeting-Quelle gewählt";
+"Day" = "Tag";
+"Month" = "Monat";
+"1 subagent" = "1 Subagent";
+"%d subagents" = "%d Subagents";
+"Fold the subagents" = "Subagents einklappen";
+"Show the subagents" = "Subagents zeigen";
+"My notes" = "Meine Notizen";
+"Tara's notes" = "Taras Notizen";
+"What you noted with ⌃⌥N; Tara remembers these." = "Was du mit ⌃⌥N notiert hast; Tara merkt sich das.";
+"Open inbox" = "Eingang öffnen";
+"Nothing noted yet" = "Noch nichts notiert";
+"Press ⌃⌥N anywhere and type a task, a question or a thought." = "Drück überall ⌃⌥N und tipp eine Aufgabe, Frage oder einen Gedanken.";
+"Tara forgets this" = "Tara vergisst das";
+"Files" = "Dateien";
+"Recent" = "Zuletzt";
+"Desktop" = "Schreibtisch";
+"Downloads" = "Downloads";
+"Documents" = "Dokumente";
+"iCloud Drive" = "iCloud Drive";
+"Loading…" = "Lädt…";
+"No files changed in the last two weeks." = "Keine Dateien aus den letzten zwei Wochen.";
+"This folder is empty." = "Dieser Ordner ist leer.";
+"Copy path" = "Pfad kopieren";
+"Add to Shelf" = "Aufs Shelf legen";
+"A small Finder: recent files and your folders, drag files out" = "Ein kleiner Finder: letzte Dateien und deine Ordner, Dateien rausziehen";
+"Tara's brain" = "Taras Gehirn";
+"With: %@" = "Mit: %@";
+"Open: %@" = "Offen: %@";
+"Background summaries" = "Zusammenfassungen im Hintergrund";
+"Same as above" = "Wie oben";
+"ChatGPT subscription (Codex)" = "ChatGPT-Abo (Codex)";
+"Runs through the Codex app on your ChatGPT plan; no API credits." = "Läuft über Codex auf deinem ChatGPT-Abo, ohne API-Kosten.";
+"Tara condenses what's on your screen into work blocks every 20 minutes or so; this picks the plan that pays for it." = "Tara fasst etwa alle 20 Minuten zusammen, was auf deinem Bildschirm war; hier wählst du, welches Abo das trägt.";
+"Date" = "Datum";
+"Copied to %@" = "Kopiert nach %@";
+
+"%d blocks" = "%d Blöcke";
+"%@ covered" = "%@ abgedeckt";
+"%@ can't condense work blocks. Choose Claude, Codex or your API key in Settings › Tara › Tara's brain › Background summaries." = "%@ kann keine Arbeitsblöcke zusammenfassen. Wähle Claude, Codex oder deinen API-Schlüssel unter Einstellungen › Tara › Taras Gehirn › Zusammenfassungen im Hintergrund.";
+"%d new work blocks" = "%d neue Arbeitsblöcke";
+"Open Privacy" = "Datenschutz öffnen";
+"Saved" = "Gespeichert";
+"%@ at %@" = "%@ bei %@";
+"Status" = "Status";
+"Usage" = "Verbrauch";
+"Tara's thinking" = "Taras Denken";
+"Calls" = "Aufrufe";
+"Tokens" = "Tokens";
+"%@ each" = "je %@";
+"Work blocks" = "Arbeitsblöcke";
+"%@ billed" = "%@ berechnet";
+"%@ at API prices" = "%@ zu API-Preisen";
+"%@ tokens in all" = "%@ Tokens insgesamt";
+"%@ tokens" = "%@ Tokens";
+"Under 2 % at rest; more while the notch is open or Tara thinks." = "Im Ruhezustand unter 2 %; mehr, während die Notch offen ist oder Tara denkt.";
+"Starnotch and its helpers together; 100 % is one core, as in Activity Monitor." = "Starnotch und seine Helfer zusammen; 100 % ist ein Kern, wie in der Aktivitätsanzeige.";
+"Memory" = "Speicher";
+"Process" = "Prozess";
+"CPU" = "CPU";
+"Peak %@" = "Spitze %@";
+"Tara's agent" = "Taras Agent";
+"Media helper" = "Medien-Helfer";
+"Opens the session in the Claude app; with ⌥ on claude.ai (Remote Control)" = "Öffnet die Session in der Claude-App; mit ⌥ auf claude.ai (Remote Control)";
+
+"Tara beside the notch" = "Tara neben der Notch";
+"When something's up" = "Wenn etwas ansteht";
+"Open on hover" = "Öffnen beim Verweilen";
+"Click only" = "Nur per Klick";
+"0.5 s" = "0,5 s";
+"1 s" = "1 s";
+"Open on the last tab" = "Auf dem letzten Tab öffnen";
+"The notch opens where you left it, on music for example. Off, it always opens on the first tab." = "Die Notch öffnet dort, wo du sie verlassen hast, etwa bei der Musik. Aus: immer auf dem ersten Tab.";
+"A click on the notch always opens it. With a hover time, resting the pointer on it opens it too." = "Ein Klick auf die Notch öffnet sie immer. Mit einer Verweilzeit öffnet sie sich auch, wenn der Zeiger kurz darauf ruht.";
+"Show it in Tools › Notepad › Tara's notes" = "In Werkzeuge › Notizblock › Taras Notizen zeigen";
+
+"Earlier chats" = "Frühere Chats";
+"Back to this chat" = "Zurück zu diesem Chat";
+"Your chats with Tara show here once she has answered." = "Deine Chats mit Tara erscheinen hier, sobald sie geantwortet hat.";
+"question" = "Frage";
+"questions" = "Fragen";
+"Forget this chat" = "Diesen Chat vergessen";
+
+"Let go on Tara" = "Auf Tara loslassen";
+"Drop a file on Tara to remember it or ask about it" = "Datei auf Tara ziehen: merken oder dazu fragen";
+"Remember" = "Merken";
+"Tara keeps it" = "Tara hat es sich gemerkt";
+"Documents › Starnotch › Documents" = "Dokumente › Starnotch › Documents";
+"Tara can read PDFs, Word and text files; this one has no text she can read" = "Tara liest PDFs, Word- und Textdateien; in dieser Datei findet sie keinen Text";
+"Don't send the document" = "Dokument nicht mitschicken";
+"Tara's brain can't see pictures; Settings › Tara's brain" = "Taras Gehirn kann keine Bilder sehen; Einstellungen › Taras Gehirn";
+"Couldn't read that file" = "Die Datei ließ sich nicht lesen";
+
+"Tara's eyes" = "Taras Augen";
+"Lines" = "Striche";
+"Round" = "Rund";

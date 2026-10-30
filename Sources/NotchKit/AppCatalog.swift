@@ -19,8 +19,9 @@ struct CatalogApp: Identifiable, Hashable {
 final class AppCatalog {
     private(set) var notchApps: [CatalogApp] = []
     private(set) var otherApps: [CatalogApp] = []
+    @ObservationIgnored private var scanning = false
 
-    private static let folders: [URL] = [
+    private nonisolated static let folders: [URL] = [
         URL(fileURLWithPath: "/Applications"),
         URL(fileURLWithPath: "/Applications/Utilities"),
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications"),
@@ -28,10 +29,22 @@ final class AppCatalog {
         URL(fileURLWithPath: "/System/Applications/Utilities"),
     ]
 
+    /// Reads the app folders again, off the main thread; the lists change when it's done.
     func refresh() {
+        guard !scanning else { return }
+        scanning = true
+        let ownID = Bundle.main.bundleIdentifier
+        Task {
+            let apps = await Task.detached(priority: .userInitiated) { Self.scan(ownID: ownID) }.value
+            notchApps = apps.filter(\.isNotchApp)
+            otherApps = apps.filter { !$0.isNotchApp }
+            scanning = false
+        }
+    }
+
+    private nonisolated static func scan(ownID: String?) -> [CatalogApp] {
         var seen = Set<String>()
         var apps: [CatalogApp] = []
-        let ownID = Bundle.main.bundleIdentifier
         for folder in Self.folders {
             let urls = (try? FileManager.default.contentsOfDirectory(
                 at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
@@ -50,8 +63,7 @@ final class AppCatalog {
             }
         }
         apps.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        notchApps = apps.filter(\.isNotchApp)
-        otherApps = apps.filter { !$0.isNotchApp }
+        return apps
     }
 
     /// Lets the user pick any app bundle with an open panel.

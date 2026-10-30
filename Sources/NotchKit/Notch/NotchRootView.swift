@@ -13,6 +13,9 @@ struct NotchRootView: View {
     var onCaptureSend: () -> Void = {}
     var onCaptureMic: () -> Void = {}
     var onCaptureEvent: () -> Void = {}
+    /// The confirmation's buttons: the Notepad on "Tara's notes", or the Markdown inbox.
+    var onCaptureShowNotes: () -> Void = {}
+    var onCaptureOpenInbox: () -> Void = {}
     /// A palette row was clicked (or ↵): its index, and whether ⌘ was held.
     var onPaletteActivate: (Int, Bool) -> Void = { _, _ in }
     /// The inbox card's own button: ↵ (true) or ⌘↵, and the id of the item it shows.
@@ -40,10 +43,14 @@ struct NotchRootView: View {
                 .coordinateSpace(.named(Self.space))
                 .environment(\.notch, NotchEnvironment(namespace: namespace))
                 .environment(\.figuresHidden, model.watching)
+                .environment(\.quietEars, !model.detailedEars)
+                .environment(\.taraResting, ![.expanded, .palette, .inbox, .capture].contains(layout.presentation) && model.taraResting)
                 .environment(\.figureCue, figureCue)
                 .environment(\.handlePressed, model.handlePressed)
                 .contentShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
                 .onTapGesture { if ![.expanded, .palette, .inbox].contains(model.interaction) { onTapIsland() } }
+                // One ear at rest (the quiet look): the island grows to the left only.
+                .offset(x: layout.centerOffset)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -61,6 +68,32 @@ struct NotchRootView: View {
         .onChange(of: model.presentation) { _, now in if now == .peek { figureCue += 1 } }
     }
 
+    /// Right-click on the island at rest or hovered: pause Tara's memory, or resume it.
+    @ViewBuilder private var memoryMenu: some View {
+        if model.memoryPaused, let resume = model.resumeMemory {
+            Button("Resume Tara's memory", action: resume)
+        } else if let pause = model.pauseMemory {
+            ForEach(MemoryPause.allCases, id: \.self) { length in
+                Button(LocalizedStringKey(length.title)) { pause(length) }
+            }
+        }
+    }
+
+    /// Tara at rest and in the peek, drawn once over the ears and the peek line (they keep her
+    /// place free): from rest to the peek she moves and grows as one figure, whole, instead of a
+    /// second copy crossing over one that the ear cut off.
+    @ViewBuilder
+    private func islandTara(_ layout: NotchLayout, peek: Bool) -> some View {
+        if let agents = (peek ? model.peekModule : model.earModule) as? AgentsModule {
+            let box = layout.taraBox
+            IslandTara(module: agents, height: box.height)
+                .frame(width: box.width, height: box.height, alignment: .bottom)
+                .notchMatched("agents.main", in: namespace)
+                .padding(.leading, box.minX)
+                .padding(.top, box.minY)
+        }
+    }
+
     @ViewBuilder
     private func island(_ layout: NotchLayout) -> some View {
         let notch = model.notchSize
@@ -71,7 +104,8 @@ struct NotchRootView: View {
             case .capture:
                 if let capture = model.capture {
                     CaptureView(capture: capture, cast: model.cast, notch: notch,
-                                onSend: onCaptureSend, onMic: onCaptureMic, onEvent: onCaptureEvent)
+                                onSend: onCaptureSend, onMic: onCaptureMic, onEvent: onCaptureEvent,
+                                onShowNotes: onCaptureShowNotes, onOpenInbox: onCaptureOpenInbox)
                         .padding(.horizontal, layout.topRadius)
                         .transition(.blurSlide(y: -12, scale: 0.94))
                 }
@@ -94,8 +128,8 @@ struct NotchRootView: View {
                         Color.clear.frame(maxWidth: .infinity)
                         Color.clear.frame(width: notch.width)
                         // Watch mode: the breakthrough line alone, no ear beside it; nor where an
-                        // icon sits next to the notch.
-                        if model.watching || layout.earRoom < NotchLayout.minEarWidth {
+                        // icon sits next to the notch, nor in the quiet look.
+                        if model.watching || !model.detailedEars || layout.earRoom < NotchLayout.minEarWidth {
                             Color.clear.frame(maxWidth: .infinity)
                         } else {
                             model.earModule.trailingEar(peek: false).frame(maxWidth: .infinity)
@@ -113,9 +147,10 @@ struct NotchRootView: View {
                 .padding(.horizontal, layout.topRadius)
                 .transition(.blurSlide(scale: 0.9))
             case .compact where layout.showsCue:
-                // No room for ears beside the notch: a short mark under it instead.
+                // No room for ears beside the notch: a short mark under it instead, in Tara's
+                // colour while something needs the user.
                 Capsule()
-                    .fill(model.earModule.needsAttention ? Theme.waiting : Theme.textSecondary)
+                    .fill(!model.earModule.needsAttention ? Theme.textSecondary : TaraAccent.shared.color)
                     .frame(width: 18, height: 3)
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 2)
@@ -123,6 +158,9 @@ struct NotchRootView: View {
             case .compact, .peek:
                 let ears = model.earModule
                 let isPeek = layout.presentation == .peek
+                // The quiet look at rest, and its peek while Tara is hovered: the left ear alone (the
+                // island has no room for a right one).
+                let oneEar = layout.oneEar && (!isPeek || layout.peek != .line)
                 // The peek's ears are as narrow as the compact ones unless the menu bar has room.
                 let roomyEars = isPeek && layout.besideNotch >= 56
                 VStack(spacing: 0) {
@@ -132,13 +170,15 @@ struct NotchRootView: View {
                             .frame(maxWidth: .infinity)
                             .clipped()
                         Color.clear.frame(width: notch.width)
-                        ears.trailingEar(peek: roomyEars)
-                            .environment(\.figureOrder, 1)
-                            .frame(maxWidth: .infinity)
-                            .clipped()
+                        if !oneEar {
+                            ears.trailingEar(peek: roomyEars)
+                                .environment(\.figureOrder, 1)
+                                .frame(maxWidth: .infinity)
+                                .clipped()
+                        }
                     }
                     .frame(height: notch.height)
-                    if isPeek {
+                    if isPeek && layout.peek != .ear {
                         model.peekModule.peekLine()
                             .padding(.horizontal, 12)
                             .frame(maxHeight: .infinity)
@@ -146,18 +186,11 @@ struct NotchRootView: View {
                     }
                 }
                 .padding(.horizontal, layout.topRadius)
-                // Tara's memory paused: a small mark at the left, only while hovered.
-                .overlay(alignment: .bottomLeading) {
-                    if isPeek && model.memoryPaused {
-                        Image(systemName: "pause.circle.fill").font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                            .padding(.leading, layout.topRadius + 8)
-                            .padding(.bottom, 5)
-                            .transition(.opacity)
-                            .help("Tara's memory is paused")
-                            .accessibilityLabel(Text("Tara's memory is paused"))
-                    }
-                }
+                .overlay(alignment: .topLeading) { islandTara(layout, peek: isPeek) }
+                // No separate mark for screen context or the pause: Tara is the mark (awake while
+                // screen context reads, dimmed and asleep while paused or off; `taraResting`).
+                // Right-click pauses or resumes her memory.
+                .contextMenu { memoryMenu }
                 // Watch mode on: a tiny moon, only while hovered.
                 .overlay(alignment: .bottomTrailing) {
                     if isPeek && model.watching {
@@ -190,9 +223,12 @@ struct NotchRootView: View {
                                     .padding(.leading, 8)
                             }
                             Spacer(minLength: 4)
+                            // The status takes the room it needs before the gap does (the plan
+                            // limits keep their names where they fit).
                             StatusStrip(model: model)
                                 .padding(.trailing, 12)
                                 .padding(.leading, split ? 0 : 8)
+                                .layoutPriority(1)
                         }
                         .frame(width: side)
                     }
@@ -311,8 +347,10 @@ private struct TabStrip: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
                     if module.kind == model.module { step = width + 2 }
                 }
-                .help(module.kind.title)
+                // The hover tooltip also says that tabs can be moved: hold, then drag.
+                .help(Text(LocalizedStringKey(module.kind.title)) + Text(verbatim: " · ") + Text("Hold and drag to move"))
                 .accessibilityLabel(module.kind.title)
+                .accessibilityHint(Text("Hold and drag to move"))
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
             if badge && model.memoryPaused { paused }

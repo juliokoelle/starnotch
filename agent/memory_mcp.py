@@ -33,6 +33,8 @@ from mcp.types import ToolAnnotations
 import captures as quick
 import connectors as linked
 import privacy as switches
+import vault_index
+import wiki
 from memory import DEFAULT_DIR, Meeting, Memory, _words
 
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
@@ -130,8 +132,10 @@ class Library:
 
     def __init__(self, memory_dir: Path | None = None, captures: Path | None = None, connectors: Path | None = None,
                  claude_projects: Path | None = None, privacy_file: Path | None = None,
-                 now: dt.datetime | None = None, calendar: Path | None = None):
+                 now: dt.datetime | None = None, calendar: Path | None = None,
+                 vault: vault_index.VaultIndex | None = None):
         self.memory_dir = memory_dir or DEFAULT_DIR
+        self.vault = vault  # the whole notes vault's index; build() sets the one config.toml names
         self.captures_path = captures or quick.QUEUE
         self.connectors_path = connectors or linked.FOLDER
         self.claude_projects = claude_projects or CLAUDE_PROJECTS
@@ -226,6 +230,17 @@ def search(lib: Library, query: str, sources: list[str] | None = None, limit: in
             score = _score(words, c.text)
             if score:
                 hits.append((score, c.day, {**_capture_source(c), "text": _short(c.text)}))
+    if words and "notes" in asked and lib.vault is not None and p.shares("notes"):
+        try:
+            lib.vault.update()
+            found = lib.vault.search(query, limit=max(1, min(limit, 30)))
+        except Exception:  # a broken index must not cost the other sources
+            found = []
+        for rank, h in enumerate(found):
+            # Best first and above a single shared word elsewhere: the index ranks by every word.
+            hits.append((2.0 - rank * 0.05, h.modified, {"source": "note", "id": f"vault:{h.path}", "title": h.title,
+                                                         "date": h.modified, "from": "vault", "link": h.url,
+                                                         "text": _short(h.text)}))
     if words and "notes" in asked:
         for item in lib.items(p):
             score = _score(words, item.title + " " + item.body)
@@ -323,7 +338,7 @@ def today_view(lib: Library) -> dict[str, Any]:
 
 def build(lib: Library | None = None) -> MCPServer:
     """The server; `lib` is the seam for tests."""
-    library = lib or Library()
+    library = lib or Library(vault=vault_index.from_config())
     server = MCPServer(
         "starnotch-memory",
         instructions=("Tara's memory from Starnotch, on the user's Mac: their meetings (transcripts, decisions, "

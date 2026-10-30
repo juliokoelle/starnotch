@@ -97,11 +97,18 @@ public struct TodayBrief: Equatable, Sendable {
     /// Small time beside the title, e.g. "06:45".
     public var time: String
     public var text: String
+    /// The briefing itself as Markdown, shown in full instead of `text`; empty when the note has
+    /// no briefing yet. Nil for a source without one (then `text` shows).
+    public var markdown: String?
+    /// Where the briefing lives (opened from the card's title).
+    public var url: URL?
 
-    public init(title: String, time: String = "", text: String) {
+    public init(title: String, time: String = "", text: String, markdown: String? = nil, url: URL? = nil) {
         self.title = title
         self.time = time
         self.text = text
+        self.markdown = markdown
+        self.url = url
     }
 }
 
@@ -122,6 +129,9 @@ public struct TodayFeed: Equatable, Sendable {
     public var followUpTitle: String
     public var confirmTitle: String
     public var emptyText: String
+    /// Open tasks that aren't due yet or have no date (Apple Reminders): Today lists them under
+    /// its due ones.
+    public var later: [TodayItem] = []
 
     public init(now: [TodayItem] = [], followUps: [TodayItem] = [], confirmations: [TodayItem] = [],
                 brief: TodayBrief? = nil, counters: [TodayCounter] = [], home: TodayLink? = nil,

@@ -27,4 +27,20 @@ import TestSupport
         #expect(isolated.store.load().moduleOrder == [.meeting, .agents])
         #expect(SwitcherSettings().moduleOrder.isEmpty)
     }
+
+    @Test func toolTabsKeepTheirDraggedOrder() {
+        let all = ["Clipboard", "Timer", "Shelf", "Notepad"]
+        // The shelf is switched off: dragging the notepad first keeps the shelf after the timer.
+        let saved = ModuleOrder.saved(visible: ["Notepad", "Clipboard", "Timer"], previous: [], all: all)
+        #expect(saved == ["Notepad", "Clipboard", "Timer", "Shelf"])
+        #expect(ModuleOrder.ordered(["Clipboard", "Timer", "Shelf"], by: saved) == ["Clipboard", "Timer", "Shelf"])
+        #expect(ModuleOrder.ordered(all, by: saved) == saved)
+
+        let isolated = IsolatedSettings()
+        var settings = SwitcherSettings()
+        settings.toolOrder = saved
+        isolated.store.save(settings)
+        #expect(isolated.store.load().toolOrder == saved)
+        #expect(SwitcherSettings().toolOrder.isEmpty)
+    }
 }

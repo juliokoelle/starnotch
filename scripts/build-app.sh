@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds the app with SwiftPM only (no Xcode needed) and signs it ad hoc.
+# Builds the app with SwiftPM only (no Xcode needed) and signs it with your Apple Development
+# certificate if the keychain has one, else ad hoc.
 #
 #   ./scripts/build-app.sh          # -> build/<Name>.app
 #   ./scripts/build-app.sh --zip    # also build/<Name>-<version>.zip for a release
@@ -12,12 +13,18 @@
 #   NOTCH_EXTRA_PACKS  colon-separated .notchpack folders to bundle besides the default pack
 #   NOTCH_OUT          output folder (default: build/ in this repo)
 #   VERSION            marketing version (default below)
+#   SIGN_IDENTITY      codesign identity (default: first valid "Apple Development" one, else - for ad hoc)
 # Release builds (see RELEASING.md) also set:
 #   STARNOTCH_SPARKLE=1     link Sparkle 2 for updates (the package then fetches it)
 #   SPARKLE_FEED_URL        appcast URL;  SPARKLE_PUBLIC_KEY  EdDSA public key (base64)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO="$(pwd)"
+# A real certificate keeps macOS privacy grants (Location Services, Accessibility) attached to the app
+# across rebuilds; with an ad-hoc signature they go stale and the Location toggle can't be switched on.
+SIGN_IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) "Apple Development: .*"$/\1/p' | head -1)}"
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
 BRAND="$(sed -n 's/^ *public static let name = "\(.*\)"$/\1/p' Sources/NotchCore/Brand.swift)"
 LOWER="$(echo "$BRAND" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
@@ -31,7 +38,9 @@ URL_SCHEME="${URL_SCHEME:-$LOWER}"
 OUT="${NOTCH_OUT:-$REPO/build}"
 COPYRIGHT="${COPYRIGHT:-Code under the Apache License 2.0. Tara and the Cat © 2026 Julio Koelle, all rights reserved.}"
 VERSION="${VERSION:-0.1.0}"
+if [[ "${STARNOTCH_SPARKLE:-}" == "1" ]]; then SCREEN_CONTEXT="${SCREEN_CONTEXT:-0}"; else SCREEN_CONTEXT="${SCREEN_CONTEXT:-1}"; fi
 BUILD_NUMBER="$(git -C "$REPO" rev-list --count HEAD 2>/dev/null || echo 1)"
+export STARNOTCH_SCREEN_CONTEXT="$SCREEN_CONTEXT"
 
 swift build --package-path "$PACKAGE" -c release --product "$PRODUCT"
 BIN_DIR="$(swift build --package-path "$PACKAGE" -c release --show-bin-path)"
@@ -52,12 +61,12 @@ mkdir -p "$APP/Contents/Frameworks"
 clang -dynamiclib -fobjc-arc -O2 -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \
     -framework Foundation -framework AppKit \
     helpers/mediaremote/StarnotchMediaRemote.m -o "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib"
-codesign --force --sign - --timestamp=none "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib"
+codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP/Contents/Frameworks/libStarnotchMediaRemote.dylib"
 # Tara's free brain: the Apple Intelligence helper the agent runs per question (Sources/AppleModel; it needs
 # macOS 26 and says so on older systems). Built from this repo, also for a private build of another package.
 swift build --package-path "$REPO" -c release --product AppleModel
 cp "$(swift build --package-path "$REPO" -c release --show-bin-path)/AppleModel" "$APP/Contents/MacOS/AppleModel"
-codesign --force --sign - --timestamp=none "$APP/Contents/MacOS/AppleModel"
+codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP/Contents/MacOS/AppleModel"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Character packs: the public ones (Astra, Cat, Pebbles), plus any the build adds.
 cp -R Resources/Characters/*.notchpack "$APP/Contents/Resources/Characters/"
@@ -70,6 +79,8 @@ fi
 # Interface strings (English and German).
 cp -R Resources/Localization/*.lproj "$APP/Contents/Resources/"
 cp docs/usage-setup.md "$APP/Contents/Resources/usage-setup.md"
+# What's new in the Dashboard (Help › What's new) reads the changelog from the bundle.
+cp CHANGELOG.md "$APP/Contents/Resources/CHANGELOG.md"
 # Approval hooks (Claude Code plugin, Codex hook and its installer), for Settings › Providers.
 # The setup page installs from these copies when GitHub isn't reachable.
 mkdir -p "$APP/Contents/Resources/integrations"
@@ -102,6 +113,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NotchSupportFolder</key><string>$SUPPORT_FOLDER</string>
+    <key>NotchScreenContext</key><$( [[ "$SCREEN_CONTEXT" == "1" ]] && echo true || echo false )/>
     <key>NotchURLScheme</key><string>$URL_SCHEME</string>
     <key>CFBundleURLTypes</key>
     <array>
@@ -126,10 +138,15 @@ $( [[ -n "${SPARKLE_PUBLIC_KEY:-}" ]] && printf '    <key>SUPublicEDKey</key><st
 </plist>
 PLIST
 
-# Ad-hoc signature: runs locally; Gatekeeper still warns on other Macs (not notarized).
-# The designated requirement names the bundle id instead of this build's hash, so macOS privacy
-# grants (calendar, automation) recorded against it survive rebuilds.
-codesign --force --sign - --timestamp=none -r="designated => identifier \"$BUNDLE_ID\"" "$APP"
+# Runs locally; Gatekeeper still warns on other Macs (not notarized, see scripts/release/).
+# With a certificate the designated requirement is codesign's default (bundle id plus certificate).
+# Ad hoc it names only the bundle id instead of this build's hash, so calendar and automation grants
+# survive rebuilds; Location Services and Accessibility don't trust that and need the certificate.
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    codesign --force --sign - --timestamp=none -r="designated => identifier \"$BUNDLE_ID\"" "$APP"
+else
+    codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP"
+fi
 codesign --verify --verbose=1 "$APP"
 echo "Built $APP"
 

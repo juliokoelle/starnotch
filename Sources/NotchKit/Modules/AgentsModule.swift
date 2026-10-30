@@ -19,6 +19,11 @@ final class AgentsModule: NotchModule {
     /// The agent shown big; `nil` follows the most recent working one.
     var selectedID: String?
     var showsLoops = false
+    /// The plan limits page, from a click on the header's chips.
+    var showsLimits = false
+    /// Subagent lists the user opened or closed in the side card, by session; the rest follow
+    /// `showsSubagents`.
+    private var subagentsOpen: [String: Bool] = [:]
     /// Sessions that just finished their turn, shown celebrating for a moment.
     private(set) var finishedAt: [String: Date] = [:]
     let cast: AvatarCast
@@ -57,6 +62,8 @@ final class AgentsModule: NotchModule {
     /// The agents inbox, for its count in the ear (set by the app).
     @ObservationIgnored weak var inbox: AgentsInbox?
     var inboxCount: Int { inbox?.count ?? 0 }
+    /// Previews: the plan limits popover opens with the panel.
+    @ObservationIgnored var previewShowsLimits = false
     @ObservationIgnored private var previewMode = false
     /// Pending approvals already turned into a step of their session.
     @ObservationIgnored private var ingestedApprovals: Set<String> = []
@@ -109,7 +116,7 @@ final class AgentsModule: NotchModule {
     enum LoopPhase: Equatable {
         case running, waiting, failed, done
 
-        var color: Color {
+        @MainActor var color: Color {
             switch self {
             case .running: Theme.ok
             case .waiting: Theme.waiting
@@ -187,8 +194,38 @@ final class AgentsModule: NotchModule {
         }
     }
 
+    /// A session's subagents in the side card: open while one runs or one failed recently, else
+    /// folded to one line, unless the user chose.
+    func showsSubagents(of agent: AgentSnapshot.Agent) -> Bool {
+        subagentsOpen[agent.id] ?? agent.subagents.contains { $0.status == .running || ($0.status == .failed && $0.isRecent) }
+    }
+
+    func toggleSubagents(of agent: AgentSnapshot.Agent) {
+        Haptics.tick()
+        let open = !showsSubagents(of: agent)
+        withAnimation(Theme.snappy) { subagentsOpen[agent.id] = open }
+    }
+
+    /// The plan limits page in place of the sessions, or back from it.
+    func toggleLimits() {
+        Haptics.tick()
+        withAnimation(Theme.snappy) {
+            showsLimits.toggle()
+            if showsLimits {
+                showsLoops = false
+                selectedLoop = nil
+                detailID = nil
+                subagentID = nil
+            }
+        }
+    }
+
     /// ← or Esc inside the agents panel: detail → list → sessions.
     func handleBack() -> Bool {
+        if showsLimits {
+            withAnimation(Theme.snappy) { showsLimits = false }
+            return true
+        }
         if subagentID != nil {
             withAnimation(Theme.snappy) { subagentID = nil }
             return true
@@ -497,6 +534,7 @@ final class AgentsModule: NotchModule {
             loadRecent()
         } else {
             showsLoops = false
+            showsLimits = false
             selectedLoop = nil
             detailID = nil
         }
@@ -551,7 +589,10 @@ final class AgentsModule: NotchModule {
         return snapshot.loops.filter { $0.last?.status == .fail && $0.last?.day == today }
     }
 
-    func mood(of agent: AgentSnapshot.Agent, now: Date = Date()) -> AgentFace.Mood {
+    func mood(of agent: AgentSnapshot.Agent, now: Date = Date()) -> AgentFace.Mood { Self.mood(of: agent, now: now) }
+
+    /// The same for any session (the Dashboard's Characters page draws sessions it was handed).
+    static func mood(of agent: AgentSnapshot.Agent, now: Date = Date()) -> AgentFace.Mood {
         if agent.needsYou != nil { return .waiting }
         if agent.isBusy { return .working }
         if let since = agent.since, now.timeIntervalSince(since) < Self.waitingWindow { return .waiting }
@@ -569,7 +610,11 @@ final class AgentsModule: NotchModule {
 
     /// Avatar mood: what the sprite shows.
     func avatarMood(of agent: AgentSnapshot.Agent, now: Date = Date()) -> AvatarMood {
-        if let at = finishedAt[agent.id], now.timeIntervalSince(at) < Self.finishedWindow { return .finished }
+        Self.avatarMood(of: agent, finished: finishedAt[agent.id], now: now)
+    }
+
+    static func avatarMood(of agent: AgentSnapshot.Agent, finished: Date?, now: Date = Date()) -> AvatarMood {
+        if let at = finished, now.timeIntervalSince(at) < finishedWindow { return .finished }
         if agent.isBusy {
             switch agent.steps.last?.kind {
             case .edit?, nil: return .working
@@ -588,9 +633,11 @@ final class AgentsModule: NotchModule {
 
     /// Colorway per session: by performance level (default) or by session; sessions of one
     /// project that land on the same colorway get a small hue offset.
-    var sessionColours: [String: (colorway: String, offset: Double)] {
+    var sessionColours: [String: (colorway: String, offset: Double)] { Self.sessionColours(snapshot.agents, cast: cast) }
+
+    static func sessionColours(_ agents: [AgentSnapshot.Agent], cast: AvatarCast) -> [String: (colorway: String, offset: Double)] {
         var result: [String: (String, Double)] = [:]
-        for (_, sessions) in Dictionary(grouping: snapshot.agents, by: \.project) {
+        for (_, sessions) in Dictionary(grouping: agents, by: \.project) {
             let keys = sessions.map { SessionColours.Session(id: $0.id, level: $0.level, started: $0.started) }
             result.merge(SessionColours.assign(keys, by: cast.colourBy, scale: cast.colourScale,
                                                sessionPalette: Colorway.builtIn.map(\.key).filter { $0 != "matte_black" })) { a, _ in a }
@@ -599,12 +646,18 @@ final class AgentsModule: NotchModule {
     }
 
     func colorway(of agent: AgentSnapshot.Agent) -> Colorway {
+        Self.colorway(of: agent, entry: sessionColours[agent.id], cast: cast)
+    }
+
+    /// A session's colorway from its entry in `sessionColours`.
+    static func colorway(of agent: AgentSnapshot.Agent, entry: (colorway: String, offset: Double)?, cast: AvatarCast) -> Colorway {
+        let character = cast.character(forProject: agent.project)
         // Not tintable (the cat): its own colours, always; sessions differ by title.
-        guard cast.isTintable(character(of: agent)) else { return Colorway() }
-        guard let entry = sessionColours[agent.id] else { return Colorway() }
+        guard cast.isTintable(character) else { return Colorway() }
+        guard let entry else { return Colorway() }
         // The character's own look for this level (Astra's colours, the cat's eyes) unless the user
         // set a colour for the level.
-        if let level = variantLevel(of: agent), let variant = cast.variant(of: character(of: agent), level: level) {
+        if let level = cast.look(of: character, level: agent.level).level, let variant = cast.variant(of: character, level: level) {
             return (variant.colorway.map(Colorway.named) ?? Colorway()).shifted(by: entry.offset)
         }
         return Colorway.named(entry.colorway).shifted(by: entry.offset)
@@ -675,18 +728,33 @@ final class AgentsModule: NotchModule {
         return "idle" + (rest.map { " \($0)" } ?? "")
     }
 
-    /// The session itself: Remote Control sessions on claude.ai, terminal sessions in their own
-    /// tab or pane, otherwise the tool's app (Claude, Codex) or the project folder.
+    /// The session itself. A Remote Control session in its own tab of the Claude app
+    /// (`claude://claude.ai/code/<session>`, tried 30.10.: the app goes straight to it), which is
+    /// lighter than the terminal or editor running it; with ⌥ held on claude.ai. Otherwise where
+    /// it runs on this Mac (its terminal tab or pane, its editor), then claude.ai for a Remote
+    /// Control session with nothing here, the tool's app (Claude, Codex) or the project folder.
     func jump(to agent: AgentSnapshot.Agent) {
-        if let url = agent.remoteURL {
+        let wantsWeb = NSEvent.modifierFlags.contains(.option)
+        if let url = agent.remoteURL, wantsWeb {
             NSWorkspace.shared.open(url)
+        } else if let url = agent.remoteURL, let app = Self.claudeAppLink(url),
+                  NSWorkspace.shared.urlForApplication(toOpen: app) != nil {
+            NSWorkspace.shared.open(app)
         } else if SessionJump.open(agent) {
             return
+        } else if let url = agent.remoteURL {
+            NSWorkspace.shared.open(url)
         } else if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.appBundleID(of: agent.provider)) {
             NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
         } else {
             NSWorkspace.shared.open(URL(fileURLWithPath: agent.cwd))
         }
+    }
+
+    /// `https://claude.ai/code/session_…` as the Claude app's own link, which opens that session's tab.
+    static func claudeAppLink(_ url: URL) -> URL? {
+        guard url.host == "claude.ai", url.path.hasPrefix("/code/") else { return nil }
+        return URL(string: "claude://claude.ai" + url.path)
     }
 
     /// The desktop app of a tool, for sessions without a terminal.
@@ -716,9 +784,9 @@ final class AgentsModule: NotchModule {
         return failedLoops.isEmpty ? 0 : 10
     }
 
-    func leadingEar(peek: Bool) -> AnyView {
-        AnyView(AgentsLeadingEar(module: self, peek: peek))
-    }
+    /// Tara's place only: the island draws her over it (`IslandTara`), so she is never clipped by
+    /// the ear and never shows twice on the way into the peek.
+    func leadingEar(peek: Bool) -> AnyView { AnyView(Color.clear) }
 
     func trailingEar(peek: Bool) -> AnyView {
         AnyView(AgentsTrailingEar(module: self, peek: peek))
@@ -758,7 +826,7 @@ final class AgentsModule: NotchModule {
         return nil
     }
 
-    var holdsOpen: Bool { detailID != nil || subagentID != nil || selectedLoop != nil }
+    var holdsOpen: Bool { detailID != nil || subagentID != nil || selectedLoop != nil || showsLimits }
 
     /// A session waits for the user, or a loop failed today. Working alone doesn't count.
     var needsAttention: Bool {
@@ -773,20 +841,20 @@ final class AgentsModule: NotchModule {
 
 // MARK: - Ears and peek
 
-private struct AgentsLeadingEar: View {
+/// Tara on the island at rest and in the hover peek. The island draws her once, over the ears
+/// and the peek line (`NotchLayout.taraBox`), so from rest to the peek she moves and grows as one
+/// figure: no second copy crossing over her, no ear cutting her off.
+struct IslandTara: View {
     let module: AgentsModule
-    let peek: Bool
-    @Environment(\.notch) private var notch
+    let height: CGFloat
+    @Environment(\.quietEars) private var quiet
 
     var body: some View {
-        // In the peek the figure moves down into the peek line (same id), bigger.
-        if peek {
-            Color.clear
-        } else {
-            MainFigure(module: module, height: 24, sink: 0.25)
-                .frame(height: 32, alignment: .bottom)
-                .notchMatched("agents.main", in: notch.namespace)
-        }
+        // The quiet look: no badge says that something waits; Tara does, with her expression
+        // and a soft glow in her own colour.
+        let attention = quiet && module.needsAttention
+        MainFigure(module: module, height: height, attention: attention)
+            .shadow(color: TaraAccent.shared.color.opacity(attention ? 0.75 : 0), radius: 5)
     }
 }
 
@@ -794,8 +862,11 @@ private struct AgentsLeadingEar: View {
 private struct MainFigure: View {
     let module: AgentsModule
     var height: CGFloat
-    var sink: CGFloat = 0
     var emergeOnAppear = true
+    /// Something needs the user (quiet look): the figure shows it instead of a badge.
+    var attention = false
+    /// Screen context off or Tara's memory paused: asleep, unless she has something to show.
+    @Environment(\.taraResting) private var resting
     @State private var draggingOut = false
 
     var body: some View {
@@ -814,13 +885,22 @@ private struct MainFigure: View {
     @ViewBuilder private var figure: some View {
         if let main = module.main {
             let character = module.character(of: main)
-            AvatarView(character: character, mood: module.avatarMood(of: main), height: height,
-                       colorway: module.colorway(of: main), sink: sink, emergeOnAppear: emergeOnAppear,
+            AvatarView(character: character, mood: attention ? attentionMood(main) : resting ? .asleep : module.avatarMood(of: main), height: height,
+                       colorway: module.colorway(of: main), emergeOnAppear: emergeOnAppear,
                        level: module.variantLevel(of: main))
         } else {
-            AvatarView(character: module.cast.main, mood: module.failedLoops.isEmpty ? .idle : .failed,
-                       height: height, colorway: module.cast.colorway, sink: sink, emergeOnAppear: emergeOnAppear)
+            AvatarView(character: module.cast.main, mood: module.failedLoops.isEmpty ? (attention ? .yourTurn : resting ? .asleep : .idle) : .failed,
+                       height: height, colorway: module.cast.colorway, emergeOnAppear: emergeOnAppear)
         }
+    }
+
+    /// The main session's own mood when it is the one waiting or finished; otherwise "your turn"
+    /// (another session or the inbox waits), or "failed" for a failed loop.
+    private func attentionMood(_ main: AgentSnapshot.Agent) -> AvatarMood {
+        let own = module.avatarMood(of: main)
+        if [.yourTurn, .failed, .finished].contains(own) { return own }
+        let waits = module.inboxCount > 0 || module.snapshot.agents.contains { module.mood(of: $0) == .waiting }
+        return waits || module.failedLoops.isEmpty ? .yourTurn : .failed
     }
 }
 
@@ -828,8 +908,14 @@ private struct AgentsTrailingEar: View {
     let module: AgentsModule
     let peek: Bool
     @Environment(\.figuresHidden) private var figuresHidden
+    @Environment(\.quietEars) private var quiet
 
     var body: some View {
+        // The quiet look: nothing right of the notch, also on hover (no count, no other figures).
+        if !quiet { ears }
+    }
+
+    private var ears: some View {
         HStack(spacing: peek ? 6 : 3) {
             // Music keeps playing in the background: a small equalizer next to the agents.
             // In the narrow compact ear only when no other sessions need the room.
@@ -893,7 +979,7 @@ private struct AgentsTrailingEar: View {
     }
 }
 
-/// How many things wait in the agents inbox: a small count in the waiting tint.
+/// How many things wait in the agents inbox: a small count in Tara's colour.
 private struct InboxCountBadge: View {
     let count: Int
     var large = false
@@ -901,7 +987,7 @@ private struct InboxCountBadge: View {
     var body: some View {
         Text("\(count)")
             .font(Theme.font(large ? 11.5 : 10.5, .bold).monospacedDigit())
-            .foregroundStyle(Color.black.opacity(0.85))
+            .foregroundStyle(TaraAccent.shared.isLight ? Color.black.opacity(0.85) : .white)
             .padding(.horizontal, large ? 5 : 4)
             .frame(minWidth: large ? 18 : 16, minHeight: large ? 18 : 16)
             .background(Theme.waiting, in: Capsule())
@@ -913,19 +999,36 @@ private struct InboxCountBadge: View {
 
 private struct AgentsPeekLine: View {
     let module: AgentsModule
-    @Environment(\.notch) private var notch
     @Environment(\.figuresHidden) private var figuresHidden
+    @Environment(\.quietEars) private var quiet
 
     var body: some View {
+        if quiet { quietLine } else { detailed }
+    }
+
+    /// The quiet look: Tara alone, to grab and pull out; one short line only while something
+    /// waits for the user ("2 need you"). What runs and what idles stays in the panel.
+    private var quietLine: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            // Bigger figure, leaning on the island's bottom edge; it grows out of the left ear.
-            // Fully below the hardware notch (whatever reaches above it hides behind the camera
-            // housing): the top of the head sits 2 pt under the notch's edge. Watch mode: text only.
-            if !figuresHidden {
-                MainFigure(module: module, height: 37, emergeOnAppear: false)
-                    .frame(width: 44, height: 39, alignment: .bottom)
-                    .notchMatched("agents.main", in: notch.namespace)
+            // Her place; the island draws her there (`IslandTara`).
+            if !figuresHidden { Color.clear.frame(width: 44) }
+            if module.inboxCount > 0 {
+                Text(String(format: Localization.string("%d need you"), module.inboxCount))
+                    .foregroundStyle(Theme.textPrimary)
+                    .font(Theme.font(13, .medium))
+                    .lineLimit(1)
+                    .padding(.bottom, 12)
             }
+            Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity, alignment: .bottom)
+    }
+
+    private var detailed: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            // Tara's place: the island draws her there, grown out of the left ear and fully below
+            // the hardware notch (`IslandTara`). Watch mode: text only.
+            if !figuresHidden { Color.clear.frame(width: 44) }
             VStack(alignment: .leading, spacing: 1) {
                 if let main = module.main {
                     let title = Text(main.displayTitle)
@@ -980,6 +1083,9 @@ private struct AgentsBody: View {
             } else if let id = module.detailID, let agent = module.snapshot.agents.first(where: { $0.id == id }) {
                 SessionDetailCard(module: module, agent: agent)
                     .transition(.blurSlide(x: 18))
+            } else if module.showsLimits {
+                LimitsPage(module: module)
+                    .transition(.blurSlide(y: 10))
             } else if module.showsLoops, let name = module.selectedLoop, let loop = module.loops.first(where: { $0.name == name }) {
                 LoopDetailCard(module: module, loop: loop)
                     .transition(.blurSlide(x: 18))
@@ -996,6 +1102,7 @@ private struct AgentsBody: View {
             }
         }
         .animation(Theme.snappy, value: module.showsLoops)
+        .animation(Theme.snappy, value: module.showsLimits)
     }
 }
 
@@ -1197,10 +1304,11 @@ private struct SideCard: View {
     }
 
     /// Rows of the side card: the main session's subagents under a small header, then each
-    /// other session with its subagents nested below it.
+    /// other session with its subagents nested below it. Each list folds to one line (`fold`).
     private enum Row: Identifiable {
         case header(AgentSnapshot.Agent)
         case chip(Chip)
+        case fold(AgentSnapshot.Agent)
         case sub(AgentSnapshot.Agent, AgentSnapshot.Subagent, last: Bool)
         case earlier(String, Int)
 
@@ -1208,6 +1316,7 @@ private struct SideCard: View {
             switch self {
             case .header(let agent): "h-\(agent.id)"
             case .chip(let chip): "c-\(chip.id)"
+            case .fold(let agent): "f-\(agent.id)"
             case .sub(_, let sub, _): "s-\(sub.id)"
             case .earlier(let parent, _): "e-\(parent)"
             }
@@ -1215,11 +1324,8 @@ private struct SideCard: View {
     }
 
     private func chip(for agent: AgentSnapshot.Agent) -> Chip {
-        var line = module.secondary(for: agent)
-        if let summary = AgentSnapshot.Subagent.summary(agent.subagents, earlier: agent.earlierSubagents),
-           agent.subagents.contains(where: { $0.status == .running }) {
-            line = summary
-        }
+        // What the subagents do is on the fold line below the chip.
+        let line = module.secondary(for: agent)
         return Chip(id: agent.id, character: module.character(of: agent), mood: module.avatarMood(of: agent),
                     title: agent.displayTitle, line: line, tint: module.color(of: agent),
                     help: "\(agent.displayTitle) · \(agent.project)\(agent.branch.map { " on \($0)" } ?? "")\n\(agent.model ?? "model unknown") · effort \(agent.effort ?? "unknown")",
@@ -1231,6 +1337,7 @@ private struct SideCard: View {
     /// In the side card: running subagents and those that finished in the last two hours; the
     /// rest count as earlier (the session's detail card lists the last five).
     private func nested(_ agent: AgentSnapshot.Agent) -> [Row] {
+        guard module.showsSubagents(of: agent) else { return [] }
         let recent = agent.subagents.filter(\.isRecent)
         let earlier = agent.earlierSubagents + agent.subagents.count - recent.count
         var rows = recent.enumerated().map { index, sub in
@@ -1242,17 +1349,17 @@ private struct SideCard: View {
 
     private var rows: [Row] {
         var rows: [Row] = []
-        if let main = module.main, !main.subagents.isEmpty {
-            let subs = nested(main)
-            // Only old ones: one quiet line, no header block.
-            if subs.contains(where: { if case .sub = $0 { true } else { false } }) {
-                rows.append(.header(main))
-                rows += subs
-            }
+        if let main = module.main, main.subagents.contains(where: \.isRecent) {
+            // Only old ones: no header block. The header folds the list.
+            rows.append(.header(main))
+            rows += nested(main)
         }
         for agent in module.others {
             rows.append(.chip(chip(for: agent)))
-            rows += nested(agent)
+            if !agent.subagents.isEmpty || agent.earlierSubagents > 0 {
+                rows.append(.fold(agent))
+                rows += nested(agent)
+            }
         }
         return rows
     }
@@ -1271,17 +1378,19 @@ private struct SideCard: View {
                             ForEach(rows) { row in
                                 switch row {
                                 case .header(let agent):
-                                    HStack(spacing: 6) {
+                                    foldButton(agent) {
                                         Text(agent.displayTitle).font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.textSecondary)
-                                        Text((AgentSnapshot.Subagent.summary(agent.subagents, earlier: agent.earlierSubagents) ?? "").replacingOccurrences(of: "Subagents: ", with: ""))
-                                            .font(Theme.font(11)).foregroundStyle(Theme.textTertiary)
-                                        Spacer(minLength: 0)
                                     }
-                                    .lineLimit(1)
                                     .padding(.leading, 6)
-                                    .frame(height: 18)
                                 case .chip(let chip):
                                     chipView(chip, compact: true)
+                                case .fold(let agent):
+                                    foldButton(agent) {
+                                        let count = agent.subagents.count + agent.earlierSubagents
+                                        Text(count == 1 ? Localization.string("1 subagent") : String(format: Localization.string("%d subagents"), count))
+                                            .font(Theme.font(11, .medium)).foregroundStyle(Theme.textSecondary)
+                                    }
+                                    .padding(.leading, 34)
                                 case .sub(let parent, let sub, let last):
                                     SubagentRow(module: module, parent: parent, sub: sub, last: last)
                                         .padding(.leading, 10)
@@ -1300,6 +1409,30 @@ private struct SideCard: View {
                 }
             }
         }
+    }
+
+    /// A line that opens or folds a session's subagents: the chevron, `label`, what they do now.
+    private func foldButton(_ agent: AgentSnapshot.Agent, @ViewBuilder label: () -> some View) -> some View {
+        let open = module.showsSubagents(of: agent)
+        let summary = (AgentSnapshot.Subagent.summary(agent.subagents, earlier: agent.earlierSubagents) ?? "")
+            .replacingOccurrences(of: "Subagents: ", with: "")
+        return Button { module.toggleSubagents(of: agent) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right").font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                label()
+                if !summary.isEmpty {
+                    Text(summary).font(Theme.font(11)).foregroundStyle(Theme.textTertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            .lineLimit(1)
+            .frame(height: 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .help(Localization.string(open ? "Fold the subagents" : "Show the subagents"))
     }
 
     private func chipView(_ chip: Chip, compact: Bool) -> some View {

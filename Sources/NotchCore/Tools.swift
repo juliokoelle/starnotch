@@ -2,27 +2,56 @@ import Foundation
 
 // The Tools module's models, without AppKit: clipboard history and the focus timer.
 
-/// One copied text.
+/// One copied text, or one copied image.
 public struct ClipItem: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
+    /// The text; empty for an image.
     public var text: String
     public var copied: Date
     public var pinned: Bool
     /// The app it was copied in.
     public var source: String?
+    /// A copied image as PNG (kept in memory only, like the text), its small preview for the
+    /// list, and its size in pixels.
+    public var image: Data?
+    public var thumbnail: Data?
+    public var pixelWidth: Int?
+    public var pixelHeight: Int?
 
-    public init(id: UUID = UUID(), text: String, copied: Date, pinned: Bool = false, source: String? = nil) {
+    public init(id: UUID = UUID(), text: String, copied: Date, pinned: Bool = false, source: String? = nil,
+                image: Data? = nil, thumbnail: Data? = nil, pixelWidth: Int? = nil, pixelHeight: Int? = nil) {
         self.id = id
         self.text = text
         self.copied = copied
         self.pinned = pinned
         self.source = source
+        self.image = image
+        self.thumbnail = thumbnail
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
     }
+
+    public var isImage: Bool { image != nil }
+    /// Memory the image and its preview take.
+    public var imageBytes: Int { (image?.count ?? 0) + (thumbnail?.count ?? 0) }
 
     /// One line for the list: whitespace folded, at most `limit` characters.
     public func line(_ limit: Int = 90) -> String {
         let folded = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         return folded.count <= limit ? folded : String(folded.prefix(limit - 1)) + "…"
+    }
+
+    /// A copied web address on its own: its domain without "www." and the rest ("/path?query"),
+    /// for a row that leads with the domain. Nil for any other text.
+    public var link: (domain: String, rest: String)? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: \.isWhitespace),
+              let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else { return nil }
+        let domain = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        var rest = url.path == "/" ? "" : url.path
+        if let query = url.query, !query.isEmpty { rest += "?" + query }
+        return (domain, rest)
     }
 }
 
@@ -32,6 +61,17 @@ public struct ClipboardHistory: Codable, Equatable, Sendable {
     public static let limit = 200
     /// Longer copies are kept up to this many characters.
     public static let maxLength = 20_000
+    /// Images take memory: at most this many unpinned ones, each at most `maxImageBytes`.
+    public static let imageLimit = 12
+    public static let maxImageBytes = 15_000_000
+    /// All images together, the pinned ones too, take at most this much memory: the oldest
+    /// unpinned go first, and pins stop at `pinnedImageBudget`.
+    public static let imageBudget = 150_000_000
+    /// Pinned images stay below this, so a new copy always fits beside them.
+    public static let pinnedImageBudget = imageBudget - maxImageBytes
+    /// Checked before an image is decoded: the copied data (TIFF is uncompressed) and its pixels.
+    public static let maxImageInputBytes = 160_000_000
+    public static let maxImagePixels = 40_000_000
 
     /// Pasteboard types that mark a copy as secret or temporary (nspasteboard.org).
     public static let skippedTypes: Set<String> = [
@@ -66,9 +106,42 @@ public struct ClipboardHistory: Codable, Equatable, Sendable {
         return true
     }
 
-    public mutating func togglePin(_ id: UUID) {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+    /// Adds a copied image (PNG); the same image moves to the top instead of repeating. Too large
+    /// an image is not kept. Returns whether the list changed.
+    @discardableResult
+    public mutating func addImage(_ png: Data, thumbnail: Data?, width: Int, height: Int, source: String? = nil,
+                                  at date: Date) -> Bool {
+        guard !png.isEmpty, png.count <= Self.maxImageBytes else { return false }
+        var pinned = false
+        if let index = items.firstIndex(where: { $0.image == png }) {
+            pinned = items[index].pinned
+            items.remove(at: index)
+        }
+        items.insert(ClipItem(text: "", copied: date, pinned: pinned, source: source, image: png, thumbnail: thumbnail,
+                              pixelWidth: width, pixelHeight: height), at: 0)
+        trim()
+        return true
+    }
+
+    /// Whether a copied image is small enough to decode, from its data's size and the pixel size
+    /// its header gives.
+    public static func acceptsImage(bytes: Int, width: Int, height: Int) -> Bool {
+        bytes > 0 && bytes <= maxImageInputBytes && width > 0 && height > 0 && width * height <= maxImagePixels
+    }
+
+    /// Memory the images take (with their previews); `pinned`: only the pinned ones.
+    public func imageBytes(pinned: Bool = false) -> Int {
+        items.filter { $0.isImage && (!pinned || $0.pinned) }.reduce(0) { $0 + $1.imageBytes }
+    }
+
+    /// Pins or unpins; an image isn't pinned beyond `pinnedImageBudget`. Returns whether it changed.
+    @discardableResult
+    public mutating func togglePin(_ id: UUID) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return false }
+        if !items[index].pinned, items[index].isImage,
+           imageBytes(pinned: true) + items[index].imageBytes > Self.pinnedImageBudget { return false }
         items[index].pinned.toggle()
+        return true
     }
 
     public mutating func remove(_ id: UUID) {
@@ -80,21 +153,30 @@ public struct ClipboardHistory: Codable, Equatable, Sendable {
         items.removeAll { !$0.pinned }
     }
 
-    /// Pinned first, then newest; with a query, the items containing it (case and accents ignored).
+    /// Pinned first, then newest; with a query, the items containing it (case and accents ignored),
+    /// also in the app it was copied in.
     public func list(matching query: String = "") -> [ClipItem] {
         let needle = query.trimmingCharacters(in: .whitespaces)
-        let found = needle.isEmpty ? items : items.filter {
-            $0.text.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        let found = needle.isEmpty ? items : items.filter { item in
+            [item.text, item.source ?? ""].contains { $0.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
         }
         return found.filter(\.pinned) + found.filter { !$0.pinned }
     }
 
-    /// Drops the oldest unpinned items beyond the limit.
+    /// Drops the oldest unpinned items beyond the limit, and the oldest unpinned images beyond
+    /// their count and the memory budget.
     private mutating func trim() {
         var unpinned = items.filter { !$0.pinned }.count
         while items.count > Self.limit, unpinned > 0, let last = items.lastIndex(where: { !$0.pinned }) {
             items.remove(at: last)
             unpinned -= 1
+        }
+        while items.filter({ $0.isImage && !$0.pinned }).count > Self.imageLimit,
+              let last = items.lastIndex(where: { $0.isImage && !$0.pinned }) {
+            items.remove(at: last)
+        }
+        while imageBytes() > Self.imageBudget, let last = items.lastIndex(where: { $0.isImage && !$0.pinned }) {
+            items.remove(at: last)
         }
     }
 }
@@ -233,6 +315,16 @@ public enum Countdown {
         let total = Int(seconds.rounded(.up))
         let hours = total / 3600, minutes = total / 60 % 60, rest = total % 60
         return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, rest) : String(format: "%d:%02d", minutes, rest)
+    }
+
+    /// For the narrow ear beside the notch (about 24 pt): "45s", "12m", "1h59", "2h"; from ten
+    /// hours on only the hours.
+    public static func short(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded(.up))
+        if total < 60 { return "\(total)s" }
+        if total < 3600 { return "\(total / 60)m" }
+        let hours = total / 3600, minutes = total / 60 % 60
+        return minutes == 0 || hours >= 10 ? "\(hours)h" : String(format: "%dh%02d", hours, minutes)
     }
 }
 

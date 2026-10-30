@@ -37,7 +37,20 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
     private let lock = NSLock()
     private var cache: (key: String, tasks: [VaultTask])?
     private var dailyCache: (key: String, text: String)?
+    /// Notes found by their wiki-link name, and names no note has (until the vault changes).
+    private var notesByName: [String: URL] = [:]
+    private var missingNotes: Set<String> = []
+    /// Names being looked for off the main thread.
+    private var lookingFor: Set<String> = []
+    /// Counts `forgetMissingNotes()`: a walk that began before a change doesn't keep its answer.
+    private var notesGeneration = 0
     private var detected: (folder: String, layout: VaultLayout)?
+
+    /// Whether Today may read the notes (set by the app): false with the notes vault switched off
+    /// in Tara's memory, and then no task, daily note or briefing is read for it.
+    public var readsNotes: () -> Bool = { true }
+    /// A briefing's linked note was found off the main thread: Today reads again (set by the app).
+    public var onNoteFound: (@Sendable () -> Void)?
 
     public init(config: ConfigSection, defaults: UserDefaults,
                 snapshotURL: URL? = Brand.supportFolder.appending(path: "connectors/vault.json")) {
@@ -208,6 +221,11 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
 
     public func today(now: Date) -> TodayFeed {
         guard isConfigured else { return TodayFeed(nowTitle: L("Due today"), emptyText: L("Pick your notes folder in Settings.")) }
+        // Notes off in Tara's memory: nothing of them is read, the briefing card says why.
+        guard readsNotes() else {
+            return TodayFeed(brief: TodayBrief(title: L("Today's note"), text: "", markdown: ""), home: homeLink,
+                             nowTitle: L("Due today"), emptyText: L("Your notes are off in Tara's memory."))
+        }
         guard layout.tasks != nil else { return TodayFeed(nowTitle: L("Due today"), emptyText: L("Choose your tasks in Settings › Notes.")) }
         let tasks = openTasks()
         let day = RunLog.day(now)
@@ -221,7 +239,19 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
         var brief: TodayBrief?
         if let note = dailyURL(for: now), let text = dailyText(note) {
             let headings = DailyNote.headings(text)
-            brief = TodayBrief(title: L("Today's note"), text: headings.isEmpty ? DailyNote.body(text, limit: 160) : headings.joined(separator: " · "))
+            brief = TodayBrief(title: L("Today's note"), text: headings.isEmpty ? DailyNote.body(text, limit: 160) : headings.joined(separator: " · "),
+                               markdown: "", url: link(to: note))
+            // The briefing in full: its section, or the note that section links to (a note not
+            // found yet is looked for off the main thread; until then the section shows).
+            if let section = DailyNote.briefing(text) {
+                brief?.title = section.title
+                brief?.markdown = section.body
+                if let name = DailyNote.linkedNote(section.body), let linked = knownNote(named: name),
+                   let content = try? String(contentsOf: linked, encoding: .utf8) {
+                    brief?.markdown = Self.withoutTitle(DailyNote.body(content, limit: 12_000))
+                    brief?.url = link(to: linked)
+                }
+            }
         }
         var counters = [TodayCounter(label: L("Open (count)"), value: tasks.count, help: L("Open tasks in your notes"),
                                      url: tasksURL.map(link(to:)))]
@@ -229,7 +259,7 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
             counters.append(TodayCounter(label: L("Inbox"), value: MarkdownTasks.openCount(text), help: L("Open lines in your inbox"),
                                          url: link(to: inbox)))
         }
-        let home = folder.map { TodayLink(title: isObsidian ? "Obsidian" : L("Notes"), url: link(to: $0)) }
+        let home = homeLink
         // Nothing due: what comes up this week takes the main list instead of an empty card.
         let main = due.isEmpty ? coming : due
         return TodayFeed(now: main.map { item($0, now: now) }, followUps: due.isEmpty ? [] : coming.map { item($0, now: now) },
@@ -237,6 +267,8 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
                          nowTitle: L(due.isEmpty && !coming.isEmpty ? "Coming up" : "Due today"), followUpTitle: L("Coming up"),
                          emptyText: L("Nothing due this week."))
     }
+
+    private var homeLink: TodayLink? { folder.map { TodayLink(title: isObsidian ? "Obsidian" : L("Notes"), url: link(to: $0)) } }
 
     private func item(_ task: VaultTask, now: Date) -> TodayItem {
         let file = resolve(task.file)
@@ -247,6 +279,76 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
                          url: file.map(link(to:)), help: isObsidian ? L("Open in Obsidian") : L("Open the note"),
                          group: task.section.isEmpty ? (task.file as NSString).deletingPathExtension : task.section,
                          notes: notes)
+    }
+
+    /// A note by its wiki-link name (`Name`, `Folder/Name`), the way Obsidian finds it: the path
+    /// from the vault's root, else the file of that name nearest the root. May walk the vault, so
+    /// not on the main thread; a name without a note is remembered until `forgetMissingNotes()`.
+    public func note(named name: String) -> URL? {
+        guard let folder else { return nil }
+        switch cachedNote(named: name, in: folder) {
+        case .found(let url): return url
+        case .missing: return nil
+        case .unknown(let generation):
+            let target = Self.noteFile(name)
+            let file = (target as NSString).lastPathComponent.lowercased()
+            let match = VaultDetect.markdownFiles(in: folder, maxDepth: 8)
+                .filter { ($0 as NSString).lastPathComponent.lowercased() == file && $0.lowercased().hasSuffix(target.lowercased()) }
+                .min { ($0.count, $0) < ($1.count, $1) }
+            let url = match.map { folder.appending(path: $0) }
+            lock.withLock {
+                guard notesGeneration == generation else { return }
+                if let url { notesByName[target] = url } else { missingNotes.insert(target) }
+            }
+            return url
+        }
+    }
+
+    /// A note by its wiki-link name from what is known without walking the vault; one not known
+    /// yet is looked for off this thread, and `onNoteFound` says when it turns up.
+    func knownNote(named name: String) -> URL? {
+        guard let folder else { return nil }
+        switch cachedNote(named: name, in: folder) {
+        case .found(let url): return url
+        case .missing: return nil
+        case .unknown:
+            let target = Self.noteFile(name)
+            guard lock.withLock({ lookingFor.insert(target).inserted }) else { return nil }
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                let found = note(named: name)
+                lock.withLock { _ = lookingFor.remove(target) }
+                if found != nil { onNoteFound?() }
+            }
+            return nil
+        }
+    }
+
+    /// The vault changed: names that had no note are looked for again.
+    public func forgetMissingNotes() {
+        lock.withLock {
+            missingNotes.removeAll()
+            notesGeneration += 1
+        }
+    }
+
+    private enum NoteLookup { case found(URL), missing, unknown(generation: Int) }
+
+    /// The path from the root, a note found before (still there), a name known to have none.
+    private func cachedNote(named name: String, in folder: URL) -> NoteLookup {
+        let target = Self.noteFile(name)
+        let direct = folder.appending(path: target)
+        if FileManager.default.fileExists(atPath: direct.path) { return .found(direct) }
+        let (known, missing, generation) = lock.withLock { (notesByName[target], missingNotes.contains(target), notesGeneration) }
+        if let known, FileManager.default.fileExists(atPath: known.path) { return .found(known) }
+        return missing ? .missing : .unknown(generation: generation)
+    }
+
+    private static func noteFile(_ name: String) -> String { name.lowercased().hasSuffix(".md") ? name : name + ".md" }
+
+    /// A briefing note without its own `# Title` line (the card names it).
+    static func withoutTitle(_ text: String) -> String {
+        guard text.hasPrefix("# ") else { return text }
+        return text.drop { $0 != "\n" }.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func dailyText(_ url: URL) -> String? {

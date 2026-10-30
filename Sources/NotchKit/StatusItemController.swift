@@ -22,6 +22,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var keepingAwake: () -> Bool = { false }
     var onToggleKeepAwake: () -> Void = {}
     var onOpenSetup: () -> Void = {}
+    var onOpenDashboard: () -> Void = {}
     /// Release builds with Sparkle: "Check for Updates…".
     var updater: Updater? {
         didSet {
@@ -84,6 +85,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         setup.target = self
         menu.addItem(setup)
 
+        let dashboard = NSMenuItem(title: Localization.string("Dashboard…"), action: #selector(openDashboard), keyEquivalent: "d")
+        dashboard.target = self
+        menu.addItem(dashboard)
+
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -96,6 +101,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleWatch() { onToggleWatch() }
     @objc private func toggleAwake() { onToggleKeepAwake() }
     @objc private func openSetup() { onOpenSetup() }
+    @objc private func openDashboard() { onOpenDashboard() }
     @objc private func checkUpdates() { updater?.checkForUpdates() }
     @objc private func openInbox() { if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) } }
     @objc private func openMeetingNotes() { NSWorkspace.shared.open(Self.meetingNotesFile) }

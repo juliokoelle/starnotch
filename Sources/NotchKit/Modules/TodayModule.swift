@@ -58,6 +58,8 @@ final class TodayModule: NotchModule {
     private(set) var tasks: [Item] = []
     private(set) var followUps: [Item] = []
     private(set) var confirmations: [Item] = []
+    /// Not due yet or without a date (reminders): below the to-dos in the calendar's Today view.
+    private(set) var later: [Item] = []
     var selectedID: String?
     /// Ticked off, shown done until the list reloads without them.
     private(set) var doneIDs: Set<String> = []
@@ -67,6 +69,20 @@ final class TodayModule: NotchModule {
     var ambientOverride = 0
     /// "Prepare" switches to the calendar.
     @ObservationIgnored var onOpenCalendar: (() -> Void)?
+    /// Tara's privacy switches: with the notes vault off, the briefing's text stays out of the notch.
+    @ObservationIgnored var privacy: () -> MemoryPrivacy = { MemoryPrivacy() }
+
+    /// A `[[wiki link]]` in the briefing: the note it names, in Obsidian when the vault is one.
+    /// Looked for off the main thread (it may walk the vault). The provider is usually Reminders
+    /// wrapping the notes, so the notes connector itself.
+    func openNote(named name: String) {
+        guard let vault = (provider as? VaultConnector) ?? Runtime.vault else { return }
+        Task.detached(priority: .userInitiated) {
+            guard let file = vault.note(named: name) else { return }
+            let url = vault.link(to: file)
+            await MainActor.run { _ = NSWorkspace.shared.open(url) }
+        }
+    }
 
     init(provider: any TodayProvider, agenda: AgendaModule) {
         self.provider = provider
@@ -81,6 +97,7 @@ final class TodayModule: NotchModule {
         tasks = feed.now.map(Item.init)
         followUps = feed.followUps.map(Item.init)
         confirmations = feed.confirmations.map(Item.init)
+        later = feed.later.map(Item.init)
     }
 
     /// Asks the connector again when the panel opens.
@@ -101,6 +118,10 @@ final class TodayModule: NotchModule {
     var hero: Item? { meetingHero ?? tasks.first }
 
     var dueFollowUps: Int { followUps.filter { $0.date.map { $0 <= today } ?? false }.count }
+
+    /// The calendar's Today view: the tasks (the connector's and the reminders) and the
+    /// follow-ups due today or earlier.
+    var todos: [Item] { tasks + followUps.filter { $0.date.map { String($0.prefix(10)) <= today } ?? false } }
     var openCount: Int { tasks.count + followUps.count + confirmations.count }
 
     /// Rows the keyboard walks through in variant A.
@@ -140,7 +161,8 @@ final class TodayModule: NotchModule {
     /// Why `item` wasn't ticked off, while that note shows.
     func failureText(_ item: Item) -> LocalizedStringKey? {
         guard let failure, failure.id == item.id else { return nil }
-        return failure.result == .changed ? "Changed elsewhere, not ticked off" : "Couldn't write to the file"
+        if failure.result == .changed { return "Changed elsewhere, not ticked off" }
+        return item.id.hasPrefix("reminder-") ? "Couldn't save in Reminders" : "Couldn't write to the file"
     }
 
     /// Shows the task done at once, writes it back off the main thread, then lets it go; when the
@@ -303,34 +325,44 @@ private struct TodayBody: View {
             .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 8) {
-                // Brief, follow-ups and confirmations scroll; the footer stays put.
-                ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if let brief = module.feed.brief { BriefCard(brief: brief) }
-                        VStack(alignment: .leading, spacing: 4) {
-                            if !module.followUps.isEmpty { SectionLabel(title: module.feed.followUpTitle) }
-                            ForEach(module.followUps) { item in
-                                ItemRow(module: module, item: item, compact: true)
-                                    .transition(.blurSlide(y: -4, scale: 0.98))
-                            }
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            if module.confirmations.isEmpty {
-                                if let link = module.feed.confirmationsLink {
-                                    LinkRow(title: link.title, detail: link.detail) { module.open(link) }
-                                }
-                            } else {
-                                SectionLabel(title: module.feed.confirmTitle, trailing: "\(module.confirmations.count)")
-                                ForEach(module.confirmations.prefix(2)) { item in
+                // The briefing in full scrolls in its own card, all the column's height when
+                // nothing else is in it; follow-ups and confirmations scroll below; the footer
+                // stays put.
+                let briefing = module.feed.brief.flatMap { brief in brief.markdown.map { (brief, $0) } }
+                let more = !module.followUps.isEmpty || !module.confirmations.isEmpty || module.feed.confirmationsLink != nil
+                if let (brief, markdown) = briefing {
+                    BriefingCard(module: module, brief: brief, markdown: markdown)
+                        .frame(maxHeight: more ? 150 : .infinity, alignment: .top)
+                }
+                if briefing == nil || more {
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if briefing == nil, let brief = module.feed.brief { BriefCard(brief: brief) }
+                            VStack(alignment: .leading, spacing: 4) {
+                                if !module.followUps.isEmpty { SectionLabel(title: module.feed.followUpTitle) }
+                                ForEach(module.followUps) { item in
                                     ItemRow(module: module, item: item, compact: true)
                                         .transition(.blurSlide(y: -4, scale: 0.98))
                                 }
                             }
+                            VStack(alignment: .leading, spacing: 4) {
+                                if module.confirmations.isEmpty {
+                                    if let link = module.feed.confirmationsLink {
+                                        LinkRow(title: link.title, detail: link.detail) { module.open(link) }
+                                    }
+                                } else {
+                                    SectionLabel(title: module.feed.confirmTitle, trailing: "\(module.confirmations.count)")
+                                    ForEach(module.confirmations.prefix(2)) { item in
+                                        ItemRow(module: module, item: item, compact: true)
+                                            .transition(.blurSlide(y: -4, scale: 0.98))
+                                    }
+                                }
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .scrollIndicators(.never)
                 }
-                .scrollIndicators(.never)
                 Footer(module: module)
             }
             .padding(.horizontal, 4)
@@ -501,6 +533,58 @@ private struct BriefCard: View {
                 .lineLimit(3)
                 .lineSpacing(1.5)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Today's briefing from the notes (the daily note's briefing section, or the note it links to),
+/// rendered like a note: headings, lists, tasks and links; it scrolls inside its card. The title
+/// opens it where it lives. Without a briefing yet, or with the notes vault switched off in Tara's
+/// memory, one calm line instead.
+private struct BriefingCard: View {
+    let module: TodayModule
+    let brief: TodayBrief
+    let markdown: String
+
+    var body: some View {
+        let shown = module.privacy().shares(.notes)
+        NotchCard(padding: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Button { if let url = brief.url { NSWorkspace.shared.open(url) } } label: {
+                    HStack(spacing: 4) {
+                        Text(brief.title).font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                        if brief.url != nil {
+                            Image(systemName: "arrow.up.right").font(.system(size: 8.5, weight: .semibold))
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .disabled(brief.url == nil)
+                .help(Text("Open in \(module.feed.home?.title ?? "app")"))
+                if !shown || markdown.isEmpty {
+                    Text(shown ? "No briefing in today's note yet." : "Your notes are off in Tara's memory.")
+                        .font(Theme.font(12)).foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                } else {
+                    ScrollView(.vertical) {
+                        MarkdownView(text: markdown, limit: 80, scale: 0.84)
+                            .padding(.trailing, 2)
+                    }
+                    .scrollIndicators(.never)
+                    .scrollEdgeFade(bottom: 10)
+                    .environment(\.openURL, OpenURLAction { url in
+                        guard url.scheme == MarkdownView.wikiScheme else { return .systemAction }
+                        let name = url.absoluteString.dropFirst(MarkdownView.wikiScheme.count + 1).removingPercentEncoding ?? ""
+                        module.openNote(named: name)
+                        return .handled
+                    })
+                }
+            }
         }
     }
 }

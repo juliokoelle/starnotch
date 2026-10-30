@@ -167,10 +167,13 @@ enum AgendaSamples {
 
 /// Sample connector for previews and the test mode (`--preview`, `--sample-data`): a Today list
 /// and meeting prep with made-up people. Shows what a connector provides without any setup.
-final class SampleConnector: NotchConnector, TodayProvider, PeopleProvider, @unchecked Sendable {
+final class SampleConnector: NotchConnector, TodayCompleting, PeopleProvider, @unchecked Sendable {
     static let id = "sample"
     static let displayName = "Sample data"
     var confirmations = true
+    /// Ticked off in the sample mode (in memory only).
+    private var done: Set<String> = []
+    private let lock = NSLock()
 
     init(config: ConfigSection) {}
     convenience init() { self.init(config: ConfigSection()) }
@@ -188,10 +191,14 @@ final class SampleConnector: NotchConnector, TodayProvider, PeopleProvider, @unc
         return TodayFeed(
             now: [
                 TodayItem(id: "t1", kind: .task, title: "Send the review notes to Ada", date: day(0), people: ["Ada Lovelace"]),
+                TodayItem(id: "reminder-s1", kind: .task, title: "Pick up the parcel", detail: "Personal", date: day(-1),
+                          help: "Open in Reminders", group: "Personal"),
                 TodayItem(id: "t2", kind: .task, title: "Draft the launch post", date: day(1)),
+                TodayItem(id: "reminder-s2", kind: .task, title: "Call the dentist", detail: "Personal", date: day(0),
+                          help: "Open in Reminders", group: "Personal"),
                 TodayItem(id: "t3", kind: .task, title: "Book flights for the offsite"),
                 TodayItem(id: "t4", kind: .task, title: "Clean up old branches"),
-            ],
+            ].filter { item in !lock.withLock { done.contains(item.id) } },
             followUps: [
                 TodayItem(id: "f1", kind: .followUp, title: "Grace: contract draft", detail: "Waiting", date: day(-1), people: ["Grace Hopper"]),
                 TodayItem(id: "f2", kind: .followUp, title: "Alan: benchmark numbers", detail: "Waiting", date: day(0), people: ["Alan Turing"]),
@@ -205,6 +212,13 @@ final class SampleConnector: NotchConnector, TodayProvider, PeopleProvider, @unc
             counters: [TodayCounter(label: "Inbox", value: 3), TodayCounter(label: "Answers", value: 1)],
             emptyText: "All done."
         )
+    }
+
+    func canComplete(_ id: String) -> Bool { id.hasPrefix("t") || id.hasPrefix("reminder-") }
+
+    func complete(_ id: String) -> TodayCompletion {
+        lock.withLock { _ = done.insert(id) }
+        return .done
     }
 
     func people() -> [Person] { Self.people.map { Person(slug: $0.slug, name: $0.name) } }

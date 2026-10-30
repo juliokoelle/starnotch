@@ -14,6 +14,20 @@ public enum TaraUsage {
         case capture
         /// The live meeting analysis, one call per batch of new utterances.
         case meeting
+        /// Screen context condensed into work blocks.
+        case digest
+    }
+
+    /// Who did the thinking, as the sidecar writes it (agent/claude.py's BRAINS).
+    public enum Brain: String, CaseIterable, Sendable {
+        /// Claude Code on the user's Claude plan.
+        case claudeCode = "claude-code"
+        /// Codex on the user's ChatGPT plan; the sidecar can't price it.
+        case codex
+        /// The Messages API with the user's own key: the one brain billed per call.
+        case api
+        /// Apple's on-device model: free, nothing leaves the Mac.
+        case apple
     }
 
     public struct Call: Equatable, Sendable {
@@ -30,6 +44,20 @@ public enum TaraUsage {
         public var costUSD: Double?
 
         public var tokens: Int { inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens }
+
+        public init(time: Date, feature: String, brain: String, model: String, inputTokens: Int, cacheWriteTokens: Int,
+                    cacheReadTokens: Int, outputTokens: Int, durationMs: Int, costUSD: Double?) {
+            self.time = time
+            self.feature = feature
+            self.brain = brain
+            self.model = model
+            self.inputTokens = inputTokens
+            self.cacheWriteTokens = cacheWriteTokens
+            self.cacheReadTokens = cacheReadTokens
+            self.outputTokens = outputTokens
+            self.durationMs = durationMs
+            self.costUSD = costUSD
+        }
     }
 
     public struct Totals: Equatable, Sendable {
@@ -39,14 +67,19 @@ public enum TaraUsage {
         public var costUSD = 0.0
         /// Calls the sidecar couldn't price (a model outside its price table): `costUSD` leaves them out.
         public var unpricedCalls = 0
+        public var durationMs = 0
         /// Calls per feature (`ask`, `capture`, `meeting`, or whatever a newer sidecar writes).
         public var byFeature: [String: Int] = [:]
 
         public init() {}
 
+        public var averageTokens: Int { calls == 0 ? 0 : tokens / calls }
+        public var averageSeconds: Double { calls == 0 ? 0 : Double(durationMs) / 1000 / Double(calls) }
+
         mutating func add(_ call: Call) {
             calls += 1
             tokens += call.tokens
+            durationMs += call.durationMs
             cachedTokens += call.cacheReadTokens
             if let cost = call.costUSD { costUSD += cost } else { unpricedCalls += 1 }
             byFeature[call.feature, default: 0] += 1
@@ -105,6 +138,41 @@ public enum TaraUsage {
             if call.time >= today { summary.today.add(call) }
         }
         return summary
+    }
+
+    /// One period's calls for the Usage page: in all, per feature, per brain, and each day's tokens per brain.
+    public struct Breakdown: Equatable, Sendable {
+        public var total = Totals()
+        public var byFeature: [String: Totals] = [:]
+        public var byBrain: [String: Totals] = [:]
+        /// Every day of the period, oldest first, empty ones too.
+        public var days: [Day] = []
+
+        public init() {}
+    }
+
+    public struct Day: Equatable, Sendable {
+        public var start: Date
+        public var tokensByBrain: [String: Int] = [:]
+        public var tokens: Int { tokensByBrain.values.reduce(0, +) }
+    }
+
+    /// Today and the `days - 1` days before it; calls after `now` don't count, as in `summary`.
+    public static func breakdown(_ calls: [Call], days: Int, now: Date, calendar: Calendar = .current) -> Breakdown {
+        let today = calendar.startOfDay(for: now)
+        var result = Breakdown()
+        result.days = (0..<max(1, days)).reversed().compactMap { calendar.date(byAdding: .day, value: -$0, to: today) }
+            .map { Day(start: $0) }
+        guard let first = result.days.first?.start else { return result }
+        for call in calls where call.time >= first && call.time <= now {
+            result.total.add(call)
+            result.byFeature[call.feature, default: Totals()].add(call)
+            result.byBrain[call.brain, default: Totals()].add(call)
+            // Whole days between the two midnights: right across a daylight-saving change too.
+            let index = calendar.dateComponents([.day], from: first, to: calendar.startOfDay(for: call.time)).day ?? -1
+            if result.days.indices.contains(index) { result.days[index].tokensByBrain[call.brain, default: 0] += call.tokens }
+        }
+        return result
     }
 
     /// The ledger in `folder`; an empty summary when there is none yet. It reads the whole file (up to 90 days of

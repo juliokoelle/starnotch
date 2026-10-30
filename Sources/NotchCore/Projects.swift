@@ -174,3 +174,55 @@ public enum LookPolicy {
         return Look(tinted: true, level: colourBy == .performance && !customized ? level : nil)
     }
 }
+
+/// The Characters page: time with each character, and the order of the projects.
+public enum CharacterTime {
+    public struct Together: Equatable, Sendable {
+        public var seconds: TimeInterval
+        public var sessions: Int
+
+        public init(seconds: TimeInterval = 0, sessions: Int = 0) {
+            self.seconds = seconds
+            self.sessions = sessions
+        }
+    }
+
+    /// Agent time per character: the time of the projects it stands for (`AgentFeed.projects`).
+    /// Sessions without a folder, counted under their tool's name, belong to no character.
+    public static func together(_ projects: [ProjectTime], tools: [String], character: (String) -> String) -> [String: Together] {
+        var result: [String: Together] = [:]
+        for project in projects where !tools.contains(project.name) && project.seconds > 0 {
+            let id = character(project.name)
+            guard !id.isEmpty else { continue }
+            result[id, default: Together()].seconds += project.seconds
+            result[id, default: Together()].sessions += project.sessions
+        }
+        return result
+    }
+
+    /// The home project first, then those with a session now, then the most time, then by name.
+    public static func order(_ projects: Set<String>, home: String, live: Set<String>,
+                             seconds: [String: TimeInterval]) -> [String] {
+        projects.sorted { a, b in
+            let ka = (a == home ? 0 : 1, live.contains(a) ? 0 : 1), kb = (b == home ? 0 : 1, live.contains(b) ? 0 : 1)
+            if ka != kb { return ka < kb }
+            let sa = seconds[a] ?? 0, sb = seconds[b] ?? 0
+            if sa != sb { return sa > sb }
+            return a.localizedStandardCompare(b) == .orderedAscending
+        }
+    }
+}
+
+/// Where agent time went: one project's active time and sessions.
+public struct ProjectTime: Equatable, Sendable, Identifiable {
+    public var name: String
+    public var seconds: TimeInterval
+    public var sessions: Int
+    public var id: String { name }
+
+    public init(name: String, seconds: TimeInterval, sessions: Int) {
+        self.name = name
+        self.seconds = seconds
+        self.sessions = sessions
+    }
+}

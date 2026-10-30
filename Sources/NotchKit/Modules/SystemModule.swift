@@ -232,6 +232,10 @@ final class SystemModule: NotchModule {
     /// awake with the lid closed (it shouldn't go into a bag unnoticed).
     var needsAttention: Bool { alertLevel != .none || media.inUse || battery?.isLow == true || lidAwakeOn }
 
+    /// The quiet look: the camera or microphone in use, full memory, a battery about to run out
+    /// or the lid state; a load that is merely high stays in the panel.
+    var quietRelevant: Bool { media.inUse || alertLevel == .critical || battery?.isLow == true || lidAwakeOn }
+
     var lidAwakeOn: Bool { lidAwake != .off }
 
     /// The lid state stays in the ears while it lasts, also when agents work in the first tab.
@@ -286,7 +290,7 @@ final class SystemModule: NotchModule {
         }
         return AnyView(Image(systemName: battery?.isLow == true && alertLevel == .none ? "battery.25percent" : symbol)
             .font(.system(size: peek ? 12.5 : 11.5, weight: .semibold))
-            .foregroundStyle(battery?.isLow == true && alertLevel == .none ? Theme.waiting : Theme.textBody))
+            .foregroundStyle(Theme.textBody))
     }
 
     func trailingEar(peek: Bool) -> AnyView {
@@ -308,7 +312,7 @@ final class SystemModule: NotchModule {
             .help(alertLevel == .none ? "" : "Your Mac is under load"))
     }
 
-    /// The system's own colours: green camera, amber microphone.
+    /// Green camera; the microphone in Tara's colour (no amber in the notch).
     private var mediaDots: some View {
         HStack(spacing: 3) {
             if media.camera { Circle().fill(Theme.ok).frame(width: 7, height: 7) }
@@ -329,7 +333,7 @@ extension MemoryStats.Pressure {
     var color: Color {
         switch self {
         case .normal: Theme.ok
-        case .warn: Theme.waiting
+        case .warn: Theme.textPrimary
         case .critical: Theme.critical
         }
     }
@@ -407,7 +411,7 @@ private struct SystemPeekLine: View {
     private var cpu: some View {
         HStack(spacing: 4) {
             Text("CPU").foregroundStyle(Theme.textSecondary)
-            Text(Percent.text(module.cpu)).foregroundStyle(module.cpu >= 0.85 ? Theme.waiting : Theme.textPrimary)
+            Text(Percent.text(module.cpu)).foregroundStyle(Theme.textPrimary)
         }
     }
 
@@ -449,7 +453,7 @@ private struct SystemBody: View {
                         HStack(spacing: 10) {
                             Meter(title: "CPU", value: module.cpu, history: module.cpuHistory,
                                   detail: "\(ProcessInfo.processInfo.activeProcessorCount) cores",
-                                  tint: module.cpu >= 0.85 ? Theme.waiting : Theme.textBody)
+                                  tint: module.cpu >= 0.85 ? Theme.textPrimary : Theme.textBody)
                             Meter(title: "GPU", value: module.gpu ?? 0, history: module.gpuHistory,
                                   detail: module.gpu == nil ? "not readable" : "", tint: Theme.textBody)
                         }
@@ -624,14 +628,15 @@ private struct TopApps: View {
         NotchCard(padding: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
-                    Text("Top apps").font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.textSecondary)
+                    // The title opens Activity Monitor (no separate icon that needs explaining).
+                    QuietTitleLink(title: "Top apps", help: "Open Activity Monitor") { module.openActivityMonitor() }
                     if let word = module.thermal.word {
                         HStack(spacing: 4) {
                             Image(systemName: "thermometer.medium").font(.system(size: 10, weight: .semibold))
                             Text(word)
                         }
                         .font(Theme.font(11, .medium))
-                        .foregroundStyle(module.thermal == .fair ? Theme.textSecondary : Theme.waiting)
+                        .foregroundStyle(module.thermal == .fair ? Theme.textSecondary : Theme.textPrimary)
                         .help("Thermal state: \(word)")
                     }
                     Spacer(minLength: 6)
@@ -641,17 +646,6 @@ private struct TopApps: View {
                     }
                     .padding(2)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    // 28 pt to hit; the row keeps the height of the CPU and Memory switch.
-                    Button { module.openActivityMonitor() } label: {
-                        Image(systemName: "arrow.up.forward.app")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressScale())
-                    .help("Open Activity Monitor")
-                    .padding(.vertical, -3)
                 }
                 .padding(.horizontal, 6)
                 .padding(.bottom, 4)
@@ -764,37 +758,55 @@ private struct StatusChips: View {
                 LidAwakePicker(module: module) { withAnimation(Theme.snappy) { module.lidPickerOpen = false } }
                     .transition(.opacity)
             } else {
+                // Status gives way before the switches lose their words: the long command first,
+                // then the battery's detail, then the switches' short words. Only at the very end
+                // do the switches that are off show their icon alone (the word in the tooltip);
+                // "Pause Tara" keeps hers, her icon alone says nothing.
                 ViewThatFits(in: .horizontal) {
-                    row(.all)
-                    row(.lit)
-                    row(.none)
+                    row(.full, command: true)
+                    row(.full, command: false)
+                    row(.full, command: false, battery: .short)
+                    row(.short, command: false, battery: .short, media: false)
+                    row(.short, command: false, battery: .none, media: false)
+                    row(.lit, command: false, battery: .none, media: false)
                 }
                 .transition(.opacity)
             }
         }
     }
 
-    /// Which switches keep their title as room runs out: all, the ones that are on, none.
-    private enum Titles { case all, lit, none }
+    /// The switches' words: full, short, or only on the switches that are on.
+    private enum Titles { case full, short, lit }
+    /// The battery chip: with its state, the percentage alone, or not at all.
+    private enum Battery { case full, short, none }
 
-    private func row(_ titles: Titles) -> some View {
-        func labels(_ on: Bool) -> Bool { titles == .all || (titles == .lit && on) }
+    private func row(_ titles: Titles, command showsCommand: Bool, battery: Battery = .full, media mediaDetail: Bool = true) -> some View {
+        func title(_ full: LocalizedStringKey, _ short: LocalizedStringKey, on: Bool) -> LocalizedStringKey? {
+            switch titles {
+            case .full: full
+            case .short: short
+            case .lit: on ? short : nil
+            }
+        }
         return HStack(spacing: 8) {
-            if let battery = module.battery {
-                chip(symbol: battery.charging ? "battery.100percent.bolt" : battery.percent <= 20 ? "battery.25percent" : "battery.75percent",
-                     text: battery.charging ? "\(battery.percent) % · charging" : battery.pluggedIn ? "\(battery.percent) % · on power" : "\(battery.percent) %",
-                     tint: battery.isLow ? Theme.waiting : Theme.textBody)
-                    .help(battery.line)
+            if let state = module.battery, battery != .none || state.isLow {
+                chip(symbol: state.charging ? "battery.100percent.bolt" : state.percent <= 20 ? "battery.25percent" : "battery.75percent",
+                     text: battery != .full ? "\(state.percent) %" : state.charging ? "\(state.percent) % · charging" : state.pluggedIn ? "\(state.percent) % · on power" : "\(state.percent) %",
+                     tint: state.isLow ? Theme.textPrimary : Theme.textBody)
+                    .help(state.line)
             }
             if module.media.inUse {
+                // The camera or microphone always shows; narrow, the app's name alone.
                 HStack(spacing: 6) {
                     Circle().fill(module.media.camera ? Theme.ok : Theme.waiting).frame(width: 7, height: 7)
-                    Text(module.media.shortLine).font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody)
+                    Text(mediaDetail ? module.media.shortLine : module.media.app ?? module.media.shortLine)
+                        .font(Theme.font(12, .medium)).foregroundStyle(Theme.textBody)
                 }
+                .help(module.media.line)
                 .padding(.horizontal, 10).frame(height: 28)
                 .background(Color.white.opacity(0.06), in: Capsule())
             }
-            if let command = module.longCommands.first {
+            if showsCommand, let command = module.longCommands.first {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     chip(symbol: "terminal", text: "\(command.command) · \(Durations.short(context.date.timeIntervalSince(command.start)))",
                          tint: Theme.textBody)
@@ -804,29 +816,21 @@ private struct StatusChips: View {
             Spacer(minLength: 0)
             HStack(spacing: 6) {
                 if module.offersKeepAwake {
-                    toggle(module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer", labels(module.keepAwake) ? "Keep awake" : nil, on: module.keepAwake,
+                    toggle(module.keepAwake ? "cup.and.heat.waves.fill" : "cup.and.saucer", title("Keep awake", "Awake", on: module.keepAwake), on: module.keepAwake,
                            help: module.keepAwake ? "The display stays on until you switch this off" : "Keep the display and the Mac awake") {
                         module.onToggleKeepAwake?()
                     }
                 }
                 if module.offersKeepAwake, module.offersLidAwake {
-                    lidToggle(labels: labels(module.lidAwakeOn))
+                    lidToggle(labels: titles != .lit || module.lidAwakeOn)
                         .transition(.opacity)
                 }
-                if module.onToggleMemory != nil {
-                    toggle(module.memoryPaused ? "pause.circle.fill" : "pause.circle",
-                           labels(module.memoryPaused) ? (module.memoryPaused ? "Tara paused" : "Pause Tara") : nil,
-                           on: module.memoryPaused,
-                           help: module.memoryPaused ? "Tara's memory is paused: nothing new is recorded. Click to resume"
-                                                     : "Pause Tara's memory: no meetings, captures, notes or clipboard until you resume") {
-                        module.onToggleMemory?()
-                    }
-                }
-                toggle(module.darkMode ? "moon.fill" : "moon", labels(module.darkMode) ? "Dark mode" : nil, on: module.darkMode,
+                if module.onToggleMemory != nil { pauseTara }
+                toggle(module.darkMode ? "moon.fill" : "moon", title("Dark mode", "Dark", on: module.darkMode), on: module.darkMode,
                        help: "Switch the whole Mac between light and dark") {
                     module.toggleDarkMode()
                 }
-                toggle(module.desktopHidden ? "eye.slash" : "menubar.dock.rectangle", labels(module.desktopHidden) ? "Hide icons" : nil, on: module.desktopHidden,
+                toggle(module.desktopHidden ? "eye.slash" : "menubar.dock.rectangle", title("Hide icons", "Icons", on: module.desktopHidden), on: module.desktopHidden,
                        help: "Hide the icons on the desktop. Finder restarts to apply it, which stops a copy in progress") {
                     module.toggleDesktopIcons()
                 }
@@ -835,6 +839,29 @@ private struct StatusChips: View {
             .layoutPriority(1)
         }
         .lineLimit(1)
+    }
+
+    /// "Pause Tara" with Tara asleep as its icon; while paused "Resume Tara", in the accent.
+    private var pauseTara: some View {
+        let paused = module.memoryPaused
+        return Button { module.onToggleMemory?() } label: {
+            HStack(spacing: 6) {
+                if let cast = module.cast {
+                    AvatarView(character: cast.main, mood: .asleep, height: 16, colorway: cast.colorway,
+                               emergeOnAppear: false, alive: false)
+                        .frame(width: 16, height: 16)
+                        .saturation(paused ? 1 : 0.35)
+                } else {
+                    Image(systemName: "moon.zzz").font(.system(size: 11, weight: .semibold))
+                }
+                Text(paused ? "Resume Tara" : "Pause Tara").font(Theme.font(12, .medium))
+            }
+            .modifier(SwitchCapsule(on: paused, titled: true))
+        }
+        .buttonStyle(PressScale())
+        .help(Text(paused ? "Tara's memory is paused: nothing new is recorded. Click to resume"
+                          : "Pause Tara's memory: no meetings, captures, notes or clipboard until you resume"))
+        .accessibilityAddTraits(paused ? .isSelected : [])
     }
 
     /// A switch as a capsule: the accent while on. Without a title (little room) the icon alone,
@@ -1052,5 +1079,30 @@ enum LidAwakeText {
         case .threeHours: "3 h"
         case .untilOff: "Until off"
         }
+    }
+}
+
+/// A card's small title that opens something: the title, a small arrow, brighter on hover.
+private struct QuietTitleLink: View {
+    let title: LocalizedStringKey
+    let help: LocalizedStringKey
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text(title).font(Theme.font(11.5, .semibold))
+                Image(systemName: "arrow.up.right").font(.system(size: 8, weight: .bold))
+                    .opacity(hovering ? 1 : 0.6)
+            }
+            .foregroundStyle(hovering ? Theme.textPrimary : Theme.textSecondary)
+            .frame(height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovering)
+        .help(Text(help))
     }
 }

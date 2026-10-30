@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import TestSupport
 @testable import NotchCore
@@ -41,6 +42,27 @@ import TestSupport
         conversation.append(question: "Preis?", answer: "30 Euro.")
         #expect(AskCommand.text("Wer?", conversation: conversation, image: "/tmp/w.png", id: "ask-2")
             == #"{"cmd":"ask","history":[{"answer":"30 Euro.","question":"Preis?"}],"id":"ask-2","image":"/tmp/w.png","question":"Wer?"}"#)
+    }
+
+    @Test func commandCarriesADroppedDocument() {
+        #expect(AskCommand.text("Worum geht es?", document: AskDocument(name: "Angebot.pdf", text: "Preis 30 Euro"), id: "ask-4")
+            == #"{"cmd":"ask","document":{"name":"Angebot.pdf","text":"Preis 30 Euro"},"id":"ask-4","question":"Worum geht es?"}"#)
+    }
+
+    @Test func commandCarriesScreenContextAndScreenSourcesParse() throws {
+        let now = UTC.date("2026-10-29 15:00")
+        let item = ScreenAskItem(id: "screen:0", app: "Mail", time: UTC.date("2026-10-29 14:05"), title: "Pricing", text: "deck v3")
+        let line = AskCommand.text("Deck?", screen: [item], now: now, id: "ask-3")
+        let object = try #require(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        let screen = try #require(object["screen"] as? [[String: Any]])
+        #expect(screen.first?["app"] as? String == "Mail" && screen.first?["text"] as? String == "deck v3")
+        #expect((screen.first?["label"] as? String)?.hasPrefix("Screen · Mail · ") == true)
+        // No screen context: no field at all.
+        #expect(!AskCommand.text("Deck?", id: "ask-4").contains("screen"))
+        let reply = #"{"type":"answer","question":"Deck?","text":"v3","brain":"api","sources":[{"kind":"screen","id":"screen:0","title":"Screen · Mail · 14:05","quote":"deck v3","date":"2026-10-29"}]}"#
+        guard case .answer(let answer, _) = AskReply.parse(Data(reply.utf8)) else { Issue.record("no answer"); return }
+        #expect(answer.sources.first?.kind == .screen)
+        #expect(answer.sources.first?.title == "Screen · Mail · 14:05")
     }
 
     @Test func conversationKeepsTheLastTurns() {
@@ -111,5 +133,24 @@ import TestSupport
             == "Was haben wir beim Preis entschieden? → 30 Euro im Monat. Jonas hat es bestätigt. (Quellen: Kickoff (2026-10-12), Pricing)")
         #expect(AskAnswer(question: "Preis?", text: "30 Euro.").inboxLine() == "Preis? → 30 Euro.")
         #expect(AskAnswer(question: "", text: "30 Euro.").inboxLine() == "30 Euro.")
+    }
+
+    @Test func threadKeepsAnsweredAndFailedTurnsInOrder() {
+        var thread = AskThread()
+        let answer = AskAnswer(question: "Preis?", text: "30 Euro.", sources: [AskSource(id: "0", kind: .meeting, title: "Kickoff")])
+        thread.archive(question: nil, answer: nil, failure: nil)           // nothing asked yet
+        thread.archive(question: "Preis?", answer: nil, failure: nil)      // still thinking: not kept
+        #expect(thread.turns.isEmpty)
+        thread.archive(question: "Preis?", answer: answer, failure: nil)
+        // Failed after an earlier answer: the old answer isn't this question's.
+        thread.archive(question: "Und der Rabatt?", answer: answer, failure: "Tara took too long")
+        #expect(thread.turns.map(\.question) == ["Preis?", "Und der Rabatt?"])
+        #expect(thread.turns[0].answer?.sources.count == 1 && thread.turns[0].failure == nil)
+        #expect(thread.turns[1].answer == nil && thread.turns[1].failure == "Tara took too long")
+        #expect(Set(thread.turns.map(\.id)).count == 2)
+        thread.clear()
+        #expect(thread.turns.isEmpty)
+        thread.archive(question: "Wer?", answer: answer, failure: nil)
+        #expect(thread.turns.first?.id == 2)  // ids stay unique after a clear
     }
 }

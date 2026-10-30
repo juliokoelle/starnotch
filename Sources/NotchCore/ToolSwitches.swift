@@ -7,13 +7,15 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
     // Media strand: synced lyrics (LRCLIB), the lyric line on hover, volume per app.
     case lyrics, lyricsOnHover, appVolume
     case askTara
+    /// A small Finder in the Tools tab.
+    case files
 
     /// The tab it lives in; nil for tools outside the tabs (the menu, a shortcut, the plus button).
     public var module: ModuleKind? {
         switch self {
         case .clipboard, .timers, .shelf, .imageConverter: .tools
         case .keepAwake, .quickCapture: nil
-        case .notes: .tools
+        case .notes, .files: .tools
         case .weather, .dayProgress, .health: nil
         case .lyrics, .lyricsOnHover, .appVolume: .nowPlaying
         case .askTara: nil
@@ -46,6 +48,7 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .lyricsOnHover: "Lyrics on hover"
         case .appVolume: "Volume per app"
         case .askTara: "Ask Tara"
+        case .files: "Files"
         }
     }
 }
@@ -159,6 +162,8 @@ public enum TaraBrain: String, Codable, CaseIterable, Sendable {
     case auto
     /// The user's Claude subscription through Claude Code, no API credits.
     case claudeCode = "claude-code"
+    /// The user's ChatGPT plan through the Codex CLI, no API credits.
+    case codex
     /// The user's own Anthropic API key.
     case api
     /// Apple's on-device model (Apple Intelligence, macOS 26): free, simpler answers.

@@ -381,6 +381,36 @@ public enum DailyNote {
         return (deeper.isEmpty ? found : deeper).map(\.text)
     }
 
+    /// The note's briefing: the section under a heading that names one ("Morning Brief", "Daily
+    /// Briefing"), a morning one first, with its title and the Markdown up to the next heading of
+    /// the same or a higher level. Nil when no heading names a briefing.
+    public static func briefing(_ text: String) -> (title: String, body: String)? {
+        let lines = text.components(separatedBy: "\n")
+        var headings: [(index: Int, level: Int, text: String)] = []
+        var inFence = false
+        for index in MarkdownTasks.frontMatterEnd(lines)..<lines.count {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { inFence.toggle(); continue }
+            if !inFence, let heading = MarkdownTasks.heading(trimmed) { headings.append((index, heading.level, heading.text)) }
+        }
+        let briefs = headings.filter { $0.text.lowercased().contains("brief") }
+        let morning = briefs.first { ["morning", "morgen"].contains(where: $0.text.lowercased().contains) }
+        guard let pick = morning ?? briefs.first else { return nil }
+        let end = headings.first { $0.index > pick.index && $0.level <= pick.level }?.index ?? lines.count
+        let body = lines[(pick.index + 1)..<end].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (pick.text, body)
+    }
+
+    /// The note a section only points to (a brief kept in a note of its own): its first
+    /// `[[wiki link]]` or `![[embed]]`, when the section holds nothing but links.
+    public static func linkedNote(_ body: String) -> String? {
+        let link = #/!?\[\[([^\]\|#\n]+)[^\]\n]*\]\]/#
+        let rest = body.replacing(link, with: "").trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "-*+•")))
+        guard rest.isEmpty, let match = body.firstMatch(of: link) else { return nil }
+        let name = String(match.output.1).trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
+    }
+
     /// The note without its front matter, at most `limit` characters.
     public static func body(_ text: String, limit: Int = 4000) -> String {
         let lines = text.components(separatedBy: "\n")

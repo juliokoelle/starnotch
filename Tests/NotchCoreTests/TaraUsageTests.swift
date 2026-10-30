@@ -57,6 +57,36 @@ import TestSupport
         #expect(TaraUsage.summary([], now: UTC.date("2026-10-28 08:00")) == TaraUsage.Summary())
     }
 
+    @Test func breakdownByFeatureBrainAndDay() {
+        let usage = TaraUsage.breakdown(TaraUsage.parse(ledger), days: 7, now: UTC.date("2026-10-28 09:00"), calendar: UTC.calendar)
+        #expect(usage.total.calls == 4)  // 2026-10-22 through today
+        #expect(usage.total.durationMs == 5121 + 2737 + 900 + 4456)
+        #expect(usage.total.averageTokens == (33352 + 33822 + 110 + 33450) / 4)
+        #expect(usage.byBrain["claude-code"]?.calls == 3 && usage.byBrain["api"]?.unpricedCalls == 1)
+        #expect(usage.byFeature["ask"]?.tokens == 33352 + 33450 && usage.byFeature["meeting"]?.calls == 1)
+        #expect(usage.days.count == 7 && usage.days.first?.start == UTC.date("2026-10-22 00:00"))
+        #expect(usage.days[1].tokens == 33352 && usage.days[2].tokens == 0)
+        #expect(usage.days[6].tokensByBrain == ["claude-code": 33822 + 33450, "api": 110])
+        let today = TaraUsage.breakdown(TaraUsage.parse(ledger), days: 1, now: UTC.date("2026-10-28 09:00"), calendar: UTC.calendar)
+        #expect(today.total.calls == 3 && today.days.count == 1)
+        #expect(abs(today.byBrain["claude-code"]!.averageSeconds - (2.737 + 4.456) / 2) < 1e-9)
+    }
+
+    @Test func breakdownDaysAcrossDaylightSaving() {
+        var berlin = Calendar(identifier: .gregorian)
+        berlin.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        // 00:30 on 25 October in Berlin, the night the clocks go back.
+        let line = #"{"time": "2026-10-24T22:30:00Z", "feature": "digest", "brain": "codex", "model": "gpt", "input_tokens": 500, "output_tokens": 20, "duration_ms": 900, "cost_usd": null}"#
+        let usage = TaraUsage.breakdown(TaraUsage.parse(line), days: 7, now: UTC.date("2026-10-28 09:00"), calendar: berlin)
+        #expect(usage.days.map(\.tokens) == [0, 0, 0, 520, 0, 0, 0])
+        #expect(usage.byBrain["codex"]?.unpricedCalls == 1)
+    }
+
+    @Test func emptyBreakdownStillHasItsDays() {
+        let usage = TaraUsage.breakdown([], days: 30, now: UTC.date("2026-10-28 09:00"), calendar: UTC.calendar)
+        #expect(usage.days.count == 30 && usage.total == TaraUsage.Totals() && usage.total.averageSeconds == 0)
+    }
+
     @Test func compactNumbers() {
         #expect(TaraUsage.compact(950) == "950")
         #expect(TaraUsage.compact(12_000) == "12k")

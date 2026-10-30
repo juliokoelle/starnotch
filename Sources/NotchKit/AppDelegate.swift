@@ -52,9 +52,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentsInboxHotKey: HotKey?
     // Ask Tara (strand ask)
     private var ask: AskTara?
+    /// Every Ask Tara engine: the floating one, the Dashboard's chat and the day summary. A change
+    /// to the memory reaches all of them.
+    private var asks: [AskTara] { [ask].compactMap { $0 } }
+    /// ⌃⌥T went down while the Dashboard was in front: its chat took the press, so the release is its too.
+    private var askPressInDashboard = false
     private var askHotKey: HotKey?
     /// Ends a timed pause of Tara's memory.
     private var pauseEnd: Task<Void, Never>?
+    /// Time per app, while "Apps you use" is on (never in previews or with sample data).
     /// Today's calendar as last written for Tara (the calendar reloads every 15 s; the file only changes with it).
     private var lastCalendarSnapshot: [CalendarSnapshotEvent]?
 
@@ -65,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let cast = AvatarCast(state: state)
         self.cast = cast
+        TaraAccent.shared.cast = cast
         let agents = AgentsModule(cast: cast)
         let dictation = DictationModule(cast: cast)
         let preview = options.preview != nil
@@ -88,6 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reminders.enabled = { [weak self] in self?.state.settings.remindersInToday ?? false }
         let todayProvider: (any TodayProvider)? = samples ?? reminders
         let today = agendaPreview?.today ?? todayProvider.map { TodayModule(provider: $0, agenda: agenda) }
+        // Reminders fetched (at launch, after access was given) or changed in Reminders: Today
+        // shows them without waiting for the panel to open again.
+        reminders.onChange = { [weak today] in today?.reload() }
         let system = SystemModule()
         system.cast = cast
         self.system = system
@@ -111,6 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !sample, let vault = Runtime.vault {
             let live = VaultLive(connector: vault)
             live.onChange = { [weak today] in today?.reload() }
+            // The briefing's linked note, found off the main thread: Today shows it.
+            vault.onNoteFound = { [weak today] in Task { @MainActor in today?.reload() } }
             live.onReconfigure = { [weak self] in self?.state.onModulesChanged?() }
             live.start()
             vaultLive = live
@@ -118,6 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // MARK: -
 
         let tools = ToolsModule()
+        tools.cast = cast
         self.tools = tools
         allModules = [agents, agenda, music, system, dictation, meeting, tools]
         if let today { allModules.insert(today, at: 1) }
@@ -135,14 +148,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             Haptics.tick()
             self.notchModel.direction = 1
-            withAnimation(Theme.snappy) { self.notchModel.module = .calendar }
+            withAnimation(Theme.snappy) {
+                // "Prepare": the meeting's briefing, so the calendar rather than Today.
+                self.daily.cardShown = false
+                self.notchModel.module = .calendar
+            }
         }
         state.onModulesChanged = { [weak self] in
             guard let self else { return }
+            if !sample { self.daily.remindersShown = self.state.settings.remindersInToday && RemindersSource.authorized }
             withAnimation(Theme.snappy) { self.notchModel.modules = self.shownModules(sample: sample) }
             self.applyTools()
         }
         state.onDisplayChanged = { [weak self] in self?.notch.placeOnScreen() }
+        notch.hoverOpenDelay = { [weak self] in self?.state.settings.hoverOpen.seconds }
+        notch.reopensLastTab = { [weak self] in self?.state.settings.reopenLastTab ?? true }
         notch.keepsOpen = { [weak self] in
             (self?.state.settings.keepOpenUntilClick ?? false) || self?.notchModel.approvals?.current != nil
         }
@@ -215,6 +235,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Jamie syncs on its own while a login is saved, also a while after each call or meeting ends.
         meeting.jamie.meetingEnds = { [weak calendar] in calendar?.today.filter { $0.kind.takesAttention }.map(\.end) ?? [] }
         if !sample { meeting.jamie.startAutomatic() }
+        // The other meeting tools the same way, while connected and picked in Integrations › Meetings.
+        // The at-rest record for the Dashboard's Usage page: one reading of the app's CPU every 5 minutes.
+        if !sample { AppCostMeter.shared.start() }
         let companion = MeetingCompanion(cast: cast)
         self.companion = companion
         let welcome = WelcomeTour(companion: companion, cast: cast)
@@ -249,20 +272,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // a question bubble beside her; the answer comes from an agent.py of its own (on the demo
         // meetings with sample data or a preview).
         let ask = AskTara(demo: sample)
+        ask.keepsHistory = !sample  // the bubble's chats, kept to go back to (never the demo's)
         self.ask = ask
         companion.ask = ask
         ask.wispr = dictation  // the mic dictates with Wispr Flow while it runs
         ask.notes = daily.notes  // "Save to notes" without a notes vault
         // Opening Ask Tara syncs an old Jamie sync in the background; new meetings reach her agent at once.
-        ask.onOpen = { [weak meeting] in
+        ask.onOpen = { [weak meeting, weak ask, weak dictation] in
+            ask?.wispr = dictation  // back from the Dashboard's chat, if its mic had Wispr Flow
             companion.showAsk()
             meeting?.jamie.syncIfDue(.askOpened)
         }
-        meeting.onMemoryChanged = { [weak ask] in ask?.reloadMemory() }
+        meeting.onMemoryChanged = { [weak self] in self?.asks.forEach { $0.reloadMemory() } }
         ask.onClose = { companion.hideAsk() }
         // Screenshots and previews never take the keyboard from the app the user types in.
         if options.capturable || preview { companion.takesKeyboard = false }
         if let name = options.preview, name.hasPrefix("ask-") { ask.preview(name) }
+        if let name = options.preview, name.hasPrefix("tara-eyes") {
+            companion.open()
+            GazeCenter.shared.runDemo(style: name == "tara-eyes-round" ? .round : .lines)
+        }
         meeting.onCard = { [weak self] entry in
             // Popped out, the bubble beside the character takes the sneak's place.
             if companion.isOpen {
@@ -284,6 +313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Strand polish: Tara squashes while the closed island is pressed (not the open panel's
         // figure) and pulls out of the music ear too.
         wheel.onPress = { [weak self] down in
+            if down { GazeCenter.shared.laugh() }  // pressing the notch: Tara's eyes laugh
             guard let self, self.notchModel.handlePressed != down else { return }
             guard !down || self.notchModel.interaction != .expanded else { return }
             self.notchModel.handlePressed = down
@@ -308,6 +338,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if !options.sampleData && !options.tour {
             setup.checkClaudePlugin()
         }
+        // Settings live in the Dashboard; this window is only for the tour's recording, which needs
+        // a small window just under the notch rather than the Dashboard.
         settingsWindow = SettingsWindowController(state: state, cast: cast, setup: setup, jamie: meeting.jamie) { [weak self] step in
             self?.showSetup(at: step)
         }
@@ -315,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state: state,
             onToggleNotch: { [weak self] in self?.notch.toggleFromKeyboard() },
             onOpenWheel: { [weak self] in self?.wheel.openFromShortcut() },
-            onOpenSettings: { [weak self] in self?.settingsWindow.show() }
+            onOpenSettings: { [weak self] in self?.showSettings() }
         )
         statusItem.keepingAwake = { [weak self] in self?.keepAwake.isOn ?? false }
         statusItem.onToggleKeepAwake = { [weak self] in self?.keepAwake.toggle() }
@@ -325,10 +357,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         joinHotKey = HotKey.controlOptionJ { [weak self] in self?.joinNextMeeting() }
         // Quiet by default, silent while watching.
         notchModel.earsMode = state.settings.earsMode
+        notchModel.detailedEars = state.settings.detailedEars
+        notchModel.taraAlways = state.settings.taraAlways
+        GazeCenter.shared.style = state.settings.eyeStyle
         agents.setDisabledProviders(Set(state.settings.disabledProviders))
         state.onProvidersChanged = { [weak self] ids in self?.agents.setDisabledProviders(ids) }
         state.onEarsModeChanged = { [weak self] mode in
-            withAnimation(.easeInOut(duration: 0.2)) { self?.notchModel.earsMode = mode }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                self?.notchModel.earsMode = mode
+                self?.notchModel.detailedEars = self?.state.settings.detailedEars ?? false
+                self?.notchModel.taraAlways = self?.state.settings.taraAlways ?? false
+            }
         }
         watchMode.automatic = { [weak self] in (self?.state.settings.watchAutomatic ?? true) && !preview }
         watchMode.timer = { [weak self] in self?.state.settings.watchTimer ?? .twoHours }
@@ -353,7 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if options.openSlotPicker { SlotRowDemo.open(.bottom) }
         if options.openProjectPicker { SlotRowDemo.openProject(AvatarCast.homeProject) }
         if showIntro || options.openSettings || options.openSlotPicker || options.openProjectPicker {
-            settingsWindow.show()
+            showSettings(options.openSlotPicker ? .notch : options.openProjectPicker ? .characters : .general)
         }
 
         if options.openWheel {
@@ -394,7 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.demoAgentFinished()
             }
         }
-        startDaily(tools: tools, sample: sample)
+        startDaily(tools: tools, today: today, sample: sample)
         // MARK: Command palette and agents inbox (strand cmdk)
         // ⌃⌥K (and ⌘K while open) searches every module that is a `PaletteProvider`; ⌃⌥A works
         // through prompts, questions, finished turns and failed loops, with its count in the ear.
@@ -408,9 +447,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                       (.brain, "Choose how Tara thinks"),
                                                       (.memory, "Share Tara's memory with your AI apps"), (.tools, "Choose tools"),
                                                       (.tara, "Choose Tara's look")]
-            return [PaletteItem(id: "settings", title: Localization.string("Settings"), symbol: "gearshape", kind: .settings,
-                                keywords: ["preferences", "display", "quiet", "providers", "loops"],
-                                perform: { [weak self] in self?.settingsWindow.show() })]
+            var items = [PaletteItem(id: "settings", title: Localization.string("Settings"), symbol: "gearshape", kind: .settings,
+                                     keywords: ["preferences", "display", "quiet", "providers", "loops"],
+                                     perform: { [weak self] in self?.showSettings() })]
+            return items
                 + setup.map { step, title in
                     PaletteItem(id: "setup:\(step.rawValue)", title: Localization.string(title), subtitle: Localization.string("Setup"),
                                 symbol: "sparkles", kind: .settings, keywords: ["onboarding", "setup"],
@@ -443,6 +483,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if let name = options.preview, name.hasPrefix("memory-settings") {
             // Settings › Tara's memory (in memory only: previews don't save or delete).
             MemorySettingsPreview.show(state: state, setup: setup, paused: name.hasSuffix("paused"))
+        } else if options.preview?.hasPrefix("memory-map") == true {
+            // The memory map with a made-up memory (the window opens below).
+            agents.usePreview(PreviewDirector.snapshot(agentsActive: false))
         } else if let name = options.preview, name == "setup-consent" || name == "setup-done" || name == "setup-agents" || name.hasPrefix("onboarding") {
             // The setup pages with nothing behind them (the center is in preview mode).
             agents.usePreview(PreviewDirector.snapshot(agentsActive: false))
@@ -453,6 +496,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 setup.resetForPreview()
                 showOnboardingPreview(name)
             }
+        } else if let name = options.preview, startMemoryPreview(name) {
+            // The Dashboard's and screen context's previews (startMemoryPreview).
         } else if let name = options.preview {
             if name == "memory-paused" { state.settings.privacy.pause(.untilResumed, now: Date()) }
             previewDirector = PreviewDirector(notch: notch, agents: agents, music: music)
@@ -487,7 +532,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quitting while Wispr Flow dictates into Ask Tara: its paste lands in the bubble first, not in
     /// the app behind it (Wispr Flow can't cancel, only stop and paste).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let ask, ask.isDictating else { return .terminateNow }
+        guard let ask = asks.first(where: \.isDictating) else { return .terminateNow }
         ask.finishDictation { NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
@@ -496,13 +541,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lidAwake?.quit()
         approvals?.stop()
         meeting?.shutdown()
-        ask?.shutdown()
+        asks.forEach { $0.shutdown() }
     }
 
-    /// Reopening the app from Finder or Spotlight shows the settings.
+    /// Reopening the app from Finder, Spotlight or the Dock shows the Dashboard (Settings without it).
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        settingsWindow.show()
+        showSettings()
         return false
+    }
+
+    /// The app menu's Settings… while the Dashboard puts the app in the Dock.
+    @objc func openSettingsFromMenu() { showSettings() }
+
+    /// `--preview dashboard…` and `screen-consent…`: true when it is one of Tara's memory previews,
+    /// set up here; false in builds without them.
+    private func startMemoryPreview(_ name: String) -> Bool {
+        return false
+    }
+
+    /// Settings: a page of the Dashboard, or its own window where there is no Dashboard.
+    func showSettings(_ pane: SettingsPane? = nil) {
+        settingsWindow.show()
     }
 
     /// The same moments a person sees, driven without touching the pointer: an agent finishes,
@@ -692,8 +751,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard let tools else { return }
         daily.apply(on: Set(ToolFeature.allCases.filter(isOn)))
-        let tabs: [(ToolsModule.Tab, ToolFeature)] = [(.clipboard, .clipboard), (.timer, .timers), (.shelf, .shelf), (.notes, .notes)]
-        tools.tabs = tabs.filter { isOn($0.1) }.map(\.0)
+        let tabs: [(ToolsModule.Tab, ToolFeature)] = [(.clipboard, .clipboard), (.timer, .timers), (.shelf, .shelf), (.notes, .notes), (.files, .files)]
+        let order = settings.toolOrder.compactMap(ToolsModule.Tab.init(rawValue:))
+        tools.tabs = ModuleOrder.ordered(tabs.filter { isOn($0.1) }.map(\.0), by: order)
+        tools.onReorder = { [weak self] shown in
+            guard let self else { return }
+            let previous = self.state.settings.toolOrder.compactMap(ToolsModule.Tab.init(rawValue:))
+            self.state.settings.toolOrder = ModuleOrder.saved(visible: shown, previous: previous, all: ToolsModule.Tab.allCases)
+                .map(\.rawValue)
+        }
         tools.converts = isOn(.imageConverter)
         guard toolsLive else { return }
         let clipboard = tools.tabs.contains(.clipboard)
@@ -708,8 +774,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Onboarding: first launch, "Set up…" in the menu, and "Set up more…" in Settings.
     func showSetup(at step: Onboarding.Step? = nil) {
         if onboarding == nil {
-            let window = OnboardingWindowController(model: Onboarding(state: state, cast: cast, setup: setup,
-                                                                      jamie: meeting?.jamie ?? JamieConnect()))
+            let model = Onboarding(state: state, cast: cast, setup: setup, jamie: meeting?.jamie ?? JamieConnect())
+            let window = OnboardingWindowController(model: model)
             window.onClose = { [weak self] finished in
                 guard let self else { return }
                 // Tara's welcome once, after the first onboarding finished through its last
@@ -842,10 +908,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// open question bubble closes.
     private func applyAskTara(_ on: Bool) {
         guard let ask else { return }
-        askHotKey = on ? askHotKey ?? HotKey.controlOptionT(action: { [weak ask] in ask?.hotKeyPressed() },
-                                                            release: { [weak ask] in ask?.hotKeyReleased() }) : nil
+        askHotKey = on ? askHotKey ?? HotKey.controlOptionT(action: { [weak self] in self?.askHotKeyPressed() },
+                                                            release: { [weak self] in self?.askHotKeyReleased() }) : nil
         companion?.onTapFigure = on ? { [weak ask] in ask?.toggle() } : nil
         companion?.onDrop = on ? { [weak ask] point in ask?.droppedOnWindow(at: point) } : nil
+        // A file dropped on Tara beside the shelf: her bubble opens with it, or she keeps its text.
+        tools?.askAboutFile = on ? { [weak self, weak ask] url in
+            self?.notch.collapse()
+            ask?.attach(file: url)
+        } : nil
+        tools?.rememberFile = on ? { url in
+            await Task.detached(priority: .userInitiated) {
+                guard let text = TaraDocument.text(of: url) else { return false }
+                return RememberedDocuments.save(name: url.lastPathComponent, source: url, text: text) != nil
+            }.value
+        } : nil
         // The palette's Ask Tara rows: open her, or ask straight away what was typed.
         notch.paletteSources.askTara = on ? { [weak ask] query in
             guard let ask else { return }
@@ -856,6 +933,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } : nil
         if !on { ask.close() }
+    }
+
+    /// ⌃⌥T: with the Dashboard in front, its chat (the page opens and the field takes the keys);
+    /// anywhere else Tara comes out of the notch as always.
+    private func askHotKeyPressed() {
+        ask?.hotKeyPressed()
+    }
+
+    private func askHotKeyReleased() {
+        guard !askPressInDashboard else { return askPressInDashboard = false }
+        ask?.hotKeyReleased()
     }
 
     private func applyDemoSlots() {
@@ -870,8 +958,29 @@ extension AppDelegate {
     /// Weather and day progress in the calendar's header and the ears, notes in the Tools tab,
     /// last night's scores as a morning line. Previews and sample data use made-up values and
     /// never touch the network, the Keychain or the location.
-    fileprivate func startDaily(tools: ToolsModule, sample: Bool) {
+    fileprivate func startDaily(tools: ToolsModule, today: TodayModule?, sample: Bool) {
         tools.notes = daily.notes
+        // Today in the calendar: the Today module's tasks and reminders, ticked off in place.
+        daily.today = today
+        daily.openSettings = { [weak self] in self?.showSettings() }
+        daily.remindersShown = sample || (state.settings.remindersInToday && RemindersSource.authorized)
+        if !sample {
+            daily.turnOnReminders = { [weak self] in
+                // Asked here, on the click, never before; declined earlier: the switch in System Settings.
+                RemindersSource.requestAccess { granted in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        if granted {
+                            self.state.settings.remindersInToday = true
+                            self.daily.remindersShown = true
+                            today?.reload()
+                        } else {
+                            PrivacyPane.open("Privacy_Reminders")
+                        }
+                    }
+                }
+            }
+        }
         let ears = DailyEars(store: daily)
         notchModel.restEars = { ears.shown }
         if sample {
@@ -899,6 +1008,9 @@ extension AppDelegate {
     }
 }
 
+// MARK: Tara's memory: the map
+
+
 // MARK: Tara's memory: privacy
 
 extension AppDelegate {
@@ -908,8 +1020,11 @@ extension AppDelegate {
     fileprivate func startPrivacy(sample: Bool) {
         let privacy: () -> MemoryPrivacy = { [weak self] in self?.state.settings.privacy ?? MemoryPrivacy() }
         tools?.privacy = privacy
+        (allModules.first { $0.kind == .today } as? TodayModule)?.privacy = privacy
         notch.inbox.privacy = privacy
         vaultLive?.privacy = privacy
+        // Notes off: Today reads neither the tasks nor today's note and its briefing.
+        Runtime.vault?.readsNotes = { privacy().shares(.notes) }
         meeting?.privacy = privacy
         meeting?.jamie.privacy = privacy
         ask?.ignores = { [weak self] id in self?.state.settings.privacy.ignores(app: id) ?? false }
@@ -933,6 +1048,9 @@ extension AppDelegate {
         }
         state.onForgetMemory = { [weak self] source in
             guard let self else { return false }
+            if source == .screen {
+                return true
+            }
             guard self.state.persists else { return true }  // previews delete nothing
             if source == .clipboard {
                 self.tools?.forgetHistory()
@@ -940,12 +1058,20 @@ extension AppDelegate {
             }
             let left = Set(files.files(for: source)).subtracting(files.forget(source))
             // The agents read again: what was deleted is gone from Ask Tara at once.
-            self.ask?.reloadMemory()
+            self.asks.forEach { $0.reloadMemory() }
             Log.app.info("Tara's memory: deleted \(source.rawValue, privacy: .public)")
             return left.isEmpty
         }
+        startScreenContext(sample: sample)
         applyPrivacy()
     }
+
+    /// Screen context: the service, Tara awake in the notch while it reads, its page, Ask Tara and the memory map.
+    private func startScreenContext(sample: Bool) {
+    }
+
+    /// Screen context was switched on for the first time: nothing runs until the consent sheet's
+    /// "Switch on"; "Not now" switches it off again.
 
     /// The System tab's switch and the badge beside the tabs: pause until resumed, or resume.
     func setMemoryPaused(_ paused: Bool) {
@@ -996,12 +1122,16 @@ extension AppDelegate {
         }
         // Back on: the vault snapshot and today's calendar are written fresh.
         if new.records(.notes, at: now), !old.records(.notes, at: before) { vaultLive?.restart() }
+        if new.shares(.notes) != old.shares(.notes) { (allModules.first { $0.kind == .today } as? TodayModule)?.reload() }
         if new.records(.meetings, at: now), !old.records(.meetings, at: before) {
             lastCalendarSnapshot = nil
             writeCalendarSnapshot(calendar.today)
         }
-        // A source switched off or on: the agents read again without it (or with it).
-        if new.off != old.off { ask?.reloadMemory() }
+        // A source switched off or on: the agents read again without it (or with it), the map and
+        // the Dashboard too.
+        if new.off != old.off || new.on != old.on {
+            asks.forEach { $0.reloadMemory() }
+        }
     }
 
     /// Today's calendar for the AI apps that read Tara's memory (`calendar-today.json`, which
@@ -1028,3 +1158,6 @@ extension AppDelegate {
         Task.detached(priority: .utility) { CalendarSnapshot.write(snapshot, to: url, privacy: privacy) }
     }
 }
+
+// MARK: Dashboard
+

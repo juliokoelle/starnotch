@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from connectors import local_stamp
 from memory import DEFAULT_DIR
 
 QUEUE = DEFAULT_DIR.parent / "capture-queue.jsonl"
@@ -28,7 +29,8 @@ class Capture:
 
     @property
     def day(self) -> str:
-        return self.created[:10]
+        """The user's day: the app writes `created` in UTC ("…Z") and counts days in local time."""
+        return local_stamp(self.created)[:10]
 
     @property
     def is_question(self) -> bool:

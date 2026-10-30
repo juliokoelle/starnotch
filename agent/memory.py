@@ -6,6 +6,7 @@ Schema of a meeting file (all keys optional except id):
       "id": "2026-10-12-kickoff",
       "title": "Kickoff",
       "date": "2026-10-12",                       # ISO date
+      "start": "2026-10-12T09:00:00+02:00",       # when it began, if the source says (finds the same meeting twice)
       "participants": ["Max", "Lisa"],
       "transcript": [{"speaker": "Max", "t": 12.5, "text": "..."}],   # t: seconds from start
       "summary": "...",                           # short, shown on the prep card
@@ -64,6 +65,7 @@ class Meeting:
     decisions: list[Decision] = field(default_factory=list)
     commitments: list[Commitment] = field(default_factory=list)
     notes: str = ""
+    start: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Meeting":
@@ -79,6 +81,7 @@ class Meeting:
             decisions=[_decision(x) for x in data.get("decisions") or []],
             commitments=[_commitment(x) for x in data.get("commitments") or []],
             notes=str(data.get("notes") or ""),
+            start=str(data.get("start") or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:

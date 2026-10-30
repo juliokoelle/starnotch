@@ -143,5 +143,8 @@ def test_sessions_never_show_what_was_said(tmp_path):
 async def test_tools_are_read_only(memory_dir, tmp_path):
     async with Client(memory_mcp.build(library(memory_dir, tmp_path))) as client:
         tools = (await client.list_tools()).tools
-    assert {t.name for t in tools} == {"search_memory", "get_meeting", "open_commitments", "recent_decisions", "today"}
+    names = {"search_memory", "get_meeting", "open_commitments", "recent_decisions", "today"}
+    assert {t.name for t in tools} == names
     assert all(t.annotations and t.annotations.read_only_hint for t in tools)
+
+

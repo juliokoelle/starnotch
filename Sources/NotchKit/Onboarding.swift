@@ -855,16 +855,10 @@ private struct NotchSample: View {
 private struct MeetingsStep: View {
     @Bindable var model: Onboarding
 
-    private enum Source { case jamie, wispr, granola }
+    private enum Source { case jamie }
 
     var body: some View {
-        CardList(items: [Source.jamie, .wispr, .granola]) { source in
-            switch source {
-            case .jamie: JamieRow(jamie: model.jamie)
-            case .wispr: ComingSoonRow(name: "Wispr Flow", symbol: "mic")
-            case .granola: ComingSoonRow(name: "Granola", symbol: "note.text")
-            }
-        }
+        CardList(items: [Source.jamie]) { _ in JamieRow(jamie: model.jamie) }
     }
 }
 
@@ -1028,6 +1022,7 @@ struct JamieRow: View {
     }
 }
 
+
 /// A meeting source that isn't there yet: greyed, no button.
 private struct ComingSoonRow: View {
     let name: String
@@ -1112,6 +1107,7 @@ enum BrainInfo {
         switch brain {
         case .auto: "Automatic"
         case .claudeCode: "Claude subscription"
+        case .codex: "ChatGPT subscription (Codex)"
         case .api: "Own API key"
         case .apple: "Apple Intelligence (on this Mac, free)"
         case .rules: "Simple rules"
@@ -1122,6 +1118,7 @@ enum BrainInfo {
         switch brain {
         case .auto: "Claude Code when it's there, else an API key, else Apple Intelligence, else simple rules."
         case .claudeCode: "Runs through Claude Code on your plan; no API credits."
+        case .codex: "Runs through the Codex app on your ChatGPT plan; no API credits."
         case .api: "Your Anthropic key, billed per use."
         case .apple: "Apple's model on this Mac, free; simpler answers than Claude."
         case .rules: "No model. Works offline and catches the obvious."

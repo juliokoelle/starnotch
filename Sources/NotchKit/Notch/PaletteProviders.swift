@@ -97,10 +97,10 @@ extension ToolsModule: PaletteProvider {
         }
         if tabs.contains(.clipboard) {
             for item in history.list().prefix(40) {
-                let line = item.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? item.text
+                let line = item.isImage ? item.imageTitle : item.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? item.text
                 items.append(PaletteItem(
                     id: "clip:\(item.id.uuidString)", title: String(line.prefix(120)),
-                    subtitle: item.source, symbol: item.pinned ? "pin.fill" : "doc.on.clipboard", kind: .clipboard,
+                    subtitle: item.source, symbol: item.pinned ? "pin.fill" : item.isImage ? "photo" : "doc.on.clipboard", kind: .clipboard,
                     secondaryTitle: "Show in notch",
                     perform: { [weak self] in self?.copy(item) },
                     secondary: { [weak self] in

@@ -21,7 +21,7 @@ struct MemorySettings: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             PauseRow(state: state, now: context.date)
         }
-        ForEach(MemorySource.allCases, id: \.self) { source in
+        ForEach(MemorySource.offered, id: \.self) { source in
             sourceRow(source)
         }
         IgnoreList(state: state)
@@ -53,8 +53,7 @@ struct MemorySettings: View {
                 state.settings.privacy.set(source, on: value)
             }))
             .labelsHidden()
-            .toggleStyle(.switch)
-            .tint(Theme.accent)
+            .toggleStyle(TaraSwitchStyle())
             .accessibilityLabel(Text(LocalizedStringKey(source.title)))
         }
         .padding(.vertical, 2)
@@ -97,6 +96,14 @@ struct MemorySettings: View {
             return count == 1 ? Localization.string("1 snapshot kept") : String(format: Localization.string("%d snapshots kept"), count)
         case .clipboard: return count == 1 ? Localization.string("1 copy, in memory only") : String(format: Localization.string("%d copies, in memory only"), count)
         case .sessions: return Localization.string("Read where each tool keeps them; Starnotch keeps no copy")
+        case .apps:
+            // The consent: what turning it on means, said before it's on.
+            if !privacy.isOn(.apps) && count == 0 { return Localization.string("Off until you turn it on. Kept on this Mac, a total per app and day.") }
+            if count == 0 { return Localization.string("Nothing counted yet") }
+            return count == 1 ? Localization.string("1 day kept") : String(format: Localization.string("%d days kept"), count)
+        case .screen:
+            if !privacy.isOn(.screen) && count == 0 { return Localization.string("Off until you switch it on") }
+            return count == 1 ? Localization.string("1 day kept, encrypted") : String(format: Localization.string("%d days kept, encrypted"), count)
         }
     }
 
@@ -111,6 +118,8 @@ struct MemorySettings: View {
         case .notes: "Tara's snapshots of your vault and other tools go. Your notes stay as they are."
         case .clipboard: "Everything in the clipboard history goes, pinned items too."
         case .sessions: "The scripts that reopen past sessions go. The sessions stay in each tool."
+        case .apps: "The time per app Tara counted goes. Nothing else was kept."
+        case .screen: "Every day of screen context goes, with its key. What Tara learned from it stays in her memory, where you can delete it on its own."
         }
     }
 
@@ -249,19 +258,24 @@ private struct AppIconImage: View {
 enum MemorySettingsPreview {
     private static var window: NSWindow?
 
+    /// Made-up counts for the source rows.
+    static func count(_ source: MemorySource) -> Int {
+        switch source {
+        case .meetings: 14
+        case .captures: 23
+        case .notes: 1
+        case .clipboard: 0
+        case .sessions: 0
+        case .apps: 6
+        case .screen: 3
+        }
+    }
+
     static func show(state: AppState, setup: SetupCenter?, paused: Bool) {
         if paused { state.settings.privacy.pause(.oneHour, now: Date()) }
         state.settings.privacy.set(.clipboard, on: false)
         state.settings.privacy.ignore(IgnoredApp(bundleID: "com.apple.Notes", name: "Notes"))
-        state.memoryCount = { source in
-            switch source {
-            case .meetings: 14
-            case .captures: 23
-            case .notes: 1
-            case .clipboard: 0
-            case .sessions: 0
-            }
-        }
+        state.memoryCount = count
         let view = Form {
             Section {
                 MemorySettings(state: state, setup: setup)

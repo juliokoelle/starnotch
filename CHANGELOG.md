@@ -2,7 +2,45 @@
 
 What changed in Starnotch, newest first: one section per day an update landed, grouped by theme. Each feature keeps the name the app uses. Smaller fixes are in the commit history.
 
+## 30 October 2026
+
+### Tara
+- **New:** Tara's eyes follow the pointer. While it moves she is awake with her eyes open, glances around now and then when it rests, and dozes off again a while after it stops. A click in the notch or on her and her eyes laugh (^ ^). She blinks twice now and then, and her eyes move softly, a little behind the pointer. Settings › Notch › Tara's eyes: her own lines, or round eyes with pupils. The eyes move only when the pointer does; with Reduce Motion they stay still.
+
+### Notch
+- **New:** Settings › Notch: Tara beside the notch (Always, When something's up, Never), Open on hover (Click only, 0.5 s, 1 s; a click always opens it) and Open on the last tab, so the notch comes back where you left it, on music for example. The last tab is on by default.
+
+### Ask Tara
+- **New:** Tara beside the shelf: drag a file onto the notch and drop it on Tara instead of the shelf. Ask opens her bubble with it (a PDF, Word or text file goes as its text, a picture as a copy); Remember keeps its text as a Markdown note in Documents › Starnotch › Documents, which Tara searches with every question, like the rest of that folder. The file itself is only read, never moved or copied elsewhere.
+- **Improved:** A file dropped on Tara herself or on her bubble goes along as the file (it used to land in the field as its path); a file a browser only promises, such as a Gmail attachment dragged out of Chrome, is taken too. She hops and looks pleased when she takes one, and stays on screen when her bubble opens.
+- **New:** Earlier chats: the clock in Ask Tara's field lists your last chats with when and how many questions; a click carries on with one, with what was said, and the cross forgets it. Kept on this Mac only (`ask-chats.json`), at most 50.
+- **Improved:** A follow-up keeps the questions before it above the answer, a scroll up away. The card is see-through glass now instead of near black.
+
+### Quick capture
+- **Improved:** The confirmation says where a capture went and takes you there: Notepad opens Tools › Notepad › Tara's notes, the file button opens the Markdown inbox. The note flies into the Notepad button. The confirmation stays while the pointer is on it.
+- **Changed:** Without a vault inbox, captures go to `Inbox.md` in a visible folder, Documents › Starnotch, as plain Markdown any notes app or AI can read; a README there says what the folder holds. The lines of the old inbox in the app's folder come along (copied).
+- **Improved:** Tab and ⇧Tab switch between Task, Question and Note, the arrow keys too while the field is empty. The cursor stays in the field after switching, and a click anywhere on the field puts it there.
+- **Fixed:** Every capture after the first stayed out of the Markdown inbox ("kept on this Mac"): the file was opened for writing only, so checking its last line failed.
+- **Fixed:** A click in quick capture that slid down a little pulled Tara out of the notch and closed it.
+
 ## 29 October 2026
+
+
+### Notch
+- **Improved:** Hovering the resting notch shows Tara alone, to grab and pull out, with one line only while something waits for you. The System tab's numbers no longer take the hover because it was the tab open last or memory is merely tight; only what matters now (camera or microphone in use, full memory, a battery about to run out, the lid state, a running timer, a meeting about to start) takes Tara's place.
+- **Changed:** No more amber in the notch: what waits for you (your turn, a loop to check, the inbox count) is in Tara's colour, a high value is said with brighter text, and only a critical state is red.
+- **Improved:** Plan limits in the Agents header: one quiet chip per tool ("66 %" over "Claude"), the same with one tool, two, or one that has been closed for a while (dimmed, last seen in the popover). A click shows each tool's 5-hour window and week with the share used, a bar, when it resets and, when it runs out first, at what time, dark and readable.
+- **Improved:** Tara is one figure on the notch: whole beside it at rest, never cut off by the notch's edge, and on hover she grows where she stands or moves down beside the line of what waits, without a second Tara crossing over her. With nothing waiting the hover adds no empty black band below the notch; with something waiting the band is only as tall as Tara and her line.
+- **New:** Today and Calendar are one switch at the left of the calendar's header, Today first: the calendar tab opens on it, unless a meeting starts within the quarter hour. Today has the day's to-dos (tasks from your notes and Apple Reminders due today or overdue, ticked off in place), the weather by the hour, the work day and last night. Reminders are offered there and macOS asks for access only on that click; without a place or a wearable, one line and one button say what to do.
+- **Improved:** The clipboard lists text, web addresses led by their domain and copied images with a preview, with the app and the time; it opens the large panel, searches once the list is long, keeps images to 150 MB together (pinned ones included), and still lives in memory only and skips password apps.
+- **Improved:** The System tab's switches keep their words ("Keep awake", "Pause Tara" with Tara asleep, "Dark mode", "Hide icons"); a long command and the battery's detail give way first. Top apps opens Activity Monitor from its title.
+- **Improved:** A paused or running timer stays readable beside the notch ("12m" instead of a cut-off "12:35") and in the hover line, where the time comes first.
+- **Improved:** A tab's tooltip says that tabs can be moved: hold, then drag.
+- **Improved:** Today's cards shrink with a narrower island instead of running past its edges, and last night shows its main score alone where both don't fit. The timer's kinds and presets no longer shorten to "…".
+- **Improved:** The notepad opens as large as the clipboard, so switching between them doesn't resize the island. The Tools tab's own tabs (Clipboard, Timer, Shelf, Notepad) can be moved like the main tabs: hold, then drag; the order is kept.
+- **New:** The Today tab shows the morning briefing from today's note in full, as a note reads (headings, lists, tasks, links), scrolling in its card: the section whose heading names a brief, or the note it links to. Its title opens it in Obsidian; links in it open their notes. Without a briefing yet, one calm line. With the notes vault off in Tara's memory, Today reads nothing from your notes (no tasks, no daily note, no briefing) and says so.
+- **Improved:** Weather where you are: Today's weather card and Settings › Daily have Use my location. macOS asks on that click, with Starnotch in front; after a no it opens System Settings at Location Services, and the weather comes by itself once you turn Starnotch on there. Set a city stays beside it.
+- **Fixed:** Accessibility no longer brings up macOS's prompt again and again. It asks once, on your click; when macOS stopped recognising an updated Starnotch although its switch shows on, Settings says to switch it off and on again and opens the right pane.
 
 ### Characters
 - **Changed:** Tara and the Cat are no longer under the Apache License: they are all rights reserved and come only with Starnotch. The code and Pebbles stay Apache 2.0, and earlier versions keep the license they came with. Starnotch, Tara and the characters are trademarks; see TRADEMARKS.md.

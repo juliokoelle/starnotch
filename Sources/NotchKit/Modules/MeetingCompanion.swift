@@ -72,7 +72,7 @@ final class MeetingCompanion: NSObject {
             return
         }
         let origin = figure.map { CGPoint(x: $0.x - Self.size.width + Self.figure.x, y: $0.y - Self.figure.y) } ?? savedOrigin()
-        let panel = FreePanel(contentRect: CGRect(origin: origin, size: Self.size),
+        let panel = FreePanel(contentRect: Self.onScreen(CGRect(origin: origin, size: Self.size)),
                               styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         // Above the menu bar, so she can be carried all the way up into the notch.
         panel.level = .statusBar
@@ -228,7 +228,19 @@ final class MeetingCompanion: NSObject {
             target.origin.y -= max(0, target.maxY - visible.maxY)
             target.origin.x += max(0, visible.minX - target.minX)
         }
-        panel.setFrame(target, display: true)
+        panel.setFrame(Self.onScreen(target, screen: panel.screen), display: true)
+    }
+
+    /// The frame moved just far enough to lie on the screen, so she is never out of sight: she
+    /// once opened past the right edge with only the bubble showing.
+    private static func onScreen(_ frame: CGRect, screen: NSScreen? = nil) -> CGRect {
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        guard let visible = (screen ?? NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.main)?.visibleFrame
+        else { return frame }
+        var moved = frame
+        moved.origin.x = min(max(moved.minX, visible.minX), visible.maxX - moved.width)
+        moved.origin.y = min(max(moved.minY, visible.minY), visible.maxY - moved.height)
+        return moved
     }
 
     /// A new meeting card: a bubble for a few seconds, at most three at a time.
@@ -323,6 +335,8 @@ private struct CompanionView: View {
     let companion: MeetingCompanion
     @State private var hovering = false
     @GestureState private var pressing = false
+    /// A file is dragged over her.
+    @State private var dropping = false
 
     var body: some View {
         let asking = companion.ask?.isOpen == true
@@ -348,10 +362,12 @@ private struct CompanionView: View {
                         .transition(Theme.reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
                 }
                 AvatarView(character: companion.cast.main,
-                           mood: companion.ask?.mood ?? (companion.listening ? .listening : .idle),
+                           mood: dropping ? .listening : companion.ask?.mood ?? (companion.listening ? .listening : .idle),
                            height: 72, colorway: companion.cast.colorway, emergeOnAppear: false)
+                    .scaleEffect(dropping ? 1.15 : 1)
+                    .animation(Theme.snappy, value: dropping)
                     .modifier(PressSquash(pressed: pressing))
-                    .modifier(LandingBounce(trigger: companion.landings))
+                    .modifier(LandingBounce(trigger: companion.landings + (companion.ask?.received ?? 0)))
                     .frame(width: 84, height: 80, alignment: .bottom)
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
@@ -362,6 +378,11 @@ private struct CompanionView: View {
                         state = abs(value.translation.width) + abs(value.translation.height) < 3
                     })
                     .simultaneousGesture(TapGesture().onEnded { companion.onTapFigure?() })
+                    // A file dropped on her: her bubble opens with it (while Ask Tara is on).
+                    .onDrop(of: FileDrop.types, isTargeted: $dropping) { providers in
+                        guard let ask = companion.ask, companion.onTapFigure != nil else { return false }
+                        return FileDrop.load(providers) { ask.attach(file: $0) }
+                    }
                     .help(Localization.string(companion.onTapFigure == nil ? "Drag to move; let go at the notch to put it back"
                                                                            : "Click to ask Tara; drag to move, let go at the notch to put it back"))
                     // On her corner, not in the row: a bubble beside her doesn't shift when it shows.

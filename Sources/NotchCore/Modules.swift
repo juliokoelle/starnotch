@@ -43,7 +43,12 @@ public enum ModuleOrder {
     /// `kinds` in `order`'s sequence (first mention wins); kinds `order` doesn't name follow in
     /// their own sequence.
     public static func sorted(_ kinds: [ModuleKind], by order: [ModuleKind]) -> [ModuleKind] {
-        var rank: [ModuleKind: Int] = [:]
+        ordered(kinds, by: order)
+    }
+
+    /// The same for any tabs, e.g. the small tools'.
+    public static func ordered<Kind: Hashable>(_ kinds: [Kind], by order: [Kind]) -> [Kind] {
+        var rank: [Kind: Int] = [:]
         for (index, kind) in order.enumerated() where rank[kind] == nil { rank[kind] = index }
         return kinds.enumerated()
             .sorted { (rank[$0.element] ?? order.count + $0.offset, $0.offset) < (rank[$1.element] ?? order.count + $1.offset, $1.offset) }
@@ -53,7 +58,12 @@ public enum ModuleOrder {
     /// The full order to save after the visible tabs were rearranged to `visible`: hidden
     /// modules keep their place relative to each other, after the visible ones.
     public static func saved(visible: [ModuleKind], previous: [ModuleKind]) -> [ModuleKind] {
-        sorted(ModuleKind.allCases, by: visible + sorted(ModuleKind.allCases, by: previous))
+        saved(visible: visible, previous: previous, all: ModuleKind.allCases)
+    }
+
+    /// The same for any tabs, e.g. the small tools' (`all` in their built-in order).
+    public static func saved<Kind: Hashable>(visible: [Kind], previous: [Kind], all: [Kind]) -> [Kind] {
+        ordered(all, by: visible + ordered(all, by: previous))
     }
 }
 

@@ -267,14 +267,11 @@ final class AgendaModule: NotchModule {
         return next.start.timeIntervalSince(now) <= 5 * 60 && next.end > now
     }
 
-    var holdsOpen: Bool { selectedID != nil || DailyStore.shared.cardShown }
+    var holdsOpen: Bool { selectedID != nil }
 
     func handleBack() -> Bool {
-        if DailyStore.shared.cardShown {
-            withAnimation(Theme.snappy) { DailyStore.shared.cardShown = false }
-            return true
-        }
-        guard showsDetail else { return false }
+        // Today is where the tab opens: Esc there closes the panel.
+        guard !DailyStore.shared.cardShown, showsDetail else { return false }
         withAnimation(Theme.snappy) {
             selectedID = nil
             detailDismissed = true
@@ -283,8 +280,10 @@ final class AgendaModule: NotchModule {
     }
 
     func setExpanded(_ expanded: Bool) {
-        if !expanded {
-            DailyStore.shared.cardShown = false
+        if expanded {
+            // Today first; a meeting within the quarter hour keeps the calendar and its briefing.
+            DailyStore.shared.cardShown = DailyStore.shared.opensOnToday && ambientPriority == 0
+        } else {
             selectedID = nil
             detailDismissed = false
             dayOffset = 0
@@ -741,33 +740,15 @@ private struct AgendaBodyB: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let now = module.viewNow(R5Clock.now(context.date))
             VStack(spacing: 8) {
-                HStack(alignment: .center, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        DayHeader(module: module, now: now)
-                        if module.span == .day {
-                            HStack(spacing: 8) {
-                                ViewThatFits(in: .horizontal) {
-                                    Text(summary(now, short: false)).fixedSize()
-                                    Text(summary(now, short: true))
-                                }
-                                .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
-                                // Weather, the day's progress and last night, when those tools are on.
-                                if module.isToday { DailyChip(store: .shared) }
-                            }
-                        } else {
-                            Text(module.rangeEvents.filter { $0.kind == .meeting }.count == 1 ? "1 meeting"
-                                 : "\(module.rangeEvents.filter { $0.kind == .meeting }.count) meetings")
-                                .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
-                        }
-                    }
-                    .lineLimit(1)
-                    Spacer(minLength: 8)
-                    if module.span == .day {
-                        WeekStrip(counts: module.weekCounts, today: module.todayIndex, notes: module.weekNotes, now: R5Clock.now(context.date),
-                                  shown: module.shownIndex) { index in
-                            module.showDay(index - module.todayIndex)
-                        }
-                    }
+                // Narrowing steps until the row fits the panel (it pushed the cards below past the
+                // panel's edges): the short date and summary, no day chip, "D W M" for the spans,
+                // last no week strip.
+                ViewThatFits(in: .horizontal) {
+                    header(now: now, clock: context.date, step: 0)
+                    header(now: now, clock: context.date, step: 1)
+                    header(now: now, clock: context.date, step: 2)
+                    header(now: now, clock: context.date, step: 3)
+                    header(now: now, clock: context.date, step: 4)
                 }
                 .padding(.horizontal, 6)
                 .frame(height: 32)
@@ -822,6 +803,44 @@ private struct AgendaBodyB: View {
         .onAppear { module.source?.requestAccessIfNeeded() }
     }
 
+    /// The row above the day: the switch to Today, the date with its summary, the week strip.
+    /// `step` 0 is the full row; each step narrows it (see the caller), 4 truncates the summary.
+    /// The chip only repeats what Today shows, so it goes before the week strip.
+    private func header(now: Date, clock: Date, step: Int) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            // The switch to Today, where Today has the same one.
+            CalendarTodaySwitch(store: .shared)
+            VStack(alignment: .leading, spacing: 1) {
+                DayHeader(module: module, now: now, short: step > 0, shortSpans: step > 2)
+                if module.span == .day {
+                    // Weather, the day's progress and last night beside the summary, when those
+                    // tools are on (Today has them in full).
+                    HStack(spacing: 8) {
+                        if step < 4 {
+                            Text(summary(now, short: step > 0)).fixedSize()
+                        } else {
+                            Text(summary(now, short: true))
+                        }
+                        if module.isToday, step < 2 { DailyChip(store: .shared) }
+                    }
+                    .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
+                } else {
+                    Text(module.rangeEvents.filter { $0.kind == .meeting }.count == 1 ? "1 meeting"
+                         : "\(module.rangeEvents.filter { $0.kind == .meeting }.count) meetings")
+                        .font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .lineLimit(1)
+            Spacer(minLength: 8)
+            if module.span == .day, step < 4 {
+                WeekStrip(counts: module.weekCounts, today: module.todayIndex, notes: module.weekNotes, now: R5Clock.now(clock),
+                          shown: module.shownIndex) { index in
+                    module.showDay(index - module.todayIndex)
+                }
+            }
+        }
+    }
+
     /// "No meetings · free until 09:30", "3 meetings · Design review until 13:00".
     /// Short: "No meetings · busy until 09:00" when the event's title doesn't fit.
     private func summary(_ now: Date, short: Bool) -> String {
@@ -840,13 +859,15 @@ private struct AgendaBodyB: View {
 /// Day, Week, Month (also D, W, M).
 private struct SpanPicker: View {
     let module: AgendaModule
+    /// First letters only, where the header is narrow.
+    var short = false
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(AgendaModule.Span.allCases, id: \.self) { span in
                 let selected = module.span == span
                 Button { module.setSpan(span) } label: {
-                    Text(LocalizedStringKey(span.rawValue))
+                    Text(short ? String(Localization.string(span.rawValue).prefix(1)) : Localization.string(span.rawValue))
                         .font(Theme.font(10.5, .semibold))
                         .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
                         .padding(.horizontal, 7)
@@ -979,15 +1000,21 @@ private struct MonthView: View {
 private struct DayHeader: View {
     let module: AgendaModule
     let now: Date
+    /// "Thu 29 Oct" instead of "Thursday 29 October".
+    var short = false
+    /// "D W M" instead of "Day Week Month".
+    var shortSpans = false
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(title).font(Theme.font(13.5, .semibold)).foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-                .layoutPriority(1)
+            // The long date where the row has room ("Thursday 29 October"), else the short one.
+            Text(short ? shortTitle : title).fixedSize()
+            .font(Theme.font(13.5, .semibold)).foregroundStyle(Theme.textPrimary)
+            .lineLimit(1)
+            .layoutPriority(1)
             arrow("chevron.left", help: "Back (⌘←)") { module.step(by: -1) }
             arrow("chevron.right", help: "Ahead (⌘→)") { module.step(by: 1) }
-            SpanPicker(module: module)
+            SpanPicker(module: module, short: shortSpans).fixedSize()
             if !module.isToday {
                 Button("Today") { module.showDay(0); module.step(by: 0) }
                     .buttonStyle(PressScale())
@@ -999,6 +1026,13 @@ private struct DayHeader: View {
                 arrow("arrow.up.forward.app", help: "Open Calendar") { source.openCalendarApp() }
             }
         }
+    }
+
+    /// "Thu 29 Oct" ("Do., 29. Okt.") in a narrow header, in the user's locale; the week and the
+    /// month keep theirs.
+    private var shortTitle: String {
+        guard module.span == .day else { return title }
+        return now.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 
     /// "Wednesday, 28 October", "Week 44 · 26 Oct – 1 Nov", "October 2026".

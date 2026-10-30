@@ -32,14 +32,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import privacy
+import meeting_sources
 from memory import DEFAULT_DIR, Commitment, Decision, Line, Meeting, Memory, _seconds
 
 JAMIE_URL = "https://mcp.meetjamie.ai/mcp"
 TOKEN_FILE = DEFAULT_DIR.parent / "jamie-oauth.json"
 CALLBACK_PORT = 47791  # next to the app's ports; 8765 is a common dev-server port
 STATE_FILE = "jamie-sync.state"  # in the memory folder; not *.json, so Memory doesn't take it for a meeting
-MAPPING = 3  # raise when meeting_of maps differently: every meeting is then written again on the next sync
+MAPPING = 4  # raise when meeting_of maps differently: every meeting is then written again on the next sync
 PAGE_SIZE = 100  # list_meetings and list_tasks take at most 100 per page
 MAX_PAGES = 500  # against a server that never says a list or transcript is finished
 PARALLEL = 4  # meetings fetched at the same time
@@ -326,6 +326,7 @@ def meeting_of(raw: dict[str, Any], tasks: list[Any] = ()) -> Meeting:
             seen.add((c.who, c.what))
             commitments.append(c)
     date = str(first(raw, "date", "start_time", "startTime", "started_at", "startedAt", "created_at", "createdAt", default=""))
+    start = str(first(raw, "start_time", "startTime", "started_at", "startedAt", "start", default=""))
     return Meeting(
         id=f"jamie-{jamie_id}",
         title=text_of(first(raw, "title", "name", "subject", default="")) or "Meeting",
@@ -336,6 +337,7 @@ def meeting_of(raw: dict[str, Any], tasks: list[Any] = ()) -> Meeting:
         decisions=[d for d in decisions if d.text],
         commitments=commitments,
         notes=notes,
+        start=start if "T" in start else "",  # a time, for finding the same meeting from another source
     )
 
 
@@ -498,14 +500,18 @@ async def sync(session: Any, memory: Memory, limit: int = 50, since: str | None 
         except ValueError as error:
             log({"type": "status", "state": "warning", "message": f"skipped: {error}"})
             return None
-        path = memory.save(meeting)
+        path, kept = meeting_sources.place(memory, meeting)
         if stamp:
             seen[memory_id] = stamp
         else:
             seen.pop(memory_id, None)
-        updated += 1
         line = {"type": "synced", "meeting_id": meeting.id, "title": meeting.title, "date": meeting.date,
-                "lines": len(meeting.transcript), "path": str(path)}
+                "lines": len(meeting.transcript)}
+        if kept:  # another source's copy of this meeting stays in the memory
+            log({**line, "duplicate_of": kept.id})
+            return None
+        updated += 1
+        line["path"] = str(path)
         log({**line, "partial": True} if partial else line)
         return meeting
 
@@ -581,7 +587,7 @@ def logout(path: Path | None = None) -> bool:
         return False
 
 
-async def wait_for_callback(port: int = CALLBACK_PORT, timeout: float = 300):
+async def wait_for_callback(port: int = CALLBACK_PORT, timeout: float = 300, name: str = "Jamie"):
     """Serves one request on 127.0.0.1:<port>/callback and returns the authorization code."""
     from mcp.shared.auth import AuthorizationCodeResult
 
@@ -591,7 +597,7 @@ async def wait_for_callback(port: int = CALLBACK_PORT, timeout: float = 300):
         request = (await reader.readline()).decode(errors="replace").split(" ")
         query = parse_qs(urlparse(request[1] if len(request) > 1 else "/").query)
         ok = "code" in query
-        body = "Starnotch ist mit Jamie verbunden. Du kannst das Fenster schliessen." if ok else "Kein Code erhalten."
+        body = f"Starnotch ist mit {name} verbunden. Du kannst das Fenster schliessen." if ok else "Kein Code erhalten."
         writer.write(f"HTTP/1.1 {200 if ok else 400} OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
                      f"Connection: close\r\n\r\n{body}".encode())
         await writer.drain()
@@ -600,7 +606,7 @@ async def wait_for_callback(port: int = CALLBACK_PORT, timeout: float = 300):
             done.set_result(AuthorizationCodeResult(code=query["code"][0], state=(query.get("state") or [None])[0],
                                                     iss=(query.get("iss") or [None])[0]))
         elif "error" in query and not done.done():
-            done.set_exception(RuntimeError(f"Jamie login failed: {query['error'][0]}"))
+            done.set_exception(RuntimeError(f"{name} login failed: {query['error'][0]}"))
 
     server = await asyncio.start_server(handle, "127.0.0.1", port)
     async with server:
@@ -621,7 +627,7 @@ def login_required(error: BaseException) -> bool:
     return cause is not None and login_required(cause)
 
 
-def reason(error: BaseException) -> str:
+def reason(error: BaseException, name: str = "Jamie") -> str:
     """What went wrong, for the app: the first error inside the task groups the MCP client raises from, and a short
     sentence when Jamie can't be reached at all (offline, or the network not back after a wake)."""
     import httpx2
@@ -629,11 +635,12 @@ def reason(error: BaseException) -> str:
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]
     if isinstance(error, (httpx2.NetworkError, httpx2.ConnectTimeout)):
-        return "Jamie isn't reachable; check your internet connection"
+        return f"{name} isn't reachable; check your internet connection"
     return str(error)
 
 
-def oauth_provider(url: str, port: int = CALLBACK_PORT, interactive: bool = True):
+def oauth_provider(url: str, port: int = CALLBACK_PORT, interactive: bool = True, token_file: Path | None = None,
+                   name: str = "Jamie"):
     from mcp.client.auth import OAuthClientProvider
     from mcp.shared.auth import OAuthClientMetadata
 
@@ -644,7 +651,7 @@ def oauth_provider(url: str, port: int = CALLBACK_PORT, interactive: bool = True
         print(json.dumps({"type": "status", "state": "login", "url": authorization_url}), flush=True)
         webbrowser.open(authorization_url)
 
-    storage = FileTokenStorage()
+    storage = FileTokenStorage(token_file)
     provider = OAuthClientProvider(
         server_url=url,
         client_metadata=OAuthClientMetadata(
@@ -656,7 +663,7 @@ def oauth_provider(url: str, port: int = CALLBACK_PORT, interactive: bool = True
         ),
         storage=storage,
         redirect_handler=open_browser,
-        callback_handler=lambda: wait_for_callback(port),
+        callback_handler=lambda: wait_for_callback(port, name=name),
     )
     # The SDK doesn't know when stored tokens run out, so an expired one would get a 401 and a new browser
     # login; with the expiry it uses the refresh token instead.
@@ -681,12 +688,13 @@ async def discover_token_endpoint(provider, http) -> None:
         pass
 
 
-async def connect_and_run(url: str, job, interactive: bool = True) -> Any:
+async def connect_and_run(url: str, job, interactive: bool = True, token_file: Path | None = None,
+                          name: str = "Jamie") -> Any:
     import httpx2
     from mcp.client import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
-    provider = oauth_provider(url, interactive=interactive)
+    provider = oauth_provider(url, interactive=interactive, token_file=token_file, name=name)
     async with httpx2.AsyncClient(timeout=10) as plain:
         await discover_token_endpoint(provider, plain)
     async with httpx2.AsyncClient(auth=provider, timeout=httpx2.Timeout(60, read=300)) as http:
@@ -712,9 +720,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.logout:
         print(json.dumps({"type": "status", "state": "logged_out", "removed": logout()}), flush=True)
         return 0
-    refused = privacy.load().why_not("meetings") if not args.list_tools else ""
-    if refused:  # paused or switched off in Settings › Tara's memory: nothing comes in
-        print(json.dumps({"type": "status", "state": "paused", "message": refused}), flush=True)
+    # Paused or switched off in Settings › Tara's memory, or Jamie not picked as a meeting source: nothing comes in
+    state, refused = meeting_sources.why_not("jamie") if not args.list_tools else ("", "")
+    if refused:
+        print(json.dumps({"type": "status", "state": state, "message": refused}), flush=True)
         return 0
     if args.no_login and not FileTokenStorage()._read().get("tokens"):  # registering the client alone writes the file
         print(json.dumps({"type": "status", "state": "login_required"}), flush=True)

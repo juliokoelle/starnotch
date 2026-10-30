@@ -55,9 +55,16 @@ enum DailyText {
 ///     daily-notes           notes in the Tools tab
 ///     daily-morning         the morning line
 ///     daily-settings        Settings with the Daily section
+///     today-view            Today in the calendar: to-dos with reminders, weather, work day, last night
+///     today-view-empty      the same with nothing set up: no place, no wearable, Reminders offered
+///     daily-files           the small Finder on the home folder (this Mac's, read only)
+///     clipboard             the clipboard with text, links and images
+///     stopwatch-paused | stopwatch-running | timer-paused | pomodoro-paused   the timer card
 enum DailyPreview {
     static let names = ["daily-calendar", "daily-card", "daily-card-whoop", "daily-card-weather", "daily-card-empty",
-                        "daily-ears", "daily-ears-weather", "daily-ears-peek", "daily-notes", "daily-morning", "daily-settings"]
+                        "daily-ears", "daily-ears-weather", "daily-ears-peek", "daily-notes", "daily-files", "daily-morning", "daily-settings",
+                        "today-view", "today-view-empty", "clipboard", "stopwatch-paused", "stopwatch-running", "timer-paused",
+                        "pomodoro-paused", "stopwatch-paused-rest", "stopwatch-paused-peek", "stopwatch-running-rest"]
 
     static func handles(_ name: String) -> Bool { names.contains(name) }
 
@@ -81,7 +88,7 @@ enum DailyPreview {
         default: settings.healthSource = .oura
         }
         store.usePreview(on: features, settings: settings)
-        if name == "daily-card-empty" { store.clearPreviewData() }
+        if name == "daily-card-empty" || name == "today-view-empty" { store.clearPreviewData() }
     }
 
     @MainActor
@@ -96,8 +103,33 @@ enum DailyPreview {
                 notch.tourPeek()
             }
         case "daily-calendar":
+            store.opensOnToday = false
             notch.expand(.calendar, pinned: true)
-        case "daily-card", "daily-card-whoop", "daily-card-weather", "daily-card-empty":
+        case "today-view-empty":
+            // Reminders not yet on: the row that offers them (it does nothing in a preview).
+            store.remindersShown = false
+            store.turnOnReminders = {}
+            store.today?.reload()
+            notch.expand(.calendar, pinned: true)
+            Task {
+                try? await Task.sleep(for: .milliseconds(500))
+                withAnimation(Theme.snappy) { store.cardShown = true }
+            }
+        case "clipboard":
+            tools.previewClips()
+            tools.tab = .clipboard
+            notch.expand(.tools, pinned: true)
+        case "stopwatch-paused", "stopwatch-running", "timer-paused", "pomodoro-paused":
+            tools.previewTimer(name)
+            tools.tab = .timer
+            notch.expand(.tools, pinned: true)
+        case "stopwatch-paused-rest", "stopwatch-running-rest", "stopwatch-paused-peek":
+            // Beside the notch at rest, or hovered: nothing else asks for the ears.
+            agents.usePreview(AgentSnapshot())
+            notch.model.modules.compactMap { $0 as? NowPlayingModule }.first?.togglePlay()
+            tools.previewTimer(name.hasPrefix("stopwatch-paused") ? "stopwatch-paused" : "stopwatch-running")
+            if name.hasSuffix("peek") { notch.tourPeek() }
+        case "daily-card", "daily-card-whoop", "daily-card-weather", "daily-card-empty", "today-view":
             notch.expand(.calendar, pinned: true)
             Task {
                 try? await Task.sleep(for: .milliseconds(500))
@@ -105,6 +137,11 @@ enum DailyPreview {
             }
         case "daily-notes":
             tools.tab = .notes
+            notch.expand(.tools, pinned: true)
+        case "daily-files":
+            // The home folder: listing it asks macOS for nothing (Desktop, Documents and Downloads would).
+            tools.tab = .files
+            tools.files.show(.home)
             notch.expand(.tools, pinned: true)
         case "daily-morning":
             if let health = store.health { _ = store.onMorningLine?(health, store.shownWeather) }

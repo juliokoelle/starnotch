@@ -85,15 +85,25 @@ public enum AppVolume {
             for (app, level) in values { set(level, for: app) }
         }
 
+        /// Saved levels go through `set` too: one saved close to 100 % comes back untouched.
+        public init(from decoder: Decoder) throws {
+            struct Saved: Decodable { var values: [String: Double] }
+            self.init(values: try Saved(from: decoder).values)
+        }
+
         public func level(_ app: String) -> Double { values[app] ?? 1 }
 
         public mutating func set(_ level: Double, for app: String) {
             let clamped = min(AppVolume.range.upperBound, max(AppVolume.range.lowerBound, level))
-            // Close to 100 %: back to untouched, so the app runs without a tap.
-            values[app] = abs(clamped - 1) < 0.02 ? nil : clamped
+            // Close to 100 %: back to untouched, so the app runs without a tap (and macOS shows no
+            // System Audio Recording for it). A nudge of a few percent is no reason to tap an app.
+            values[app] = abs(clamped - 1) < Self.untouched ? nil : clamped
         }
 
         public var adjusted: Set<String> { Set(values.keys) }
+
+        /// Within this of 100 % a level counts as untouched.
+        public static let untouched = 0.06
     }
 
     /// "40 %", "Muted".

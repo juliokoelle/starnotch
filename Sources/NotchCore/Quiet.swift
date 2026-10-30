@@ -24,6 +24,13 @@ public enum Quiet {
         }
     }
 
+    /// The island with ears at rest: its width without the flares, and how far its centre sits
+    /// from the notch's. Both ears: symmetric. The quiet look (`oneSided`): only the left ear, so
+    /// the right edge stays flush with the notch and the island grows by one ear, not two.
+    public static func restIsland(notchWidth: CGFloat, ear: CGFloat, oneSided: Bool) -> (width: CGFloat, offset: CGFloat) {
+        oneSided ? (notchWidth + ear, -ear / 2) : (notchWidth + 2 * ear, 0)
+    }
+
     /// While watching, only urgent sneaks get through; the rest are counted for the summary.
     public static func letsThrough(urgent: Bool, watching: Bool) -> Bool { !watching || urgent }
 

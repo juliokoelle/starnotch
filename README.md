@@ -2,28 +2,29 @@
 
 **Your notch, the control strip for your agents.**
 
-Meet Tara, a little star that lives in your MacBook's notch. Starnotch turns the notch into a small island. It shows what your coding agents are doing, your next meeting, what's playing, and anything a connector adds. Hover to peek, click to open, ⌃⌥Space from the keyboard, swipe on the notch to switch.
+Meet Tara, a little star that lives in your MacBook's notch. Starnotch turns the notch into a small island: it shows what your coding agents are doing and brings their questions to you, your next meeting, what's playing, your files and notes, and anything a connector adds. Tara watches with you; her eyes follow your pointer and laugh when you click. Hover to peek (or rest on the notch to open it), click to open, ⌃⌥Space from the keyboard, swipe on the notch to switch.
 
 <p align="center">
-  <img src="docs/screenshots/agents.png" width="680" alt="Tara in the Starnotch agents panel: the session at max effort glows in Sol, the others in their effort colours, plan usage in the header">
+  <img src="docs/screenshots/agents.png" width="680" alt="Tara in the Starnotch agents panel: Claude Code, Codex, Cursor, Copilot CLI and Gemini CLI sessions side by side, a subagent at work, plan limits in the header">
 </p>
 
 ## What it shows
 
 | Module | What you see | Needs |
 |---|---|---|
-| **Agents** | Your Claude Code sessions as small characters: working, waiting for you, idle. Last steps, subagents, context window per session, plan limits in the header, recurring loops. | Claude Code |
+| **Agents** | Your Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI and opencode sessions as small characters: working, waiting for you, idle. Last steps, subagents, context window per session, plan limits in the header, recurring loops. Open a session's terminal, editor or Claude app tab from the notch. | One of those agents |
 | **Calendar** | Your day on a time band, the next meeting with a countdown and Join (Meet, Zoom, Teams), a reminder five minutes before. | Calendar access (asked when you first open it) |
 | **Now playing** | Cover, controls, volume and output device for whatever plays: Spotify, Music, Podcasts, VLC, IINA, YouTube or SoundCloud in a browser. Optional: synced lyrics and a volume per app. | Nothing (Spotify or Music without the bundled helper) |
 | **Dictate** | Starts Wispr Flow hands-free from the notch. | Wispr Flow |
 | **Today** | Tasks, follow-ups and a short brief from a connector. | A connector |
 | **Meeting** | Listens along and remembers your past meetings: flags when something said contradicts an earlier decision, nudges about open promises, writes down new ones, answers questions with the quote they come from. | An Anthropic API key; Reson8 for live audio, Jamie for past meetings |
-| **Quick capture** | ⌃⌥N: one line out of the notch, dates and people recognised as you type (English and German). Everything lands in `Inbox.md`, ⌃⌥I opens it. | Nothing |
+| **Quick capture** | ⌃⌥N: one line out of the notch, dates and people recognised as you type (English and German); Tab or the arrow keys pick task, question or note. Everything lands in `Inbox.md` in Documents › Starnotch (or your notes vault's inbox) and in the Notepad; the confirmation takes you there. | Nothing |
+| **Tools** | Files (your folders, open or drag out, a drop copies), Notepad (your notes and Tara's), Shelf (park files, AirDrop, convert images) with Tara beside it: drop a file on her to ask about it or keep its text, Clipboard history, timers. | Nothing |
 | **Command palette** | ⌃⌥K, or ⌘K while the island is open: one search over tabs, sessions, loops, today's events, tools, clipboard, shelf and settings. ↵ runs a row, ⌘↵ its second action; what you pick often comes first. | Nothing |
 | **Agents inbox** | ⌃⌥A: everything that needs you, one at a time: permission prompts from Claude Code and Codex, MCP questions, sessions the Claude app says need you, finished turns, failed loops. The card in front stays until you move on. ↵ answers or opens, ⌘↵ jumps to the session, esc moves on. The count sits in the Agents ear. Comes with the Agents tab. | Claude Code or Codex |
-| **Ask Tara** | ⌃⌥T or a click on the floating Tara: ask about your meetings, quick captures and notes; hold the keys to speak. The answer comes with its sources (meeting and date, the note), follow-ups keep the thread, esc closes. Drop her on a window to ask about it. | Claude Code on your plan or an API key (without one she only finds words); uv |
+| **Ask Tara** | ⌃⌥T or a click on the floating Tara: ask about your meetings, quick captures and notes; hold the keys to speak. The answer comes with its sources (meeting and date, the note), follow-ups keep the thread above the answer, and earlier chats are a click away. Drop a PDF, Word or text file on her to ask about it, or drop her on a window. | Claude Code or Codex on your plan, an API key, or Apple Intelligence (without one she only finds words); uv |
 
-Modules whose source isn't on your Mac hide themselves. You can switch any module off in Settings.
+Modules whose source isn't on your Mac hide themselves. You can switch any module off in Settings, and Settings › Notch decides whether Tara sits beside the closed notch, whether resting the pointer opens it, and whether it opens on the tab you left.
 
 <p align="center">
   <img src="docs/screenshots/calendar.png" width="420" alt="Starnotch calendar: the day band and the next meeting with Join">
@@ -31,6 +32,13 @@ Modules whose source isn't on your Mac hide themselves. You can switch any modul
 </p>
 <p align="center">
   <img src="docs/screenshots/music.png" width="560" alt="Starnotch now playing with output devices">
+</p>
+<p align="center">
+  <img src="docs/screenshots/tools.png" width="560" alt="The Shelf in the Tools tab with Tara beside it: a PDF dropped on her, with Remember and Ask">
+</p>
+<p align="center">
+  <img src="docs/screenshots/capture.png" width="420" alt="Quick capture saved, with buttons to the Notepad and to Inbox.md">
+  <img src="docs/screenshots/ask.png" width="360" alt="Ask Tara: the first question above, the follow-up's answer with its source from a meeting">
 </p>
 
 On a display without a notch, the island is a small pill at the top center. Settings choose the display: the one with the notch, the main display, or the one with the pointer.
@@ -72,9 +80,10 @@ The second step of the first launch lists the agents it found (Claude Code, Code
 
 ## Privacy
 
-Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only and never touches the Keychain. Connectors you add decide what they talk to. Synced lyrics, when you switch them on, ask LRCLIB (lrclib.net) with the track's title, artist, album and length. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API. Once you connect Jamie, the app reads your meetings from your Jamie account on its own, every 30 minutes and after your meetings. Ask Tara sends your question, the meeting memory, your quick captures, any connector snapshots and, when you drop her on a window, its picture to the brain you chose (Claude Code on your plan, or Anthropic's API); with rules nothing leaves the Mac.
+Everything stays on your Mac. There is no telemetry and no account. The app reads Claude Code's and Codex's local session files read-only. Its own Keychain items hold, when you connect them, the daily tools' tokens. Connectors you add decide what they talk to. Synced lyrics, when you switch them on, ask LRCLIB (lrclib.net) with the track's title, artist, album and length. The Meeting module is the exception, and only while you run it: audio goes to Reson8 for transcription, the transcript and your meeting memory go to Anthropic's API. Once you connect Jamie, the app reads your meetings from your Jamie account on its own, every 30 minutes and after your meetings. Ask Tara sends your question, the meeting memory, your quick captures, any connector snapshots, the text of a file you dropped on her and, when you drop her on a window, its picture to the brain you chose (Claude Code on your plan, Anthropic's API, or Apple Intelligence on this Mac); with rules nothing leaves the Mac.
 
-Settings › Tara's memory decides what she keeps: pause it (an hour, until midnight, or until you resume; also from the System tab, a mark on the notch shows it), switch single sources off (meetings and calendar, quick captures, notes vault, clipboard, agent sessions), keep apps out (password apps always), and delete what she remembers per source. If you let your AI apps read her memory (Claude Desktop, Claude Code, Cursor, ChatGPT's Mac app; a step of its own in the setup, off until you choose an app, and Settings › Tara's memory › Choose apps…), they get a read-only MCP server on this Mac that leaves out every source you switched off; what they do with an answer is up to them. While one is set up, the app keeps today's calendar (titles, times, places, attendees, join links) in its folder for that server; Ask Tara doesn't send it. Details: [agent/README.md](agent/README.md#taras-memory-in-every-ai-app).
+Settings › Tara's memory decides what she keeps: pause it (an hour, until midnight, or until you resume; also from the System tab or a right-click on the island; Tara rests dimmed in the notch meanwhile), switch single sources off (meetings and calendar, quick captures, notes vault, clipboard, agent sessions), keep apps out (password apps always), and delete what she remembers per source. If you let your AI apps read her memory (Claude Desktop, Claude Code, Cursor, ChatGPT's Mac app; a step of its own in the setup, off until you choose an app, and Settings › Tara's memory › Choose apps…), they get a read-only MCP server on this Mac that leaves out every source you switched off; what they do with an answer is up to them. While one is set up, the app keeps today's calendar (titles, times, places, attendees, join links) in its folder for that server; Ask Tara doesn't send it. Details: [agent/README.md](agent/README.md#taras-memory-in-every-ai-app).
+
 
 ## Now playing from any app
 

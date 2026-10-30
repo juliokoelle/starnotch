@@ -22,8 +22,14 @@ final class AskTara {
 
     private(set) var isOpen = false
     /// The question being typed or spoken.
-    var text = ""
+    var text = "" {
+        didSet { pickUpDroppedFile(after: oldValue) }
+    }
     private(set) var phase = Phase.idle
+    /// Counts files Tara took (dropped on her or the bubble): she hops each time.
+    private(set) var received = 0
+    /// A file just came in: she looks pleased for a moment.
+    private(set) var justReceived = false
     /// The question that was sent, shown above the answer.
     private(set) var asked: String?
     private(set) var answer: AskAnswer?
@@ -34,12 +40,27 @@ final class AskTara {
     /// Bumped to put the keyboard focus back in the field.
     private(set) var focusRequest = 0
     private(set) var conversation = AskConversation()
+    /// The bubble's earlier questions in this chat, shown above the one on screen.
+    private(set) var thread = AskThread()
+    /// The bubble keeps its chats on this Mac and can go back to them (the notch's Ask Tara; the
+    /// Dashboard's chats don't).
+    @ObservationIgnored var keepsHistory = false
+    /// The list of earlier chats shows instead of the answer.
+    private(set) var showsChats = false
+    private(set) var chats: [AskChat] = []
+    /// The chat on screen, as it is kept: grows with every answer.
+    @ObservationIgnored private var chat = AskChat()
+    private static var history: AskHistory { AskHistory(file: Brand.supportFolder.appending(path: "ask-chats.json")) }
+    /// Questions about one day only (the Timeline's day page); nil asks the whole memory.
+    var scope: AskScope?
     /// A window Tara was dropped on: its picture goes with the next question.
     struct Attachment: Equatable {
         let url: URL
         let app: String
     }
     private(set) var attachment: Attachment?
+    /// A document dropped on Tara in the notch: its text goes with the next question (the file stays untouched).
+    private(set) var document: AskDocument?
     /// The window's picture is being taken.
     private(set) var capturing = false
     /// The answer went to the clipboard a moment ago.
@@ -52,9 +73,16 @@ final class AskTara {
 
     /// The bubble opens beside Tara: the companion comes out if needed and takes the keyboard.
     @ObservationIgnored var onOpen: () -> Void = {}
+    /// Screen context for a question (and the day it is scoped to, "YYYY-MM-DD"); empty while that source is off.
+    @ObservationIgnored var screenContext: ((String, String?, String?) async -> [ScreenAskItem])?
+    /// The app in front when Tara was asked to open (⌃⌥T over its window): its screen text goes
+    /// with the questions. Not Starnotch itself (the Dashboard's chat).
+    @ObservationIgnored private var frontApp: String?
     /// Apps on Tara's ignore list: she never takes a picture of their windows.
     @ObservationIgnored var ignores: (String?) -> Bool = { _ in false }
     @ObservationIgnored var onClose: () -> Void = {}
+    /// A question goes out and replaces the one on screen (the Dashboard's chat keeps that one).
+    @ObservationIgnored var willAsk: () -> Void = {}
     /// Wispr Flow: when it's installed, the mic starts its hands-free dictation (launching it if
     /// needed), which pastes into the field.
     @ObservationIgnored var wispr: DictationModule? {
@@ -135,6 +163,7 @@ final class AskTara {
     var mood: AvatarMood? {
         guard isOpen else { return nil }
         if isDictating { return .listening }
+        if justReceived { return .finished }
         switch phase {
         case .thinking: return .thinking
         case .listening: return .listening
@@ -153,6 +182,8 @@ final class AskTara {
     func open() {
         idleEnd?.cancel()
         if !isOpen {
+            let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            frontApp = front == Bundle.main.bundleIdentifier ? nil : front
             withAnimation(Theme.reduceMotion ? nil : Theme.snappy) { isOpen = true }
             Haptics.open()
         }
@@ -188,6 +219,8 @@ final class AskTara {
         setNotice(nil)
         wisprDidntStart = false
         conversation.clear()
+        endChat()
+        document = nil
         removeAttachment()
         removeSentImage()
         onClose()
@@ -207,7 +240,55 @@ final class AskTara {
         }
         resetActions()
         conversation.clear()
+        endChat()
         focusRequest += 1
+    }
+
+    // MARK: Earlier chats
+
+    /// The chat on screen is kept already (after each answer); the next question starts a new one.
+    private func endChat() {
+        thread.clear()
+        chat = AskChat()
+        showsChats = false
+    }
+
+    /// The list of earlier chats, or back to the chat on screen.
+    func toggleChats() {
+        Haptics.tick()
+        if !showsChats { chats = Self.history.load() }
+        withAnimation(Theme.snappy) { showsChats.toggle() }
+    }
+
+    /// Carries on with an earlier chat: its questions above, the last answer on screen, and the
+    /// follow-ups knowing what was said.
+    func resume(_ earlier: AskChat) {
+        guard let last = earlier.turns.last, !isThinking else { return }
+        Haptics.tick()
+        timeout?.cancel()
+        pending = nil
+        resetActions()
+        thread.clear()
+        conversation.clear()
+        for turn in earlier.turns.dropLast() {
+            thread.archive(question: turn.question, answer: turn.answer, failure: nil)
+        }
+        for turn in earlier.turns { conversation.append(question: turn.question, answer: turn.answer.text) }
+        chat = earlier
+        withAnimation(Theme.snappy) {
+            asked = last.question
+            answer = last.answer
+            expanded = nil
+            phase = .answered
+            showsChats = false
+        }
+        focusRequest += 1
+    }
+
+    func deleteChat(_ id: String) {
+        Haptics.tick()
+        withAnimation(Theme.snappy) { chats = Self.history.delete(id) }
+        if chat.id == id { chat = AskChat(turns: []) }
     }
 
     /// New meetings came into the memory: a running agent re-reads it, so the next question sees them.
@@ -404,13 +485,35 @@ final class AskTara {
         guard !question.isEmpty, !isThinking else { return }
         if previewing { return }
         guard startAgent(), let process else { return }
+        willAsk()
+        if keepsHistory {
+            var failure: String?
+            if case .failed(let message) = phase { failure = message }
+            thread.archive(question: asked, answer: answer, failure: failure)
+            showsChats = false
+        }
         nextID += 1
         let id = "ask-\(nextID)"
         pending = id
-        process.write(AskCommand.ask(question, conversation: conversation, image: attachment?.url.path, id: id))
+        // Screen context may open an older day's file first (off the main thread): the question goes when it's there.
+        let command = { [conversation, image = attachment?.url.path, document, scope] (screen: [ScreenAskItem]) in
+            AskCommand.ask(question, conversation: conversation, image: image, document: document, scope: scope,
+                           screen: screen, id: id)
+        }
+        if let screenContext {
+            let day = scope?.day
+            Task { [weak self] in
+                let screen = await screenContext(question, day, self?.frontApp)
+                guard self?.pending == id else { return }
+                process.write(command(screen))
+            }
+        } else {
+            process.write(command([]))
+        }
         removeSentImage()
         sentImage = attachment?.url
         attachment = nil
+        document = nil
         Haptics.confirm()
         withAnimation(Theme.snappy) {
             asked = question
@@ -518,6 +621,72 @@ final class AskTara {
         withAnimation(Theme.snappy) { attachment = nil }
     }
 
+    func removeDocument() {
+        withAnimation(Theme.snappy) { document = nil }
+    }
+
+    /// A file dropped on Tara in the notch, to ask about: the bubble opens with it. A picture goes
+    /// as a copy (the copy is deleted after the answer, never the file); a document goes as its
+    /// text. The file itself is only read.
+    func attach(file url: URL) {
+        open()
+        guard !isThinking, !previewing else { return }
+        if TaraDocument.isImage(url) {
+            guard ![.rules, .apple].contains(MeetingAgentSetup.brain) else {
+                fail("Tara's brain can't see pictures; Settings › Tara's brain")
+                return
+            }
+            let folder = Self.shotFolder
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let copy = folder.appending(path: "drop-\(UUID().uuidString).\(url.pathExtension)")
+            guard (try? FileManager.default.copyItem(at: url, to: copy)) != nil else {
+                fail("Couldn't read that file")
+                return
+            }
+            removeAttachment()
+            withAnimation(Theme.snappy) { attachment = Attachment(url: copy, app: url.lastPathComponent) }
+            tookFile()
+            return
+        }
+        withAnimation(Theme.snappy) { capturing = true }
+        Task { [weak self] in
+            let text = await Task.detached(priority: .userInitiated) { TaraDocument.text(of: url) }.value
+            guard let self, self.isOpen else { return }
+            withAnimation(Theme.snappy) { self.capturing = false }
+            guard let text else {
+                self.fail("Tara can read PDFs, Word and text files; this one has no text she can read")
+                return
+            }
+            withAnimation(Theme.snappy) { self.document = AskDocument(name: url.lastPathComponent, text: text) }
+            self.tookFile()
+        }
+    }
+
+    /// Tara took a file: a hop, a pleased face for a moment, a tick, and the keyboard in the field.
+    private func tookFile() {
+        Haptics.confirm()
+        received += 1
+        withAnimation(Theme.snappy) { justReceived = true }
+        focusRequest += 1
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation(Theme.snappy) { self?.justReceived = false }
+        }
+    }
+
+    /// A file dropped into the field arrives as its path (the text field takes it before anything
+    /// else can): when what came in at once is the path of an existing file, it goes as the file.
+    private func pickUpDroppedFile(after old: String) {
+        guard text.count > old.count + 1, text.hasPrefix(old) else { return }
+        var inserted = String(text.dropFirst(old.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        if inserted.hasPrefix("file://"), let url = URL(string: inserted) { inserted = url.path }
+        var directory: ObjCBool = false
+        guard inserted.hasPrefix("/"), !inserted.contains("\n"),
+              FileManager.default.fileExists(atPath: inserted, isDirectory: &directory), !directory.boolValue else { return }
+        text = old
+        attach(file: URL(fileURLWithPath: inserted))
+    }
+
     private func removeSentImage() {
         if let sentImage { try? FileManager.default.removeItem(at: sentImage) }
         sentImage = nil
@@ -607,6 +776,10 @@ final class AskTara {
             removeSentImage()
             if !answer.onRules { offlineReason = nil }  // Claude answered: it's reachable again
             conversation.append(question: answer.question, answer: answer.text)
+            if keepsHistory {
+                chat.turns.append(AskChat.Turn(question: asked ?? answer.question, answer: answer))
+                Self.history.save(chat)
+            }
             Haptics.tick()
             resetActions()
             withAnimation(Theme.snappy) {
@@ -642,7 +815,7 @@ final class AskTara {
         Nächster Schritt laut deinen Notizen: Preis mit Max klären, bevor die Seite live geht.
         """
 
-    /// `--preview ask-empty | ask-typed | ask-listening | ask-thinking | ask-answer | ask-long | ask-rules | ask-window | ask-failed`
+    /// `--preview ask-empty | ask-typed | ask-listening | ask-thinking | ask-answer | ask-long | ask-rules | ask-window | ask-failed | ask-thread | ask-chats`
     /// show made-up states.
     /// `ask-send:<question>` is live: the real agent and brain answer it from the demo meetings (for
     /// recordings and checks).
@@ -696,6 +869,29 @@ final class AskTara {
             case "ask-window":
                 self.text = "Was ist an diesem Diff riskant?"
                 self.attachment = Attachment(url: URL(fileURLWithPath: "/tmp/none.jpg"), app: "Safari")
+            case "ask-thread":
+                // A follow-up: the first question and its answer above the one on screen (in English, for the README).
+                let first = "What did we decide on the price?"
+                self.thread.archive(question: first, answer: AskAnswer(question: first,
+                    text: "30 euros a month. The kickoff dropped 25; in the weekly, Jonas confirmed 30.",
+                    brain: "claude-code"), failure: nil)
+                let follow = "And the discount for yearly plans?"
+                self.asked = follow
+                self.answer = AskAnswer(question: follow, text: "Still open: Max is working out by Friday what two free months on a yearly plan would cost.", sources: [
+                    AskSource(id: "0", kind: .meeting, title: "Weekly · Lumen plan", quote: "I'll work that out by Friday.", speaker: "Max", date: "2026-10-19"),
+                ], brain: "claude-code")
+                self.phase = .answered
+            case "ask-chats":
+                let day: TimeInterval = 86_400
+                self.chats = [
+                    AskChat(started: Date().addingTimeInterval(-3_600), turns: [AskChat.Turn(question: question, answer: AskAnswer(question: question, text: "30 Euro."))]),
+                    AskChat(started: Date().addingTimeInterval(-day), turns: [
+                        AskChat.Turn(question: "Wer hat die Launch-Checkliste?", answer: AskAnswer(question: "", text: "Lena.")),
+                        AskChat.Turn(question: "Bis wann?", answer: AskAnswer(question: "", text: "Bis Freitag.")),
+                    ]),
+                    AskChat(started: Date().addingTimeInterval(-4 * day), turns: [AskChat.Turn(question: "Was hat Max zum Budget gesagt?", answer: AskAnswer(question: "", text: "…"))]),
+                ]
+                self.showsChats = true
             case "ask-failed":
                 self.asked = question
                 self.phase = .failed(Localization.string("Tara needs uv to think: Settings › Meeting agent › Install uv"))

@@ -9,6 +9,11 @@ public enum Fixtures {
     static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         .appending(path: "Fixtures")
 
+    /// A file of the repository itself (`CHANGELOG.md`).
+    public static func repoFile(_ path: String) throws -> String {
+        try String(contentsOf: root.deletingLastPathComponent().deletingLastPathComponent().appending(path: path), encoding: .utf8)
+    }
+
     public static func text(_ path: String) -> String {
         (try? String(contentsOf: root.appending(path: path), encoding: .utf8)) ?? ""
     }

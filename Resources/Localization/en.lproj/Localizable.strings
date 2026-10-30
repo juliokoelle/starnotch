@@ -1,6 +1,4 @@
-/* English is the development language: keys are the English text, so this file only needs
-   entries where the wording differs from the key. Add a key here when you add it to de.lproj. */
 "Welcome to %@" = "Welcome to %@";
 
-/* Strand vault: notes connector */
 "Open (count)" = "Open";
+

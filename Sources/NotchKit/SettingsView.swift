@@ -11,15 +11,21 @@ struct SettingsView: View {
     var jamie: JamieConnect?
     /// Opens the setup window at a step: the agents for "Set up more…", the AI apps for Tara's memory.
     var openSetup: (Onboarding.Step) -> Void = { _ in }
+    /// The Dashboard shows one part at a time inside its own window; nil is the whole form, in
+    /// a window of its own.
+    var panes: [SettingsPane]?
+
+    private func shows(_ pane: SettingsPane) -> Bool { panes?.contains(pane) ?? true }
 
     var body: some View {
-        Form {
-            if !state.isAccessibilityTrusted {
+        let form = Form {
+            if shows(.general) && !state.isAccessibilityTrusted {
                 Section {
                     AccessibilityNotice(state: state)
                 }
             }
 
+            if shows(.characters) {
             Section {
                 MainCharacterRow(state: state, cast: cast)
                 ProjectsList(state: state, cast: cast)
@@ -38,7 +44,9 @@ struct SettingsView: View {
                 Text("Sessions show their effort level as colour, from light (low) to black (max). Two sessions on the same level differ slightly in hue and by their title.")
                     .foregroundStyle(.secondary)
             }
+            }
 
+            if shows(.notch) {
             Section {
                 ForEach(SlotPosition.allCases, id: \.self) { position in
                     SlotRow(position: position, state: state, catalog: catalog)
@@ -49,7 +57,9 @@ struct SettingsView: View {
                 Text("Hold the notch and flick toward a slot. A module opens in the notch; an app slot quits the apps in the other slots and opens the chosen one.")
                     .foregroundStyle(.secondary)
             }
+            }
 
+            if shows(.general) {
             Section("Activation") {
                 LabeledContent("Notch") {
                     Text("Press and hold for \(state.settings.holdDuration, format: .number.precision(.fractionLength(2))) s")
@@ -65,7 +75,9 @@ struct SettingsView: View {
                     }
                 }
             }
+            }
 
+            if shows(.tara) {
             Section {
                 MemorySettings(state: state, setup: setup, openSetup: { openSetup(.memory) })
             } header: {
@@ -73,8 +85,9 @@ struct SettingsView: View {
             } footer: {
                 Text(MemorySettings.footer).foregroundStyle(.secondary)
             }
+            }
 
-            if let setup {
+            if shows(.agents), let setup {
                 Section {
                     SetupLedgerList(center: setup, openSetup: { openSetup(.agents) })
                 } header: {
@@ -85,6 +98,7 @@ struct SettingsView: View {
                 }
             }
 
+            if shows(.agents) {
             Section {
                 ProviderSwitches(state: state)
             } header: {
@@ -93,7 +107,9 @@ struct SettingsView: View {
                 Text("The agent tools found on this Mac. Their files are only read; the notch never changes a tool's settings.")
                     .foregroundStyle(.secondary)
             }
+            }
 
+            if shows(.notch) {
             Section {
                 ToolGallery(state: state)
                 if !state.settings.disabledModules.contains(.today) {
@@ -125,14 +141,38 @@ struct SettingsView: View {
 
             // The daily tools' details (strand daily), only while one of them is on.
             DailySettingsSection(state: state)
+            }
+
+            if shows(.general) {
+            Section {
+                LabeledContent("Tara beside the notch") {
+                    GlassSegmented(label: Localization.string("Tara beside the notch"), selection: $state.settings.taraBeside,
+                                   options: TaraBeside.allCases.map { ($0, Localization.string($0.title)) })
+                }
+                LabeledContent("Open on hover") {
+                    GlassSegmented(label: Localization.string("Open on hover"), selection: $state.settings.hoverOpen,
+                                   options: HoverOpen.allCases.map { ($0, Localization.string($0.title)) })
+                }
+                LabeledContent("Tara's eyes") {
+                    GlassSegmented(label: Localization.string("Tara's eyes"), selection: $state.settings.eyeStyle,
+                                   options: EyeStyle.allCases.map { ($0, Localization.string($0.title)) })
+                }
+                Toggle(isOn: $state.settings.reopenLastTab) {
+                    Text("Open on the last tab")
+                    Text("The notch opens where you left it, on music for example. Off, it always opens on the first tab.")
+                }
+            } header: {
+                Text("Notch")
+            } footer: {
+                Text("A click on the notch always opens it. With a hover time, resting the pointer on it opens it too.")
+                    .foregroundStyle(.secondary)
+            }
 
             Section {
-                Picker("Island on", selection: $state.settings.islandDisplay) {
-                    ForEach(IslandDisplay.allCases, id: \.self) { display in
-                        Text(LocalizedStringKey(display.title)).tag(display)
-                    }
+                LabeledContent("Island on") {
+                    GlassSegmented(label: Localization.string("Island on"), selection: $state.settings.islandDisplay,
+                                   options: IslandDisplay.allCases.map { ($0, Localization.string($0.title)) })
                 }
-                .pickerStyle(.segmented)
             } header: {
                 Text("Display")
             } footer: {
@@ -141,26 +181,26 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker("Show activity in the ears", selection: $state.settings.earsMode) {
-                    ForEach(EarsMode.allCases, id: \.self) { Text(LocalizedStringKey($0.title)).tag($0) }
+                Toggle(isOn: $state.settings.detailedEars) {
+                    Text("Details beside the notch")
+                    Text("Counts, the other sessions and a second ear right of the notch. Off, only Tara sits beside it, and she shows when something waits.")
                 }
-                .pickerStyle(.segmented)
                 Toggle(isOn: $state.settings.watchAutomatic) {
                     Text("Watch mode for fullscreen and video")
                     Text("The notch stays silent while a fullscreen app or a video is in front; only approvals and meetings about to start get through.")
                 }
-                Picker("Watch mode by hand (⌃⌥W) lasts", selection: $state.settings.watchTimer) {
-                    ForEach(WatchTimer.allCases, id: \.self) { Text(LocalizedStringKey($0.title)).tag($0) }
+                LabeledContent("Watch mode by hand (⌃⌥W) lasts") {
+                    GlassSegmented(label: Localization.string("Watch mode by hand (⌃⌥W) lasts"), selection: $state.settings.watchTimer, options: WatchTimer.allCases.map { ($0, Localization.string($0.title)) })
                 }
-                .pickerStyle(.segmented)
             } header: {
                 Text("Quiet")
             } footer: {
                 Text("By default the notch is just the notch: figures appear when something needs you, on hover, and for a moment when something happens.")
                     .foregroundStyle(.secondary)
             }
+            }
 
-            if Runtime.vault != nil {
+            if shows(.tara) && Runtime.vault != nil {
                 Section {
                     NotesSettings(state: state)
                 } header: {
@@ -171,6 +211,7 @@ struct SettingsView: View {
                 }
             }
 
+            if shows(.agents) {
             Section {
                 LoopsLogSettings()
             } header: {
@@ -179,11 +220,14 @@ struct SettingsView: View {
                 Text("Recurring agents and jobs that write one line per run (2026-10-26 · morning-brief · ok · note) show as loops in the Agents panel, with their schedule when a <loop>.md next to the log has a cron in its front matter.")
                     .foregroundStyle(.secondary)
             }
+            }
 
+            if shows(.tara) {
             Section {
                 MeetingAgentSettings(state: state, jamie: jamie)
             } header: {
-                Text("Meeting agent")
+                // How Tara thinks for every feature (Ask Tara, meetings, summaries), not only meetings.
+                Text("Tara's brain")
             } footer: {
                 Text("The keys stay on this Mac, in agent.env in the app's folder, readable by you only. Keys exported in ~/.zshrc work too. Automatic uses Claude Code when it's there, else an Anthropic key, else Apple Intelligence, else simple rules.")
                     .foregroundStyle(.secondary)
@@ -197,7 +241,9 @@ struct SettingsView: View {
                 Text("What Tara's calls would cost at API prices. On a Claude plan they count against your plan's limits instead of costing money; with an API key this is what you pay. A + means some calls used a model without a known price.")
                     .foregroundStyle(.secondary)
             }
+            }
 
+            if shows(.general) {
             Section("Behavior") {
                 Toggle(isOn: $state.settings.keepOpenUntilClick) {
                     Text("Keep the panel open until I click outside")
@@ -232,19 +278,42 @@ struct SettingsView: View {
                     Button("Quit") { NSApp.terminate(nil) }
                 }
             }
+            }
         }
         .formStyle(.grouped)
-        // Fits a 14" screen; the form scrolls.
-        .frame(width: 560, height: min(760, (NSScreen.main?.visibleFrame.height ?? 800) - 60))
         .onAppear {
-            catalog.refresh()
+            if panes == nil { catalog.refresh() }  // the Dashboard reads it once per visit, not per part
             state.refreshAccessibility()
             state.refreshLoginItemStatus()
+        }
+        if panes == nil {
+            // Fits a 14" screen; the form scrolls.
+            form.frame(width: 560, height: min(760, (NSScreen.main?.visibleFrame.height ?? 800) - 60))
+        } else {
+            // On the Dashboard's background, as wide as its page.
+            form.scrollContentBackground(.hidden)
         }
     }
 
     private static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+}
+
+/// The parts of Settings, one at a time on the Dashboard's Settings page.
+enum SettingsPane: String, CaseIterable, Identifiable {
+    case general, characters, notch, agents, tara
+    var id: String { rawValue }
+
+    /// The English key, for `Localization.string`.
+    var titleKey: String {
+        switch self {
+        case .general: "General"
+        case .characters: "Characters"
+        case .notch: "Notch and tools"
+        case .agents: "Agents"
+        case .tara: "Tara"
+        }
     }
 }
 
@@ -275,6 +344,14 @@ struct MeetingAgentSettings: View {
                     Text(LocalizedStringKey(BrainInfo.title(brain))).tag(brain)
                 }
             }
+            // Summaries in the background can run on another plan than the questions.
+            Picker("Background summaries", selection: $state.settings.backgroundBrain) {
+                Text("Same as above").tag(TaraBrain?.none)
+                ForEach([TaraBrain.claudeCode, .codex, .api], id: \.self) { brain in
+                    Text(LocalizedStringKey(BrainInfo.title(brain))).tag(TaraBrain?.some(brain))
+                }
+            }
+            .help("Tara condenses what's on your screen into work blocks every 20 minutes or so; this picks the plan that pays for it.")
             if state.settings.brain == .apple || state.settings.brain == .auto {
                 LabeledContent("Apple Intelligence") { Text(LocalizedStringKey(Self.line(apple))) }
                     .task { apple = await MeetingAgentSetup.appleStatus() }
@@ -388,6 +465,7 @@ private struct TaraUsageRows: View {
             TaraUsage.Feature.ask.rawValue: String(localized: "Ask Tara"),
             TaraUsage.Feature.capture.rawValue: String(localized: "Quick capture"),
             TaraUsage.Feature.meeting.rawValue: String(localized: "Meeting analysis"),
+            TaraUsage.Feature.digest.rawValue: Localization.string("Work blocks"),
         ]
         let order = TaraUsage.Feature.allCases.map(\.rawValue)
         func rank(_ key: String) -> Int { order.firstIndex(of: key) ?? order.count }
@@ -400,7 +478,7 @@ private struct TaraUsageRows: View {
 
 /// The window a view sits in, for work that pauses while that window is closed or minimized.
 @MainActor
-private final class HostWindow {
+final class HostWindow {
     weak var window: NSWindow?
 
     struct Reader: NSViewRepresentable {
@@ -480,20 +558,32 @@ private struct AccessibilityNotice: View {
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 8) {
-                Text("Allow Accessibility access")
-                    .font(.headline)
-                Text("The notch and the shortcut work without it. It lets Escape cancel while you hold the wheel; until then, release in the center to cancel.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Privacy & Security › Accessibility › \(Brand.bundleName). After an update, remove the entry with − and add it again.")
-                    .font(.callout)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Open Accessibility Settings") {
-                    state.requestAccessibility()
-                    state.openAccessibilitySettings()
+                if state.accessibilityGrantIsStale {
+                    // The switch shows on, macOS no longer trusts this build: its prompt would only repeat.
+                    Text("Accessibility needs a fresh switch")
+                        .font(.headline)
+                    Text("macOS needs you to switch \(Brand.bundleName) off and on again in Privacy & Security › Accessibility. The switch may still show on: macOS doesn't recognise this build of the app yet.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("If that doesn't help, remove the entry with − and add it again.")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Accessibility Settings") { state.openAccessibilitySettings() }
+                        .padding(.top, 2)
+                } else {
+                    Text("Allow Accessibility access")
+                        .font(.headline)
+                    Text("The notch and the shortcut work without it. It lets Escape cancel while you hold the wheel; until then, release in the center to cancel.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Privacy & Security › Accessibility › \(Brand.bundleName). After an update, remove the entry with − and add it again.")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Accessibility Settings") { state.requestAccessibility() }
+                        .padding(.top, 2)
                 }
-                .padding(.top, 2)
             }
         }
         .padding(.vertical, 4)
@@ -666,7 +756,7 @@ private struct ProjectRow: View {
 }
 
 /// Character grid and base colours for one project. Buttons only, no menus.
-private struct ProjectStylePicker: View {
+struct ProjectStylePicker: View {
     let project: String
     let cast: AvatarCast
     let state: AppState
@@ -995,8 +1085,8 @@ private struct ColourScaleView: View {
                                            colorway: own.map { $0.colorway.map(Colorway.named) ?? Colorway() } ?? Colorway.named(key),
                                            emergeOnAppear: false, alive: false, level: own == nil ? nil : level)
                                     .frame(width: 66, height: 44, alignment: .bottom)
-                                Text(level.title).font(.system(size: 11.5, weight: .medium))
-                                Text(own.map { $0.name ?? "Own" } ?? Colorway.title(key))
+                                Text(Localization.string(level.title)).font(.system(size: 11.5, weight: .medium))
+                                Text(own.map { $0.name ?? Localization.string("Own") } ?? Colorway.title(key))
                                     .font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
                             }
                             .frame(width: 72, height: 86)
@@ -1020,7 +1110,7 @@ private struct ColourScaleView: View {
         .padding(.vertical, 4)
     }
 
-    private func option(_ title: String, _ mode: ColourBy) -> some View {
+    private func option(_ title: LocalizedStringKey, _ mode: ColourBy) -> some View {
         let selected = cast.colourBy == mode
         return Button {
             withAnimation(Theme.snappy) { cast.setColourBy(mode) }
@@ -1053,7 +1143,7 @@ private struct ColorwayPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(level.title) effort").font(.system(size: 13, weight: .semibold))
+            Text("\(Localization.string(level.title)) effort").font(.system(size: 13, weight: .semibold))
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(70), spacing: 6), count: 4), spacing: 6) {
                 if let own {
                     Button { pick(nil) } label: {
@@ -1062,7 +1152,7 @@ private struct ColorwayPicker: View {
                                        colorway: own.colorway.map(Colorway.named) ?? Colorway(),
                                        emergeOnAppear: false, alive: false, level: level)
                                 .frame(width: 64, height: 44, alignment: .bottom)
-                            Text(own.name ?? "Own").font(.system(size: 10.5))
+                            Text(own.name ?? Localization.string("Own")).font(.system(size: 10.5))
                                 .foregroundStyle(selected == nil ? Theme.accent : .secondary)
                         }
                         .frame(width: 70, height: 66)

@@ -34,6 +34,22 @@ struct LaunchOptions {
     /// that read Tara's memory, which comes before the tools).
     var onboarding = false
     var onboardingStep: Int?
+    /// Open the memory map in its own window; made-up data with `--preview memory-map` or
+    /// `--sample-data`, and `--memory-map-nodes 1500` sets how big the made-up map is.
+    var openMemoryMap = false
+    var memoryMapNodes: Int?
+    /// Open the Dashboard right after launch; `--dashboard-section` picks the page (`home`,
+    /// `timeline`, `characters`, `brain`, `ask`, `meetings`, `captures`, `integrations`, `privacy`, `settings`;
+    /// `memoryMap` and `connections` still work), with an integration's page or a part of Settings
+    /// after a colon (`integrations:calendar`, `settings:agents`). With `--preview dashboard` or
+    /// `--sample-data` it shows made-up activity; `--dashboard-state empty|loading|error` shows
+    /// the cards' other states and `--appearance light|dark` fixes its look for screenshots.
+    var openDashboard = false
+    var dashboardSection: String?
+    var dashboardState: String?
+    var appearance: String?
+    /// Screenshots of long pages: `--dashboard-scroll center|bottom` starts the page there.
+    var dashboardScroll: String?
 
     init(arguments: [String] = CommandLine.arguments) {
         var iterator = arguments.dropFirst().makeIterator()
@@ -53,6 +69,13 @@ struct LaunchOptions {
             case "--open-slot-picker": openSlotPicker = true
             case "--open-project-picker": openProjectPicker = true
             case "--onboarding": onboarding = true
+            case "--open-memory-map": openMemoryMap = true
+            case "--memory-map-nodes": memoryMapNodes = iterator.next().flatMap(Int.init)
+            case "--open-dashboard": openDashboard = true
+            case "--dashboard-section": dashboardSection = iterator.next()
+            case "--dashboard-state": dashboardState = iterator.next()
+            case "--appearance": appearance = iterator.next()
+            case "--dashboard-scroll": dashboardScroll = iterator.next()
             case "--onboarding-step":
                 onboarding = true
                 onboardingStep = iterator.next().flatMap(Int.init)

@@ -86,11 +86,11 @@ enum Runtime {
 
     /// Quick capture without an inbox connector appends here as Markdown tasks: the file config.toml
     /// names (`""` keeps only the local queue), else the notes vault's inbox, else `Inbox.md` in
-    /// the app's folder.
+    /// the visible Starnotch folder in Documents.
     static var captureMarkdownFile: URL? {
         let section = config["capture"]
         guard let raw = section.string("markdown_file") else {
-            return vault?.inboxFile ?? Brand.supportFolder.appending(path: "Inbox.md")
+            return vault?.inboxFile ?? MarkdownInbox.defaultFile
         }
         return raw.trimmingCharacters(in: .whitespaces).isEmpty ? nil : section.path("markdown_file")
     }
@@ -147,7 +147,7 @@ enum ConfigTemplate {
     # port = 47789
 
     [capture]
-    # Without an inbox connector, quick capture appends Markdown tasks here (default: Inbox.md in this folder;
+    # Without an inbox connector, quick capture appends Markdown tasks here (default: the vault's inbox, else ~/Documents/Starnotch/Inbox.md;
     # "" = only the local queue). The Inbox button in quick capture opens it.
     # markdown_file = ""
 

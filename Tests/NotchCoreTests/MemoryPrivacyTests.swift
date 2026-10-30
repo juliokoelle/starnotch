@@ -7,14 +7,20 @@ import TestSupport
 @Suite struct MemoryPrivacyTests {
     let now = UTC.date("2026-10-28 20:00")
 
-    @Test func everythingRecordsByDefault() {
+    @Test func everythingRecordsByDefaultButTheOptInSources() {
         let privacy = MemoryPrivacy()
-        for source in MemorySource.allCases {
+        for source in MemorySource.allCases where !source.isOptIn {
             #expect(privacy.records(source, at: now))
             #expect(privacy.shares(source))
         }
+        // Time per app waits for the user to turn it on.
+        #expect(!privacy.records(.apps, at: now) && !privacy.shares(.apps))
+        #expect(!privacy.records(.screen, at: now))
+        #expect(!privacy.shares(.screen))
+        #expect(privacy.switchedOff == [.apps, .screen])
         #expect(!privacy.isPaused(at: now))
     }
+
 
     @Test func aPauseStopsRecordingButNotSharing() {
         var privacy = MemoryPrivacy()
@@ -85,8 +91,20 @@ import TestSupport
         let data = try JSONEncoder().encode(settings)
         let back = try JSONDecoder().decode(SwitcherSettings.self, from: data)
         #expect(back.privacy == settings.privacy)
-        let odd = try JSONDecoder().decode(MemoryPrivacy.self, from: Data(#"{"off":["meetings","screen"]}"#.utf8))
+        let odd = try JSONDecoder().decode(MemoryPrivacy.self, from: Data(#"{"off":["meetings","telepathy"]}"#.utf8))
         #expect(odd.off == [.meetings])
+        // An opt-in source never sits in `off`; settings from before keep screen context off, 30 days.
+        let screen = try JSONDecoder().decode(MemoryPrivacy.self, from: Data(#"{"off":["screen"],"on":["screen","notes"]}"#.utf8))
+        #expect(screen.off.isEmpty)
+        #expect(screen.on == [.screen])
+        #expect(!screen.isOn(.screen))
+        #expect(screen.screenRetentionDays == 30)
+        var consented = MemoryPrivacy()
+        consented.set(.screen, on: true)
+        consented.screenConsent = now
+        consented.screenRetentionDays = 7
+        let roundTrip = try JSONDecoder().decode(MemoryPrivacy.self, from: JSONEncoder().encode(consented))
+        #expect(roundTrip == consented)
         // Settings saved before privacy existed: everything on.
         let old = try JSONDecoder().decode(SwitcherSettings.self, from: Data(#"{"didOnboard":true}"#.utf8))
         #expect(old.privacy == MemoryPrivacy())
@@ -99,7 +117,11 @@ import TestSupport
         let paused = try #require(JSONSerialization.jsonObject(with: privacy.sidecarJSON(now: now)) as? [String: Any])
         #expect(paused["paused"] as? Bool == true)
         #expect(paused["paused_until"] as? String == "2026-10-28T21:00:00Z")
-        #expect(paused["off"] as? [String] == ["notes"])
+        #expect(paused["off"] as? [String] == ["notes", "apps", "screen"])
+        #expect(paused["on"] as? [String] == [])
+        privacy.set(.apps, on: true)
+        let apps = try #require(JSONSerialization.jsonObject(with: privacy.sidecarJSON(now: now)) as? [String: Any])
+        #expect(apps["on"] as? [String] == ["apps"] && apps["off"] as? [String] == ["notes", "screen"])
         #expect((paused["ignored_apps"] as? [String])?.contains("com.apple.Passwords") == true)
         // The hour is over: not paused any more.
         let later = try #require(JSONSerialization.jsonObject(with: privacy.sidecarJSON(now: now.addingTimeInterval(7200))) as? [String: Any])
@@ -141,8 +163,13 @@ import TestSupport
         #expect(fm.fileExists(atPath: files.connectorsFolder.appending(path: "vault.json").path))
         #expect(fm.fileExists(atPath: files.connectorsFolder.appending(path: "calendar.json").path))
         #expect(files.count(.captures) == 2)
+        try fm.createDirectory(at: files.wikiIndex.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "[]".write(to: files.wikiIndex, atomically: true, encoding: .utf8)
+        try "x".write(to: files.vaultIndex, atomically: true, encoding: .utf8)
+        #expect(files.count(.notes) == 2)  // the index and the wiki are no snapshots
         files.forget(.notes)
         #expect(!fm.fileExists(atPath: files.connectorsFolder.appending(path: "vault.json").path))
+        #expect(!fm.fileExists(atPath: files.wikiIndex.path) && !fm.fileExists(atPath: files.vaultIndex.path))
         files.forget(.captures)
         #expect(!fm.fileExists(atPath: files.captureQueue.path))
         #expect(fm.fileExists(atPath: files.privacyFile.path))

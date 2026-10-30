@@ -31,6 +31,55 @@ public enum EarsMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Whether resting the pointer on the notch opens the panel, and after how long. A click opens
+/// it in every case.
+public enum HoverOpen: String, Codable, CaseIterable, Sendable {
+    case click, half, one
+
+    /// Seconds on the notch before it opens; nil: only a click opens it.
+    public var seconds: Double? {
+        switch self {
+        case .click: nil
+        case .half: 0.5
+        case .one: 1
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .click: "Click only"
+        case .half: "0.5 s"
+        case .one: "1 s"
+        }
+    }
+}
+
+/// Tara beside the closed notch: always, only when something is up, or never. One choice for
+/// the user over two stored values (`taraAlways`, `earsMode`).
+public enum TaraBeside: String, CaseIterable, Sendable {
+    case always, activity, never
+
+    public var title: String {
+        switch self {
+        case .always: "Always"
+        case .activity: "When something's up"
+        case .never: "Never"
+        }
+    }
+}
+
+/// How Tara's moving eyes look: her own lines, or round eyes with pupils (after a teammate's mascot sketch).
+public enum EyeStyle: String, Codable, CaseIterable, Sendable {
+    case lines, round
+
+    public var title: String {
+        switch self {
+        case .lines: "Lines"
+        case .round: "Round"
+        }
+    }
+}
+
 /// How long manual Watch mode stays on.
 public enum WatchTimer: String, Codable, CaseIterable, Sendable {
     case oneHour, twoHours, untilOff
@@ -113,10 +162,25 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public private(set) var knownTools: [String]
     /// How the meeting agent thinks (onboarding or Settings › Meeting agent).
     public var brain: TaraBrain
+    /// How Tara's background work thinks (condensing screen context); nil: like `brain`. Lets the
+    /// summaries run on another plan (Codex) than the questions.
+    public var backgroundBrain: TaraBrain?
     /// The open panel stays until a click outside (or Esc), not when the pointer leaves.
     public var keepOpenUntilClick: Bool
     /// Figures beside the notch at rest.
     public var earsMode: EarsMode
+    /// Beside the notch at rest only Tara, on one side (the quiet look); on: both ears with
+    /// counts and the other sessions. Off for new and existing users (settings saved before the
+    /// switch have no key and decode as off).
+    public var detailedEars: Bool
+    /// Tara sits beside the closed notch even when nothing is going on.
+    public var taraAlways: Bool
+    /// Resting the pointer on the notch opens the panel after this long (a click always opens it).
+    public var hoverOpen: HoverOpen
+    /// The panel opens on the tab it was closed on; off: always on the first tab.
+    public var reopenLastTab: Bool
+    /// How Tara's moving eyes look.
+    public var eyeStyle: EyeStyle
     /// Watch mode turns on by itself for fullscreen apps and video.
     public var watchAutomatic: Bool
     /// How long a manually started Watch mode lasts.
@@ -127,6 +191,9 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public var remindersInToday: Bool
     /// Tab order, set by dragging a tab in the island (`ModuleOrder`); empty = the built-in order.
     public var moduleOrder: [ModuleKind]
+    /// The Tools tab's own tabs (Clipboard, Timer, Shelf, Notepad) in the order dragged there, by
+    /// name; empty = the built-in order.
+    public var toolOrder: [String]
     /// Tara's memory: paused, sources switched off, apps kept out (Settings › Tara's memory).
     public var privacy: MemoryPrivacy
 
@@ -149,13 +216,20 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         disabledModules: [ModuleKind] = ToolSwitches.offModules,
         disabledFeatures: [ToolFeature] = ToolSwitches.offFeatures,
         brain: TaraBrain = .auto,
+        backgroundBrain: TaraBrain? = nil,
         keepOpenUntilClick: Bool = false,
         earsMode: EarsMode = .attention,
+        detailedEars: Bool = false,
+        taraAlways: Bool = false,
+        hoverOpen: HoverOpen = .click,
+        reopenLastTab: Bool = true,
+        eyeStyle: EyeStyle = .lines,
         watchAutomatic: Bool = true,
         watchTimer: WatchTimer = .twoHours,
         disabledProviders: [String] = [],
         remindersInToday: Bool = false,
         moduleOrder: [ModuleKind] = [],
+        toolOrder: [String] = [],
         privacy: MemoryPrivacy = MemoryPrivacy()
     ) {
         self.slots = Self.normalized(slots)
@@ -177,14 +251,34 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         self.disabledFeatures = disabledFeatures
         self.knownTools = ToolSwitches.known
         self.brain = brain
+        self.backgroundBrain = backgroundBrain
         self.keepOpenUntilClick = keepOpenUntilClick
         self.earsMode = earsMode
+        self.detailedEars = detailedEars
+        self.taraAlways = taraAlways
+        self.hoverOpen = hoverOpen
+        self.reopenLastTab = reopenLastTab
+        self.eyeStyle = eyeStyle
         self.watchAutomatic = watchAutomatic
         self.watchTimer = watchTimer
         self.disabledProviders = disabledProviders
         self.remindersInToday = remindersInToday
         self.moduleOrder = moduleOrder
+        self.toolOrder = toolOrder
         self.privacy = privacy
+    }
+
+    /// Tara beside the closed notch, as the user picks it. Always also shows activity (agents at
+    /// work, music); Never hides the figures at rest altogether.
+    public var taraBeside: TaraBeside {
+        get { earsMode == .never ? .never : taraAlways ? .always : .activity }
+        set {
+            switch newValue {
+            case .always: taraAlways = true; earsMode = .always
+            case .activity: taraAlways = false; earsMode = .attention
+            case .never: taraAlways = false; earsMode = .never
+            }
+        }
     }
 
     /// The app in a slot. Assigning an app replaces the slot's module.
@@ -277,13 +371,20 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             disabledModules: (try? c.decodeIfPresent([ModuleKind].self, forKey: .disabledModules)) ?? [],
             disabledFeatures: (try? c.decodeIfPresent([ToolFeature].self, forKey: .disabledFeatures)) ?? [],
             brain: (try? c.decodeIfPresent(TaraBrain.self, forKey: .brain)) ?? .auto,
+            backgroundBrain: try? c.decodeIfPresent(TaraBrain.self, forKey: .backgroundBrain),
             keepOpenUntilClick: (try? c.decodeIfPresent(Bool.self, forKey: .keepOpenUntilClick)) ?? false,
             earsMode: (try? c.decodeIfPresent(EarsMode.self, forKey: .earsMode)) ?? .attention,
+            detailedEars: (try? c.decodeIfPresent(Bool.self, forKey: .detailedEars)) ?? false,
+            taraAlways: (try? c.decodeIfPresent(Bool.self, forKey: .taraAlways)) ?? false,
+            hoverOpen: (try? c.decodeIfPresent(HoverOpen.self, forKey: .hoverOpen)) ?? .click,
+            reopenLastTab: (try? c.decodeIfPresent(Bool.self, forKey: .reopenLastTab)) ?? true,
+            eyeStyle: (try? c.decodeIfPresent(EyeStyle.self, forKey: .eyeStyle)) ?? .lines,
             watchAutomatic: (try? c.decodeIfPresent(Bool.self, forKey: .watchAutomatic)) ?? true,
             watchTimer: (try? c.decodeIfPresent(WatchTimer.self, forKey: .watchTimer)) ?? .twoHours,
             disabledProviders: (try? c.decodeIfPresent([String].self, forKey: .disabledProviders)) ?? [],
             remindersInToday: (try? c.decodeIfPresent(Bool.self, forKey: .remindersInToday)) ?? false,
             moduleOrder: (try? c.decodeIfPresent([ModuleKind].self, forKey: .moduleOrder)) ?? [],
+            toolOrder: (try? c.decodeIfPresent([String].self, forKey: .toolOrder)) ?? [],
             privacy: (try? c.decodeIfPresent(MemoryPrivacy.self, forKey: .privacy)) ?? MemoryPrivacy()
         )
         // Saved by an older version: tools added since start off. Without the stamp the settings

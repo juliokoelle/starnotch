@@ -1,10 +1,13 @@
 """Tara's privacy switches, as the app writes them to `privacy.json` in its folder (Settings › Tara's memory).
 
-    {"paused": true, "paused_until": "2026-10-28T21:00:00Z" | null, "off": ["clipboard"], "ignored_apps": [...]}
+    {"paused": true, "paused_until": "2026-10-28T21:00:00Z" | null, "off": ["clipboard"], "on": ["apps"],
+     "ignored_apps": [...]}
 
 `paused_until` null with `paused` true is a pause until the user resumes it. A pause stops recording only (no new
 meetings, Jamie syncs or transcripts); a source in `off` is neither recorded nor used in answers or handed to AI apps.
-A missing or unreadable file means everything is on and nothing is paused, so the sidecar works without the app.
+A missing or unreadable file means everything is on and nothing is paused, so the sidecar works without the app;
+only the opt-in sources (time per app, screen context), which are off until the user switches them on in the app,
+stay off. An opt-in source counts as on only when `on` lists it and `off` doesn't (as `MemorySource.isOptIn`).
 `STARNOTCH_PRIVACY` names another file (tests, a second build).
 """
 
@@ -19,14 +22,15 @@ from pathlib import Path
 from memory import DEFAULT_DIR
 
 FILE = DEFAULT_DIR.parent / "privacy.json"
-SOURCES = ("meetings", "captures", "notes", "clipboard", "sessions")
+SOURCES = ("meetings", "captures", "notes", "clipboard", "sessions", "apps", "screen")
+OPT_IN = frozenset({"apps", "screen"})  # off unless the app lists them in `on`
 
 
 @dataclass
 class Privacy:
     paused: bool = False
     paused_until: dt.datetime | None = None
-    off: set[str] = field(default_factory=set)
+    off: set[str] = field(default_factory=lambda: set(OPT_IN))
 
     def is_paused(self, now: dt.datetime | None = None) -> bool:
         if not self.paused:
@@ -74,5 +78,6 @@ def load(file: Path | None = None) -> Privacy:
                 until = until.replace(tzinfo=dt.timezone.utc)
         except ValueError:
             until = None
-    off = {str(s) for s in data.get("off") or [] if str(s) in SOURCES}
+    on = {str(s) for s in data.get("on") or []} if isinstance(data.get("on"), list) else set()
+    off = {str(s) for s in data.get("off") or [] if str(s) in SOURCES} | (OPT_IN - on)
     return Privacy(paused=bool(data.get("paused")), paused_until=until, off=off)

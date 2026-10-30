@@ -46,6 +46,18 @@ final class NotchModel {
     /// Tara's memory is paused: a badge beside the tabs says so, a click resumes it.
     var memoryPaused = false
     @ObservationIgnored var resumeMemory: (() -> Void)?
+    /// Previews (`+reading`, `+off`): whether screen context reads, without reading anything.
+    var previewScreenReading: Bool?
+
+    /// Tara in the island rests (dimmed, asleep where she has no other news) while her memory is
+    /// paused, or while screen context is switched on but not reading (paused, locked). Switched off
+    /// (the default) she stays awake, so most people never see her asleep without a reason.
+    var taraResting: Bool {
+        if memoryPaused { return true }
+        if let preview = previewScreenReading { return !preview }
+        return false
+    }
+    @ObservationIgnored var pauseMemory: ((MemoryPause) -> Void)?
     /// A tab was dragged to a new place: the visible modules in their new order, to save.
     @ObservationIgnored var onReorder: (([ModuleKind]) -> Void)?
 
@@ -67,6 +79,11 @@ final class NotchModel {
     /// The module sitting beside the notch at rest, if any.
     /// Figures beside the notch at rest (a setting) and Watch mode (everything quiet).
     var earsMode = EarsMode.attention
+    /// Both ears with counts and the other sessions (a setting); off: the quiet look, only Tara
+    /// on the left of the notch.
+    var detailedEars = false
+    /// Tara beside the closed notch even when nothing is going on (a setting).
+    var taraAlways = false
     /// The notch or the closed island is pressed (from `WheelController`): Tara squashes.
     var handlePressed = false
     var watching = false
@@ -82,10 +99,15 @@ final class NotchModel {
     /// The module whose ears show; at rest by default only one that needs the user.
     var ambient: NotchModule? {
         if let held { return held }
-        let pool = interaction == .rest && earsMode != .always ? active.filter(\.needsAttention) : active
-        // At rest the first tab is the one in focus: it shows whenever it has something, even
-        // when another module calls louder.
-        if interaction == .rest, !pool.isEmpty, let first = modules.first, first.ambientPriority > 0 { return first }
+        var pool = interaction == .rest && earsMode != .always ? active.filter(\.needsAttention) : active
+        // The quiet look, at rest and on hover: only what is actively relevant (`quietRelevant`),
+        // never the system's stats for a load that is merely high. Tara takes the rest.
+        if !detailedEars { pool = pool.filter(\.quietRelevant) }
+        // At rest (and in the quiet look also on hover) the first tab is the one in focus: it
+        // shows whenever it has something, even when another module calls louder. In the quiet
+        // look only when it is relevant itself.
+        if interaction == .rest || !detailedEars, !pool.isEmpty, let first = modules.first, first.ambientPriority > 0,
+           detailedEars || pool.contains(where: { $0 === first }) { return first }
         return pool.max { $0.ambientPriority < $1.ambientPriority }
     }
 
@@ -111,10 +133,14 @@ final class NotchModel {
     }
 
     /// The module whose ears show while not expanded.
-    var earModule: NotchModule { ambient ?? restEarsShown ?? current }
+    var earModule: NotchModule { ambient ?? restEarsShown ?? idle }
 
     /// The module whose line shows under the notch on hover: never the rest ears, which have none.
-    var peekModule: NotchModule { ambient ?? current }
+    var peekModule: NotchModule { ambient ?? idle }
+
+    /// Ears and peek line when nothing else claims them: the open tab, or in the quiet look Tara
+    /// (the agents module), so a hover never shows the stats of the tab that was open last.
+    private var idle: NotchModule { detailedEars ? current : module(.agents) ?? current }
 
     enum Presentation: Equatable { case closed, compact, sneak, peek, expanded, capture, palette, inbox }
 
@@ -123,7 +149,7 @@ final class NotchModel {
         case .rest:
             sneak != nil ? .sneak
                 : ambient != nil && (held != nil && !watching || Quiet.showsEars(ambientLevel, mode: earsMode, watching: watching)) ? .compact
-                : restEarsShown != nil ? .compact : .closed
+                : restEarsShown != nil || taraAlways && !watching && earsMode != .never ? .compact : .closed
         case .peek: .peek
         case .expanded: .expanded
         case .capture: .capture
@@ -144,8 +170,15 @@ final class NotchModel {
         return NotchLayout(presentation: presentation, notch: notchSize, panel: panel,
                            bodyHeight: interaction == .inbox ? inbox?.bodyHeight ?? InboxView.emptyHeight
                                : approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? panel.height,
-                           earWidth: earModule.compactEarWidth, menuBarRoom: Runtime.menuBarRoom,
-                           menuBarItems: menuBarItems)
+                           earWidth: earModule.compactEarWidth, oneEar: !detailedEars, peekStyle: peekStyle,
+                           menuBarRoom: Runtime.menuBarRoom, menuBarItems: menuBarItems)
+    }
+
+    /// The hover peek's shape: in the quiet look, while Tara is the one hovered, sized to her and
+    /// her line (`NotchLayout.PeekStyle`) instead of a band across both ears.
+    private var peekStyle: NotchLayout.PeekStyle {
+        guard interaction == .peek, !detailedEars, !watching, let agents = peekModule as? AgentsModule else { return .line }
+        return agents.inboxCount == 0 && earModule === agents ? .ear : .earLine
     }
 }
 
@@ -185,6 +218,14 @@ struct NotchLayout: Equatable {
     var bodyHeight: CGFloat = NotchLayout.panelHeight
     /// Width of each ear at rest (the ear module may ask for more than the default).
     var earWidth: CGFloat = NotchLayout.earWidth
+    /// The quiet look: at rest only the left ear, the right edge flush with the notch.
+    var oneEar = false
+    /// The hover peek's shape. `line`: a line under the notch across both ears. In the quiet look,
+    /// while Tara is the one hovered, the peek keeps the one-eared shape of the rest: `ear` with
+    /// nothing below the notch (she grows in her ear; a band holding only her read as a dead black
+    /// bar), `earLine` with a band just tall enough for her and the line of what waits.
+    enum PeekStyle: Equatable { case line, ear, earLine }
+    var peekStyle = PeekStyle.line
     /// What the island may take of the menu bar beside the notch, per side, flare included.
     /// Peek, sneak and compact never grow past it, so menu bar extras stay uncovered.
     var menuBarRoom: CGFloat = 30
@@ -194,6 +235,8 @@ struct NotchLayout: Equatable {
     var topRadius: CGFloat {
         switch presentation {
         case .closed, .compact: 6
+        // One-eared like the rest: the same flares, so the island's edges stay where they were.
+        case .peek where peekStyle != .line: 6
         case .peek, .sneak: 9
         case .expanded, .capture, .palette, .inbox: 14
         }
@@ -203,6 +246,7 @@ struct NotchLayout: Equatable {
         switch presentation {
         case .closed: 9
         case .compact: 11
+        case .peek where peek == .ear: 11
         case .peek, .sneak: 17
         case .expanded, .inbox: 30
         case .capture, .palette: 24
@@ -213,8 +257,8 @@ struct NotchLayout: Equatable {
     var innerWidth: CGFloat {
         switch presentation {
         case .closed: notch.width
-        case .compact: notch.width + 2 * compactEarWidth
-        case .peek: notch.width + 2 * besideNotch
+        case .compact: restIsland.width
+        case .peek: peek == .line ? notch.width + 2 * besideNotch : oneEarIsland.width
         // A sneak is unasked for: like the ears it stays out of the icons beside the notch.
         case .sneak: notch.width + 2 * min(besideNotch, earRoom)
         // The straight sides are what runs through the icons; the flares only touch the top rows.
@@ -244,6 +288,44 @@ struct NotchLayout: Equatable {
         return width < Self.minEarWidth ? 0 : width
     }
 
+    private var restIsland: (width: CGFloat, offset: CGFloat) {
+        Quiet.restIsland(notchWidth: notch.width, ear: compactEarWidth, oneSided: oneEar)
+    }
+
+    private var oneEarIsland: (width: CGFloat, offset: CGFloat) {
+        Quiet.restIsland(notchWidth: notch.width, ear: compactEarWidth, oneSided: true)
+    }
+
+    /// The peek's shape as drawn: Tara can't grow in an ear there is no room for, so then she
+    /// takes the band under the notch.
+    var peek: PeekStyle { peekStyle == .ear && compactEarWidth == 0 ? .earLine : peekStyle }
+
+    /// Below the notch in the one-eared peek: Tara whole and the line beside her.
+    static let quietBand: CGFloat = 38
+
+    /// How far the island's centre sits left (negative) of the notch's: only with one ear at rest
+    /// and in the one-eared peek.
+    var centerOffset: CGFloat {
+        switch presentation {
+        case .compact: restIsland.offset
+        case .peek where peek != .line: oneEarIsland.offset
+        default: 0
+        }
+    }
+
+    /// Where Tara stands on the island at rest and in the peek, flares included: whole inside the
+    /// left ear (also when hovered with nothing below the notch), or at the start of the line
+    /// under it, clear of the bottom corners. One place per state, so she moves and grows between
+    /// them as one figure.
+    var taraBox: CGRect {
+        if presentation == .peek && peek != .ear {
+            return CGRect(x: topRadius + 12, y: notch.height + 1, width: 44, height: max(0, height - notch.height - 4))
+        }
+        let ear = compactEarWidth
+        let side = max(0, presentation == .peek ? min(ear, notch.height - 8) : min(ear - 3, notch.height - 11))
+        return CGRect(x: topRadius + (ear - side) / 2, y: (notch.height - side) / 2, width: side, height: side)
+    }
+
     /// Compact without room for ears: the island shows the dip with its mark.
     var showsCue: Bool { presentation == .compact && compactEarWidth == 0 }
 
@@ -251,7 +333,12 @@ struct NotchLayout: Equatable {
         switch presentation {
         case .closed: notch.height
         case .compact: showsCue ? notch.height + Self.cueDip : notch.height
-        case .peek: notch.height + 40
+        case .peek:
+            switch peek {
+            case .line: notch.height + 40
+            case .ear: notch.height
+            case .earLine: notch.height + Self.quietBand
+            }
         case .sneak: notch.height + 36
         case .expanded, .inbox: notch.height + Self.bodyTop + min(bodyHeight, panel.height) + Self.bodyBottom
         case .capture: notch.height + 8 + 44 + 9 + 24 + 14

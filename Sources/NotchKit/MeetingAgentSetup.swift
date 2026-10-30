@@ -93,7 +93,8 @@ enum MeetingAgentSetup {
         var list = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
         for (name, value) in keys() { list.append("STARNOTCH_KEY_\(name)=\(value)") }
         // How Tara thinks (onboarding or Settings › Meeting agent): claude-code, api, apple, rules or auto.
-        list.removeAll { $0.hasPrefix("STARNOTCH_BRAIN=") || $0.hasPrefix("STARNOTCH_APPLE_HELPER=") || $0.hasPrefix("STARNOTCH_PRIVACY=") }
+        list.removeAll { $0.hasPrefix("STARNOTCH_BRAIN=") || $0.hasPrefix("STARNOTCH_APPLE_HELPER=") || $0.hasPrefix("STARNOTCH_PRIVACY=")
+            || $0.hasPrefix("STARNOTCH_MEETING_SOURCES=") }
         list.append("STARNOTCH_BRAIN=\(brain.rawValue)")
         // The privacy switches this build writes (its own support folder), for the agent and Jamie's sync.
         list.append("STARNOTCH_PRIVACY=\(MemoryFiles(support: Brand.supportFolder).privacyFile.path)")

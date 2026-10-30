@@ -100,7 +100,8 @@ struct SessionDetailCard: View {
     }
 
     private var jumpHelp: String {
-        if agent.remoteURL != nil { return "Opens the session on claude.ai (Remote Control)" }
+        if agent.remoteURL != nil, agent.pid == nil { return "Opens the session on claude.ai (Remote Control)" }
+        if agent.remoteURL != nil { return "Opens the session in the Claude app; with ⌥ on claude.ai (Remote Control)" }
         if agent.pid != nil { return "Brings the terminal or app running it to the front" }
         return "Opens the Claude app"
     }

@@ -83,6 +83,7 @@ enum ToolInfo {
         case .feature(.lyricsOnHover): "text.line.first.and.arrowtriangle.forward"
         case .feature(.appVolume): "slider.horizontal.3"
         case .feature(.askTara): "bubble.left.and.text.bubble.right"
+        case .feature(.files): "folder"
         }
     }
 
@@ -123,6 +124,7 @@ enum ToolInfo {
         case .feature(.lyricsOnHover): "The current lyric line when you hover the notch"
         case .feature(.appVolume): "A mixer for each app's volume; asks to capture system audio"
         case .feature(.askTara): "Ask about your meetings and notes, on ⌃⌥T or a click on Tara"
+        case .feature(.files): "A small Finder: recent files and your folders, drag files out"
         }
     }
 }

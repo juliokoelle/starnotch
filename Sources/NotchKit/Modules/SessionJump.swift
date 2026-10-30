@@ -39,7 +39,8 @@ enum SessionJump {
                 case .appleScript(let source):
                     reached = runScript(source)
                 case .raiseWindow(let bundleID, let title):
-                    guard let source = TerminalJump.raiseScript(bundleID: bundleID, title: title) else { continue }
+                    // Without Accessibility, System Events would put up macOS's prompt on every jump.
+                    guard AXIsProcessTrusted(), let source = TerminalJump.raiseScript(bundleID: bundleID, title: title) else { continue }
                     reached = runScript(source)
                 case .command(let candidates, let arguments, let environment):
                     guard let tool = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { continue }

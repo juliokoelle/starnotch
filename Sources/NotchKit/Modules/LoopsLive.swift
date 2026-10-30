@@ -556,67 +556,57 @@ private struct PulsingDot: View {
     }
 }
 
-/// The plan limits in the panel header, as Claude Code's status line reports them:
-/// "5 h 62 % · 2 h 14 m left", the week in the tooltip. Neutral below 80 %, amber from 80 %,
-/// red from 90 %. Before the bridge is set up: a link to the setup note.
+/// The plan limits in the panel header: one quiet chip per tool ("Claude 62 %"), the same shape
+/// for one tool, two or more; a click opens every window with its reset (`LimitsPage`). The
+/// ring is in Tara's colour, red from 90 %; the text stays neutral. A tool that hasn't reported
+/// for a while (`staleAfter`) keeps its chip, dimmed, after the fresh ones, so the header
+/// doesn't jump when one app has been closed for long. Before the bridge is set up: a link to
+/// the setup note.
 struct PlanBadge: View {
     let module: AgentsModule
-    @State private var showsLimits = false
-    @State private var lockToken: Int?
+
+    /// Numbers older than this are shown dimmed, with when they were last seen.
+    static let staleAfter: TimeInterval = 3 * 3600
+
+    /// Fresh tools first, then the stale ones, each in the order they came.
+    static func arranged(_ usages: [AgentUsage], now: Date) -> [AgentUsage] {
+        let fresh = usages.filter { now.timeIntervalSince($0.capturedAt) < staleAfter }
+        return fresh + usages.filter { now.timeIntervalSince($0.capturedAt) >= staleAfter }
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let usages = module.usages.map { $0.current(now: context.date) }
-            if usages.contains(where: { $0.provider != ClaudeCodeProvider.id }) {
-                // Several tools side by side; Claude without numbers says how to get them.
-                let missing = !usages.contains { $0.provider == ClaudeCodeProvider.id }
-                let pills = { (style: UsagePill.Style) in
-                    HStack(spacing: style == .named ? 10 : 6) {
-                        ForEach(usages, id: \.provider) { UsagePill(usage: $0, style: style, now: context.date, module: module) }
+            let now = context.date
+            let usages = Self.arranged(module.usages.map { $0.current(now: now) }, now: now)
+            if !usages.isEmpty {
+                // Claude without numbers and without the bridge: a link to set it up, while it fits.
+                let setUp = !module.statusBridgeInstalled && !usages.contains { $0.provider == ClaudeCodeProvider.id }
+                // A real button (keyboard, VoiceOver); the setup link beside it stays its own.
+                let chips = { (style: UsagePill.Style) in
+                    Button { module.toggleLimits() } label: {
+                        HStack(spacing: style == .ring ? 6 : style == .stacked ? 8 : 12) {
+                            ForEach(usages, id: \.provider) { usage in
+                                UsagePill(usage: usage, style: style, now: now, module: module,
+                                          stale: now.timeIntervalSince(usage.capturedAt) >= Self.staleAfter)
+                            }
+                        }
+                        .fixedSize()
+                        .contentShape(Rectangle())
                     }
-                    .fixedSize()
+                    .buttonStyle(PressScale())
+                    .help(Localization.string("Plan limits: click for every window and its reset"))
                 }
-                // Claude's hint shortens first; the numbers go last.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 10) { if missing { claudeMissing("set up limits") }; limitsButton(pills(.named), usages: usages, now: context.date) }.fixedSize()
-                    HStack(spacing: 10) { if missing { claudeMissing("set up") }; limitsButton(pills(.named), usages: usages, now: context.date) }.fixedSize()
-                    HStack(spacing: 8) { if missing { claudeMissing(nil) }; limitsButton(pills(.named), usages: usages, now: context.date) }.fixedSize()
-                    HStack(spacing: 8) { if missing { claudeMissing(nil) }; limitsButton(pills(.short), usages: usages, now: context.date) }.fixedSize()
-                    HStack(spacing: 8) { if missing { claudeMissing(nil) }; limitsButton(pills(.ring), usages: usages, now: context.date) }.fixedSize()
-                }
-            } else if let plan = module.plan, let five = plan.fiveHour {
-                let level = QuotaEstimator.level(five.usedPercentage / 100)
-                let tint: Color = switch level {
-                case .calm: Theme.textSecondary
-                case .warn: Theme.waiting
-                case .critical: Theme.critical
-                }
-                let reset = five.resetsAt.map { UsageText.left(until: $0, now: context.date) }
-                let percent = "\(Int(five.usedPercentage.rounded())) %"
-                // On pace to run out before the reset: when, instead of how much.
-                let pace = module.paceShort(ClaudeCodeProvider.id, .init(usedPercent: five.usedPercentage, minutes: 300, resetsAt: five.resetsAt), now: context.date)
-                let paceTint = pace != nil && level == .calm ? Theme.waiting : tint
-                let ring = ZStack {
-                    Circle().stroke(Color.white.opacity(0.14), lineWidth: 2)
-                    Circle().trim(from: 0, to: min(1, five.usedPercentage / 100))
-                        .stroke(level == .calm ? Theme.textBody : tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                }
-                .frame(width: 12, height: 12)
-                // "5 h 53 % · 53 m left", then "53 % · 53 m", then the ring; all of it in the tooltip.
-                ViewThatFits(in: .horizontal) {
-                    if let pace {
-                        HStack(spacing: 6) { ring; Text("5 h · \(pace)") }.fixedSize()
-                        HStack(spacing: 6) { ring; Text(pace) }.fixedSize()
-                    } else {
-                        HStack(spacing: 6) { ring; Text("5 h \(percent)\(reset.map { " · \($0)" } ?? "")") }.fixedSize()
-                        HStack(spacing: 6) { ring; Text("\(percent)\(reset.map { " · \(UsageText.short($0))" } ?? "")") }.fixedSize()
+                HStack(spacing: 10) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 10) { if setUp { claudeSetUp(true) }; chips(usages.count == 1 ? .detailed : .named) }.fixedSize()
+                        HStack(spacing: 10) { if setUp { claudeSetUp(false) }; chips(.named) }.fixedSize()
+                        chips(.named)
+                        chips(.stacked)
+                        chips(.percent)
+                        chips(.ring)
                     }
-                    ring
                 }
-                .font(Theme.font(12, .medium).monospacedDigit())
-                .foregroundStyle(paceTint)
-                .help(help(plan, now: context.date))
+                .onAppear { if module.previewShowsLimits, !module.showsLimits { module.toggleLimits() } }
             } else if module.statusBridgeInstalled {
                 ViewThatFits(in: .horizontal) {
                     Text("Plan limits after the next reply").fixedSize()
@@ -651,151 +641,209 @@ struct PlanBadge: View {
         }
     }
 
-    /// The tools' numbers; a click shows every window in a popover.
-    private func limitsButton(_ pills: some View, usages: [AgentUsage], now: Date) -> some View {
-        Button { setShowsLimits(!showsLimits) } label: { pills.contentShape(Rectangle()) }
-            .buttonStyle(PressScale())
-            .popover(isPresented: Binding(get: { showsLimits }, set: { setShowsLimits($0) }), arrowEdge: .bottom) {
-                LimitsPopover(usages: usages, now: now, module: module)
+    /// "Claude ↗": opens the setup page for Claude's plan limits.
+    private func claudeSetUp(_ named: Bool) -> some View {
+        Button {
+            if let url = StatusFiles.setupGuide { NSWorkspace.shared.open(url) }
+        } label: {
+            HStack(spacing: 4) {
+                Text(named ? "Claude limits" : "Claude").fixedSize()
+                Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
             }
-    }
-
-    /// "Claude: set up limits" (opens the setup page), or a wait for the first numbers.
-    /// `text` nil: the pill and the arrow only.
-    @ViewBuilder private func claudeMissing(_ text: String?) -> some View {
-        if module.statusBridgeInstalled {
-            HStack(spacing: 5) {
-                ToolBadge(provider: ClaudeCodeProvider.id)
-                Text(text == nil ? "…" : "after next reply").fixedSize()
-            }
-            .font(Theme.font(12)).foregroundStyle(Theme.textTertiary)
-            .help("Claude Code reports its 5-hour and weekly limits after the first answer in a session.")
-        } else {
-            Button {
-                if let url = StatusFiles.setupGuide { NSWorkspace.shared.open(url) }
-            } label: {
-                HStack(spacing: 5) {
-                    ToolBadge(provider: ClaudeCodeProvider.id)
-                    if let text { Text(text).fixedSize() }
-                    Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
-                }
-                .font(Theme.font(12, .medium)).foregroundStyle(Theme.accent)
-            }
-            .buttonStyle(PressScale())
-            .help("Show Claude's plan limits: one line in Claude Code's settings")
+            .font(Theme.font(12, .medium)).foregroundStyle(Theme.accent)
         }
-    }
-
-    /// The popover holds the island open while it shows.
-    private func setShowsLimits(_ show: Bool) {
-        showsLimits = show
-        if show, lockToken == nil {
-            lockToken = IslandLock.shared.acquire("limits") { setShowsLimits(false) }
-        } else if !show, let token = lockToken {
-            lockToken = nil
-            IslandLock.shared.release(token)
-        }
-    }
-
-    private func help(_ plan: StatusSnapshot, now: Date) -> String {
-        var lines: [String] = []
-        if let five = plan.fiveHour {
-            lines.append("5-hour window: \(Int(five.usedPercentage.rounded())) % used\(five.resetsAt.map { ", \(UsageText.left(until: $0, now: now))" } ?? "")")
-        }
-        if let week = plan.sevenDay {
-            lines.append("Week: \(Int(week.usedPercentage.rounded())) % used\(week.resetsAt.map { ", \(UsageText.resetDay($0, now: now, calendar: .current))" } ?? "")")
-        }
-        if let five = plan.fiveHour, let pace = module.forecast(ClaudeCodeProvider.id, .init(usedPercent: five.usedPercentage, minutes: 300, resetsAt: five.resetsAt), now: now) {
-            lines.append(pace)
-        }
-        lines.append("From Claude Code's status line, \(TimeText.clock(plan.capturedAt)).")
-        return lines.joined(separator: "\n")
+        .buttonStyle(PressScale())
+        .help("Show Claude's plan limits: one line in Claude Code's settings")
     }
 }
 
-/// Every tool's 5-hour and weekly windows with their resets, from a click on the header.
-private struct LimitsPopover: View {
-    let usages: [AgentUsage]
+/// Every tool's 5-hour and weekly windows with their resets, in place of the sessions after a
+/// click on the header's chips: a compact card per tool side by side (more tools wrap and
+/// scroll), a row per window with its share as a number and a bar, when it resets and, when it
+/// runs out first, at what time. The bar in Tara's colour like the Dashboard's, red from 90 %.
+struct LimitsPage: View {
+    let module: AgentsModule
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let now = context.date
+            let usages = PlanBadge.arranged(module.usages.map { $0.current(now: now) }, now: now)
+            NotchCard(padding: 10) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Button { _ = module.handleBack() } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+                                Text("Sessions").font(Theme.font(12, .medium))
+                            }
+                            .foregroundStyle(Theme.textSecondary)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressScale())
+                        Spacer()
+                        Text("Plan limits").font(Theme.font(12, .semibold)).foregroundStyle(Theme.textPrimary)
+                    }
+                    .padding(.horizontal, 4)
+                    ScrollView(.vertical) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 8, alignment: .top)], spacing: 8) {
+                            ForEach(usages, id: \.provider) { usage in
+                                ToolLimits(usage: usage, now: now, module: module)
+                            }
+                        }
+                    }
+                    .scrollIndicators(.never)
+                    .scrollEdgeFade(bottom: 10)
+                }
+            }
+        }
+    }
+}
+
+/// One tool on the limits page: its badge, plan and when the numbers came, then its windows.
+private struct ToolLimits: View {
+    let usage: AgentUsage
     let now: Date
     let module: AgentsModule
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(usages, id: \.provider) { usage in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        ToolBadge(provider: usage.provider)
-                        if let plan = usage.plan { Text(plan).font(Theme.font(11)).foregroundStyle(.secondary) }
-                    }
-                    ForEach([usage.primary, usage.secondary].compactMap { $0 }, id: \.label) { window in
-                        HStack {
-                            Text(window.label == "week" ? "Week" : window.label.isEmpty ? "Window" : window.label)
-                                .frame(width: 44, alignment: .leading)
-                            Text("\(Int(window.usedPercent.rounded())) %").monospacedDigit().frame(width: 44, alignment: .trailing)
-                            if let reset = window.resetsAt {
-                                Text(window.label == "week" ? UsageText.resetDay(reset, now: now, calendar: .current)
-                                                            : UsageText.left(until: reset, now: now))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .font(Theme.font(12))
-                        if let pace = module.forecast(usage.provider, window, now: now) {
-                            Text(pace).font(Theme.font(11)).foregroundStyle(.secondary)
-                        }
-                    }
+        let stale = now.timeIntervalSince(usage.capturedAt) >= PlanBadge.staleAfter
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                ToolBadge(provider: usage.provider)
+                if let plan = usage.plan {
+                    Text(plan.capitalized).font(Theme.font(11)).foregroundStyle(Theme.textSecondary)
                 }
+                Spacer(minLength: 6)
+                Text(String(format: Localization.string(stale ? "Last seen %@" : "Updated %@"), TimeText.clock(usage.capturedAt, from: now)))
+                    .font(Theme.font(10.5)).foregroundStyle(Theme.textTertiary)
             }
+            .lineLimit(1)
+            ForEach([usage.primary, usage.secondary].compactMap { $0 }, id: \.label) { window in
+                // Only when it runs out before the reset: "full 15:40".
+                LimitRow(window: window, now: now, pace: stale ? nil : module.paceShort(usage.provider, window, now: now))
+            }
+            .opacity(stale ? 0.55 : 1)
         }
-        .padding(14)
-        .frame(minWidth: 220, alignment: .leading)
+        .padding(10)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
-/// One tool's plan limits in the header: ring and percentage of its fuller window, both windows
-/// and their resets in the tooltip.
+/// One plan window: "5-hour window · 66 %", a thin bar, "Resets 16:55 · in 2 h 23 m · full 16:40".
+private struct LimitRow: View {
+    let window: AgentUsage.Window
+    let now: Date
+    let pace: String?
+
+    var body: some View {
+        let used = window.usedPercent
+        let critical = QuotaEstimator.level(used / 100) == .critical
+        let isWeek = window.label == "week"
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(isWeek ? "Week" : window.label == "5 h" ? "5-hour window" : window.label.isEmpty ? "Window" : window.label)
+                    .font(Theme.font(11.5, .medium))
+                    .foregroundStyle(Theme.textBody)
+                Spacer(minLength: 8)
+                Text("\(Int(used.rounded())) %")
+                    .font(Theme.font(12.5, .semibold).monospacedDigit())
+                    .foregroundStyle(critical ? Theme.critical : Theme.textPrimary)
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.09))
+                    Capsule().fill(critical ? Theme.critical : TaraAccent.current)
+                        .frame(width: max(4, proxy.size.width * min(1, used / 100)))
+                }
+            }
+            .frame(height: 4)
+            let line = [window.resetsAt.map { resetLine($0, isWeek: isWeek) }, pace].compactMap { $0 }.joined(separator: " · ")
+            if !line.isEmpty {
+                Text(line)
+                    .font(Theme.font(10.5).monospacedDigit())
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// "Resets 16:55 · in 2 h 23 m"; the week "Resets Tue 07:44".
+    private func resetLine(_ reset: Date, isWeek: Bool) -> String {
+        let at = String(format: Localization.string("Resets %@"), TimeText.clock(reset, from: now))
+        guard !isWeek, reset > now else { return at }
+        return at + " · " + String(format: Localization.string("in %@"), UsageText.short(UsageText.left(until: reset, now: now)))
+    }
+}
+
+/// The small ring of a plan window in the header: Tara's colour, red from 90 %.
+struct LimitRing: View {
+    let used: Double
+    let level: QuotaEstimator.Level
+    var size: CGFloat = 13
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.white.opacity(0.18), lineWidth: 2.2)
+            Circle().trim(from: 0, to: min(1, used / 100))
+                .stroke(level == .critical ? Theme.critical : TaraAccent.current, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+/// One tool's plan limits in the header: ring, name and the share of its fuller window ("Claude
+/// 62 %"), or when it runs out ("Claude full 16:40"); both windows and their resets in the
+/// tooltip and the popover. Stale numbers dim.
 struct UsagePill: View {
-    /// `short`: the pill and the percentage without the window's name.
-    enum Style { case named, short, ring }
+    /// `detailed`: also the reset of the fuller window (one tool alone); `named`: ring, name and
+    /// value; `stacked`: the value over the tool's name, like a Dashboard number (narrow headers);
+    /// `percent`: ring and value; `ring`: the ring alone.
+    enum Style { case detailed, named, stacked, percent, ring }
     let usage: AgentUsage
     let style: Style
     let now: Date
     var module: AgentsModule?
+    var stale = false
 
     var body: some View {
         let window = [usage.primary, usage.secondary].compactMap { $0 }.max { $0.usedPercent < $1.usedPercent }
         let used = window?.usedPercent ?? 0
         let level = QuotaEstimator.level(used / 100)
-        let tint: Color = switch level {
-        case .calm: Theme.textSecondary
-        case .warn: Theme.waiting
-        case .critical: Theme.critical
-        }
-        let ring = ZStack {
-            Circle().stroke(Color.white.opacity(0.14), lineWidth: 2)
-            Circle().trim(from: 0, to: min(1, used / 100))
-                .stroke(level == .calm ? Theme.textBody : tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-        .frame(width: 12, height: 12)
         let percent = "\(Int(used.rounded())) %"
         // The week only says so when it is the fuller window.
         let suffix = window.map { $0.label == "5 h" || $0.label.isEmpty ? "" : " \($0.label)" } ?? ""
         // On pace to run out before a reset: when, instead of how much (the ring keeps the share).
-        let pace = module?.paceShort(of: usage, now: now)
+        let pace = stale ? nil : module?.paceShort(of: usage, now: now)
+        let reset = window?.resetsAt.map { window?.label == "week" ? UsageText.resetDay($0, now: now, calendar: .current)
+                                                                   : UsageText.short(UsageText.left(until: $0, now: now)) }
         HStack(spacing: 5) {
-            ring
+            LimitRing(used: used, level: level)
+            if style == .detailed || style == .named {
+                Text(AgentsModule.toolLabel(of: usage.provider)).foregroundStyle(Theme.textSecondary)
+            }
             switch style {
+            case .detailed:
+                Text(pace ?? "\(percent)\(suffix)\(reset.map { " · \($0)" } ?? "")")
             case .named:
-                ToolBadge(provider: usage.provider)
                 Text(pace ?? "\(percent)\(suffix)")
-            case .short:
-                ToolBadge(provider: usage.provider)
+            case .stacked:
+                // The value over the tool's name ("3 %" over "Codex"); which window it is, in the popover.
+                VStack(alignment: .leading, spacing: -1) {
+                    Text(pace ?? percent).font(Theme.font(12, .semibold).monospacedDigit())
+                    Text(AgentsModule.toolLabel(of: usage.provider))
+                        .font(Theme.font(9.5, .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            case .percent:
                 Text(percent)
             case .ring: EmptyView()
             }
         }
         .font(Theme.font(12, .medium).monospacedDigit())
-        .foregroundStyle(pace != nil && level == .calm ? Theme.waiting : tint)
+        .foregroundStyle(level == .critical ? Theme.critical : Theme.textPrimary)
+        .opacity(stale ? 0.45 : 1)
         .help(help)
     }
 
@@ -807,13 +855,13 @@ struct UsagePill: View {
             lines.append("\(name): \(Int(window.usedPercent.rounded())) % used\(reset)")
             if let pace = module?.forecast(usage.provider, window, now: now) { lines.append("  \(pace)") }
         }
-        lines.append(usage.provider == ClaudeCodeProvider.id ? "From Claude Code's status line, \(TimeText.clock(usage.capturedAt))."
-                                                            : "From \(usage.displayName)'s session files, \(TimeText.clock(usage.capturedAt)).")
+        lines.append(usage.provider == ClaudeCodeProvider.id ? "From Claude Code's status line, \(TimeText.clock(usage.capturedAt, from: now))."
+                                                            : "From \(usage.displayName)'s session files, \(TimeText.clock(usage.capturedAt, from: now)).")
         return lines.joined(separator: "\n")
     }
 }
 
-/// A thin ring for a session's context window: amber from 70 %, red from 90 %.
+/// A thin ring for a session's context window: Tara's colour from 70 %, red from 90 %.
 struct ContextRing: View {
     let percentage: Double
     var size: CGFloat = 11

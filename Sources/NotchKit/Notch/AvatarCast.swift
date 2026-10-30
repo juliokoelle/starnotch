@@ -418,7 +418,8 @@ struct AvatarView: View {
                 // Characters that aren't tintable keep their own colours, whatever the caller asks.
                 let colorway = library.character(character)?.tintable == false ? Colorway() : colorway
                 SpriteLayerView(image: image, colorway: colorway, mood: mood, alive: alive,
-                                glow: glow, highlight: library.character(character)?.finish?.highlight ?? 0)
+                                glow: glow, highlight: library.character(character)?.finish?.highlight ?? 0,
+                                eyes: picked.flatMap { SpriteEyes.forSprite(file: $0.file) })
                     .aspectRatio(image.size.width / max(1, image.size.height), contentMode: .fit)
                     .overlay(alignment: .topTrailing) { if drawsNote { MusicNote() } }
                     .frame(height: height, alignment: .bottom)
@@ -448,6 +449,12 @@ struct AvatarView: View {
     private var sprite: AvatarLibrary.Sprite? {
         guard let character = library.character(character) else { return nil }
         if let forcedState { return character.variant(level)?.states?[forcedState] ?? character.states[forcedState] }
+        // Resting while the pointer moves: open eyes that follow it (Tara), not the sleepy picture.
+        if mood == .idle, alive, !reduceMotion, GazeCenter.shared.awake,
+           let open = character.variant(level)?.states?["idle"] ?? character.states["idle"],
+           SpriteEyes.forSprite(file: open.file) != nil {
+            return open
+        }
         // Level sprites win for the moods they cover; they may be wider (a peek over the edge).
         if let states = character.variant(level)?.states,
            let state = AvatarStates.candidates[mood]?.first(where: { states[$0] != nil }) {

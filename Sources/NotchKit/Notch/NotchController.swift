@@ -60,6 +60,10 @@ final class NotchController {
     private var lastPanelClick = Date.distantPast
     /// Keep-open setting and modules showing a detail card.
     var keepsOpen: () -> Bool = { false }
+    /// Seconds the pointer rests on the notch before it opens (nil: only a click opens it).
+    var hoverOpenDelay: () -> Double? = { nil }
+    /// Closed, the panel keeps its tab for the next open (a setting); else it goes back to the first.
+    var reopensLastTab: () -> Bool = { true }
     static let stayMargin: CGFloat = 30
     private var pointerInside = false
     /// Demos and screenshots (`--expand`, `--tour`): ignore the real pointer so the states stay put.
@@ -109,6 +113,8 @@ final class NotchController {
             onCaptureSend: { [weak self] in self?.sendCapture() },
             onCaptureMic: { [weak self] in self?.toggleCaptureMic() },
             onCaptureEvent: { [weak self] in self?.createCaptureEvent() },
+            onCaptureShowNotes: { [weak self] in self?.showCapturedNotes() },
+            onCaptureOpenInbox: { [weak self] in self?.openCaptureInbox() },
             onPaletteActivate: { [weak self] index, secondary in self?.activatePalette(index, secondary: secondary) },
             onInboxKey: { [weak self] primary, id in self?.inboxKey(primary: primary, id: id) },
             onInboxEmpty: { [weak self] in self?.inboxEmptied() }
@@ -222,14 +228,15 @@ final class NotchController {
     private var islandRect: CGRect {
         guard let screen else { return .zero }
         let size = model.layout.size
-        let midX = screen.notch.rect.midX
+        let midX = screen.notch.rect.midX + model.layout.centerOffset
         return CGRect(x: midX - size.width / 2, y: screen.frame.maxY - size.height, width: size.width, height: size.height)
     }
 
     /// Where a press may pull the main character out: the island while it isn't open (closed,
-    /// peeking, dictating), wider than the notch's own hot zone.
+    /// peeking, dictating), wider than the notch's own hot zone. Never quick capture: a click in
+    /// its field that slid down a little pulled Tara out and closed it.
     func canPullFigure(at point: CGPoint) -> Bool {
-        ![.expanded, .palette, .inbox].contains(model.interaction) && islandRect.insetBy(dx: -4, dy: -4).contains(point)
+        ![.expanded, .palette, .inbox, .capture].contains(model.interaction) && islandRect.insetBy(dx: -4, dy: -4).contains(point)
     }
 
     // MARK: Pointer
@@ -248,7 +255,10 @@ final class NotchController {
         }) { monitors.append(global) }
         // Clicks inside the panel: a short hold against collapsing right after.
         if let clicks = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.lastPanelClick = Date() }
+            MainActor.assumeIsolated {
+                self?.lastPanelClick = Date()
+                GazeCenter.shared.laugh()  // a click in the island or beside Tara: her eyes laugh
+            }
             return event
         }) { monitors.append(clicks) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: moves, handler: { [weak self] event in
@@ -275,10 +285,17 @@ final class NotchController {
     /// A file drag is under way (from Finder, the desktop, a browser download …).
     private func isFileDrag() -> Bool {
         let board = NSPasteboard(name: .drag)
-        return board.changeCount != dragBaseline && board.types?.contains(.fileURL) == true
+        // A file, or one a browser promises (a Gmail attachment out of Chrome).
+        return board.changeCount != dragBaseline
+            && board.types?.contains(where: { $0 == .fileURL || FileDrop.promiseTypes.contains($0) }) == true
     }
 
+    /// Below this distance from the top edge a move at rest is ignored (well beyond the ears and
+    /// the hover zone).
+    static let farBelow: CGFloat = 140
+
     private func pointerMoved(dragging: Bool = false) {
+        GazeCenter.shared.pointerMoved()  // Tara's eyes follow (throttled; nothing while none show)
         guard !wheelOpen, !isLocked, var screen else { return }
         let location = NSEvent.mouseLocation
         // "With pointer": at rest, the island follows the pointer to another display.
@@ -287,6 +304,13 @@ final class NotchController {
             place()
             guard let moved = self.screen else { return }
             screen = moved
+        }
+        // At rest with the pointer far below the top edge (most moves on the screen): nothing can
+        // change, so the island's shape isn't worked out at all. Every move used to compute it,
+        // which showed as several percent CPU while the mouse moved.
+        if model.interaction == .rest, !pointerInside, !dragging, panel.ignoresMouseEvents,
+           location.y < screen.frame.maxY - Self.farBelow {
+            return
         }
         let island = islandRect
         let inside: Bool
@@ -324,6 +348,12 @@ final class NotchController {
                     guard let self, !Task.isCancelled else { return }
                     self.hoverTask = nil
                     if self.model.interaction == .rest { self.set(.peek, animation: Theme.open) }
+                    // Resting on: opens after the chosen time, without taking the keyboard (a
+                    // click still opens at once). Not while watching.
+                    guard let delay = self.hoverOpenDelay(), !self.model.watching else { return }
+                    try? await Task.sleep(for: .seconds(max(0, delay - 0.2)))
+                    guard !Task.isCancelled, self.pointerInside, self.model.interaction == .peek else { return }
+                    self.expand()
                 }
             }
         } else {
@@ -477,11 +507,13 @@ final class NotchController {
         pinned = false
         guard model.interaction != .rest else { return }
         set(.rest, animation: Theme.close)
-        // Closed, the island goes back to the first tab, so it opens there next time.
-        Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(450))
-            guard let self, self.model.interaction == .rest, let first = self.model.modules.first?.kind else { return }
-            self.model.module = first
+        // Closed, the island keeps its tab for the next open (a setting), else goes back to the first.
+        if !reopensLastTab() {
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))
+                guard let self, self.model.interaction == .rest, let first = self.model.modules.first?.kind else { return }
+                self.model.module = first
+            }
         }
         if model.capture != nil {
             Task { [weak self] in
@@ -604,10 +636,38 @@ final class NotchController {
                 ? .delivered
                 : await self.inbox.file(text: capture.text, route: capture.route, parse: capture.parse)
             withAnimation(Theme.open) { capture.phase = .sent }
-            try? await Task.sleep(for: .seconds(capture.outcome == .delivered ? 1.8 : 2.6))
-            guard self.model.capture === capture else { return }
-            self.collapse()
+            // Long enough to read where it went and reach its buttons; with the pointer on it,
+            // it stays until the pointer leaves.
+            try? await Task.sleep(for: .seconds(3.2))
+            guard self.model.capture === capture, self.model.interaction == .capture else { return }
+            if self.pointerInside {
+                self.pinned = false
+            } else {
+                self.collapse()
+            }
         }
+    }
+
+    /// The confirmation's Notepad button: the Tools tab on the Notepad's "Tara's notes", where
+    /// every capture shows. Without the Notepad, the Markdown inbox opens instead.
+    func showCapturedNotes() {
+        guard let tools = model.module(.tools) as? ToolsModule, tools.tabs.contains(.notes), let notes = tools.notes else {
+            openCaptureInbox()
+            return
+        }
+        Haptics.tick()
+        tools.tab = .notes
+        notes.showsTara = true
+        expandWithFocus(.tools)
+        model.capture = nil
+    }
+
+    /// The confirmation's file button: the Markdown inbox in its app (Obsidian for a vault).
+    func openCaptureInbox() {
+        guard let file = model.capture?.inboxFile else { return }
+        Haptics.tick()
+        CaptureInbox.openMarkdown(file)
+        collapse()
     }
 
     /// "Add to Calendar": the text named a day and a time; a one-hour event in the default calendar.
@@ -870,6 +930,19 @@ final class NotchController {
                 if command, isK { collapse(); return true }
                 return false
             }
+            return true
+        case .capture:
+            // Task, Question, Note: tab and ⇧tab always, ← → while the field is empty (with
+            // text the arrows move the cursor).
+            guard let capture = model.capture, capture.phase == .editing else { return false }
+            let step: Int
+            switch event.keyCode {
+            case 48: step = flags.contains(.shift) ? -1 : 1
+            case 123 where capture.text.isEmpty && flags.isDisjoint(with: [.command, .option, .control]): step = -1
+            case 124 where capture.text.isEmpty && flags.isDisjoint(with: [.command, .option, .control]): step = 1
+            default: return false
+            }
+            capture.step(step)
             return true
         case .inbox:
             guard let inbox = model.inbox else { return false }

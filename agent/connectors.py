@@ -10,6 +10,7 @@ the agent never depends on a connector being there.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 from dataclasses import dataclass
@@ -37,6 +38,16 @@ class Item:
     body: str = ""
     date: str = ""
     url: str = ""
+
+
+def local_stamp(text: str) -> str:
+    """An ISO 8601 time with an offset ("…Z", "…+01:00") in this Mac's time zone, without the offset, so its first ten
+    characters are the user's day (the app counts days locally); anything else as it is."""
+    try:
+        when = dt.datetime.fromisoformat(text.strip())
+    except ValueError:
+        return text
+    return when.astimezone().replace(tzinfo=None).isoformat() if when.tzinfo else text
 
 
 def read(folder: Path | None = FOLDER) -> list[Item]:
@@ -73,7 +84,7 @@ def _walk(value: Any, source: str, group: str, out: list[Item], top: bool = Fals
     if title and not top:
         body = "\n".join(_text(value[k]) for k in BODY_KEYS if k in value and _text(value[k]) != title)
         out.append(Item(id="", source=source, group=group, title=_one_line(title)[:160], body=body.strip()[:MAX_BODY],
-                        date=str(_first(value, DATE_KEYS) or "")[:16], url=_where(value)))
+                        date=local_stamp(str(_first(value, DATE_KEYS) or ""))[:16], url=_where(value)))
     for key, child in value.items():
         if isinstance(child, (dict, list)):
             _walk(child, source, key if top or not group else group, out)

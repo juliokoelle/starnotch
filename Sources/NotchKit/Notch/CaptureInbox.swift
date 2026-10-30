@@ -6,8 +6,8 @@ import NotchCore
 ///
 /// With an `InboxSink` connector, the connector files the capture (and keeps its own copy when
 /// it can't deliver). Without one, every capture is appended to `capture-queue.jsonl` (0600) in
-/// the app's support folder, and, when `[capture] markdown_file` is set in config.toml, to that
-/// file as a Markdown task or note line.
+/// the app's support folder, and to a Markdown file as a task or note line: `[capture]
+/// markdown_file` in config.toml, else the vault's inbox, else `~/Documents/Starnotch/Inbox.md`.
 @MainActor
 final class CaptureInbox {
     typealias Outcome = CaptureOutcome
@@ -35,8 +35,12 @@ final class CaptureInbox {
             return await sink.file(capture)
         }
         var outcome = Outcome.queued(reason: "no inbox connected")
-        if let file = Runtime.captureMarkdownFile, Self.appendMarkdown(capture, to: file) {
-            outcome = .delivered
+        if let file = Runtime.captureMarkdownFile {
+            // The first capture into the Documents folder brings the old inbox's lines along.
+            if file == MarkdownInbox.defaultFile {
+                MarkdownInbox.prepare(file, legacy: Brand.supportFolder.appending(path: "Inbox.md"))
+            }
+            if Self.appendMarkdown(capture, to: file) { outcome = .delivered }
         }
         // Paused, or captures switched off: Tara doesn't keep it. Only when the Markdown inbox
         // didn't take it does the queue keep it anyway, marked as not Tara's, so it isn't lost.
@@ -87,27 +91,7 @@ final class CaptureInbox {
     }
 
     nonisolated static func appendMarkdown(_ capture: Capture, to file: URL) -> Bool {
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: file.path) {
-            try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            guard fm.createFile(atPath: file.path, contents: nil) else { return false }
-        }
-        guard let handle = try? FileHandle(forWritingTo: file) else { return false }
-        defer { try? handle.close() }
-        do {
-            let end = try handle.seekToEnd()
-            var line = markdownLine(capture) + "\n"
-            if end > 0 {
-                // Start on a new line if the file doesn't end with one.
-                try handle.seek(toOffset: end - 1)
-                if try handle.read(upToCount: 1) != Data("\n".utf8) { line = "\n" + line }
-                try handle.seekToEnd()
-            }
-            try handle.write(contentsOf: Data(line.utf8))
-            return true
-        } catch {
-            return false
-        }
+        MarkdownInbox.append(markdownLine(capture), to: file)
     }
 
     nonisolated static func append(_ record: [String: Any]) {

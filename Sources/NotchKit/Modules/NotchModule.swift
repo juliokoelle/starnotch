@@ -47,6 +47,9 @@ protocol NotchModule: AnyObject {
     /// takes the ears at rest and in the peek over the first tab and over the ears setting, and
     /// yields only to something urgent (`NotchModel.urgentPriority`).
     var holdsEars: Bool { get }
+    /// In the quiet look (Settings › Details beside the notch off) the module may take the ears
+    /// and the hover peek from Tara: only while it is actively relevant. Default: `needsAttention`.
+    var quietRelevant: Bool { get }
 }
 
 extension NotchModule {
@@ -60,6 +63,7 @@ extension NotchModule {
     var holdsOpen: Bool { false }
     var needsAttention: Bool { false }
     var holdsEars: Bool { false }
+    var quietRelevant: Bool { needsAttention }
 }
 
 /// Shared between the shell and modules: the namespace for figures that travel between the
@@ -80,6 +84,10 @@ private struct IslandPeekKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct QuietEarsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var notch: NotchEnvironment {
         get { self[NotchEnvironmentKey.self] }
@@ -97,6 +105,13 @@ extension EnvironmentValues {
     var islandPeek: Bool {
         get { self[IslandPeekKey.self] }
         set { self[IslandPeekKey.self] = newValue }
+    }
+
+    /// The quiet look (Settings › Details beside the notch off): Tara alone beside the notch, no
+    /// counts or badges; the peek keeps to her and one line.
+    var quietEars: Bool {
+        get { self[QuietEarsKey.self] }
+        set { self[QuietEarsKey.self] = newValue }
     }
 }
 

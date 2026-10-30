@@ -14,6 +14,18 @@ import TestSupport
         #expect(!Quiet.showsEars(.attention, mode: .always, watching: true))
     }
 
+    @Test func quietLookTakesOneEar() {
+        // Both ears: centred on the notch.
+        let both = Quiet.restIsland(notchWidth: 185, ear: 24, oneSided: false)
+        #expect(both.width == 233 && both.offset == 0)
+        // One ear on the left: one ear wider, shifted left so the right edge stays at the notch's.
+        let one = Quiet.restIsland(notchWidth: 185, ear: 24, oneSided: true)
+        #expect(one.width == 209 && one.offset == -12)
+        #expect(one.offset + one.width / 2 == 185.0 / 2)
+        // No room for an ear: just the notch.
+        #expect(Quiet.restIsland(notchWidth: 185, ear: 0, oneSided: true) == (185, 0))
+    }
+
     @Test func sneaksWhileWatching() {
         #expect(Quiet.letsThrough(urgent: false, watching: false))
         #expect(!Quiet.letsThrough(urgent: false, watching: true))

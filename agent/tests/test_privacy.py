@@ -16,7 +16,8 @@ def write(path, **data):
 
 def test_missing_or_broken_file_means_everything_on(tmp_path):
     p = privacy.load(tmp_path / "nope.json")
-    assert not p.is_paused(NOW) and all(p.records(s, NOW) for s in privacy.SOURCES)
+    assert not p.is_paused(NOW) and all(p.records(s, NOW) for s in privacy.SOURCES if s not in privacy.OPT_IN)
+    assert not p.shares("screen")  # screen context is off until the app says it's on
     (tmp_path / "bad.json").write_text("{", encoding="utf-8")
     assert privacy.load(tmp_path / "bad.json").records("meetings", NOW)
 
@@ -27,10 +28,24 @@ def test_pause_until_a_time_and_until_resumed(tmp_path):
     p = privacy.load(file)
     assert p.is_paused(NOW) and not p.is_paused(NOW + dt.timedelta(hours=2))
     assert not p.records("meetings", NOW) and p.shares("meetings")
-    assert p.off == {"clipboard"}
+    assert p.off == {"clipboard", "screen", "apps"}  # no `on`: the opt-in sources stay off
     assert p.why_not("meetings", NOW) == "Tara's memory is paused"
     write(file, paused=True, paused_until=None)
     assert privacy.load(file).is_paused(NOW + dt.timedelta(days=400))
+
+
+def test_opt_in_sources_are_on_only_when_the_app_lists_them(tmp_path):
+    file = tmp_path / "privacy.json"
+    write(file, paused=False, off=[])  # an older app without `on`: apps and screen stay off
+    p = privacy.load(file)
+    assert not p.shares("apps") and not p.shares("screen") and p.shares("meetings")
+    write(file, paused=False, off=[], on=["apps", "screen"])
+    p = privacy.load(file)
+    assert p.shares("apps") and p.shares("screen")
+    write(file, paused=False, off=["screen"], on=["apps", "screen"])  # off wins
+    assert not privacy.load(file).shares("screen") and privacy.load(file).shares("apps")
+    write(file, paused=False, off=[], on="screen")  # not a list: nothing is on
+    assert not privacy.load(file).shares("screen")
 
 
 def make(memory_dir, tmp_path, out):

@@ -15,14 +15,17 @@ struct SpriteLayerView: NSViewRepresentable {
     /// The pack's finish: a soft outer glow in this colour, and a top highlight (0 to 1).
     var glow: (color: CGColor, amount: Double)? = nil
     var highlight: Double = 0
+    /// Eyes of their own on this picture (Tara's open eyes), which follow the pointer.
+    var eyes: SpriteEyes? = nil
 
     func makeNSView(context: Context) -> SpriteHostView { SpriteHostView() }
 
     func updateNSView(_ view: SpriteHostView, context: Context) {
         let tinted = SpriteTint.image(image, colorway, highlight: highlight)
-        view.update(image: tinted, mood: mood,
-                    alive: alive && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
-                    glow: tinted.map { SpriteTint.isDark($0, colorway) } ?? false, colorGlow: glow)
+        let alive = alive && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        view.update(image: tinted, mood: mood, alive: alive,
+                    glow: tinted.map { SpriteTint.isDark($0, colorway) } ?? false, colorGlow: glow,
+                    eyes: alive ? eyes : nil)
     }
 }
 
@@ -36,6 +39,11 @@ final class SpriteHostView: NSView {
     private var alive = false
     private var aspect: CGFloat = 1
     private let phase = Double.random(in: 0...3)
+    /// Tara's moving eyes, over the picture they belong to (`eyesImage`) while it shows.
+    private let eyesLayer = EyesLayer()
+    private var eyes: SpriteEyes?
+    private var eyesImage: CGImage?
+    private var eyesShown = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -52,6 +60,8 @@ final class SpriteHostView: NSView {
         previousLayer.minificationFilter = .trilinear
         previousLayer.opacity = 0
         imageLayer.addSublayer(previousLayer)
+        eyesLayer.opacity = 0
+        imageLayer.addSublayer(eyesLayer)
         layer?.addSublayer(hopLayer)
         hopLayer.addSublayer(beatLayer)
         beatLayer.addSublayer(squashLayer)
@@ -79,13 +89,85 @@ final class SpriteHostView: NSView {
         imageLayer.contentsScale = window?.backingScaleFactor ?? 2
         previousLayer.frame = imageLayer.bounds
         previousLayer.contentsScale = imageLayer.contentsScale
+        if let eyes { eyesLayer.place(eyes, in: imageLayer.bounds, face: faceColor(eyes), style: GazeCenter.shared.style) }
         CATransaction.commit()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncEyes()
+    }
+
+    // MARK: Eyes
+
+    /// The eyes show while their picture is the one on screen, in a window, alive.
+    private func syncEyes() {
+        let show = eyes != nil && eyesImage != nil && imageLayer.contents as! CGImage? === eyesImage && window != nil && alive
+        guard show != eyesShown else { return }
+        eyesShown = show
+        if show, let eyes {
+            eyesLayer.place(eyes, in: imageLayer.bounds, face: faceColor(eyes), style: GazeCenter.shared.style)
+            GazeCenter.shared.add(self)
+        } else {
+            GazeCenter.shared.remove(self)
+        }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = eyesLayer.presentation()?.opacity ?? eyesLayer.opacity
+        fade.toValue = show ? 1 : 0
+        fade.duration = 0.24
+        eyesLayer.opacity = show ? 1 : 0
+        eyesLayer.add(fade, forKey: "show")
+    }
+
+    /// The face's own colour (each colourway tints it a little), read from the picture.
+    private func faceColor(_ eyes: SpriteEyes) -> CGColor? {
+        guard let image = eyesImage else { return nil }
+        let x = Int(eyes.faceSample.x / eyes.canvas.width * CGFloat(image.width))
+        let y = Int(eyes.faceSample.y / eyes.canvas.height * CGFloat(image.height))
+        guard let pixel = image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) else { return nil }
+        var rgba = [UInt8](repeating: 0, count: 4)
+        guard let context = CGContext(data: &rgba, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        guard rgba[3] > 200 else { return nil }
+        return CGColor(red: CGFloat(rgba[0]) / 255, green: CGFloat(rgba[1]) / 255, blue: CGFloat(rgba[2]) / 255, alpha: 1)
+    }
+
+    /// Looks toward a point on screen (the pointer): how far and which way, from her face.
+    func look(at point: CGPoint, animated: Bool = true) {
+        guard eyesShown, let window else { return }
+        let rect = window.convertToScreen(convert(bounds, to: nil))
+        let face = CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.46)
+        eyesLayer.look(CGPoint(x: (point.x - face.x) / 240, y: (point.y - face.y) / 240), animated: animated)
+    }
+
+    func glance(_ target: CGPoint) {
+        guard eyesShown else { return }
+        eyesLayer.look(target)
+    }
+
+    func restyleEyes() {
+        guard eyesShown, let eyes else { return }
+        eyesLayer.place(eyes, in: imageLayer.bounds, face: faceColor(eyes), style: GazeCenter.shared.style)
+    }
+
+    func laughEyes() {
+        guard eyesShown else { return }
+        eyesLayer.laugh()
+    }
+
     func update(image: CGImage?, mood: AvatarMood, alive: Bool, glow: Bool = false,
-                colorGlow: (color: CGColor, amount: Double)? = nil) {
+                colorGlow: (color: CGColor, amount: Double)? = nil, eyes: SpriteEyes? = nil) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        if let eyes {
+            self.eyes = eyes
+            eyesImage = image
+        } else if image !== eyesImage {
+            // A picture without moving eyes; the eyes go once it is the one showing.
+            if self.eyes != nil, imageLayer.contents as! CGImage? === eyesImage, pending == nil { eyesImage = nil }
+        }
         swap(to: image, moodChanged: mood != self.mood)
         // Dark figures on the black card: a faint cool glow from the sprite's own alpha (the
         // layer shadow follows the contents), so the silhouette reads without an outline.
@@ -103,10 +185,12 @@ final class SpriteHostView: NSView {
         }
         imageLayer.shadowOffset = .zero
         CATransaction.commit()
-        guard mood != self.mood || alive != self.alive else { return }
+        let changed = mood != self.mood || alive != self.alive
         let previous = self.mood
         self.mood = mood
         self.alive = alive
+        syncEyes()
+        guard changed else { return }
         configure(previous: previous)
     }
 
@@ -125,7 +209,7 @@ final class SpriteHostView: NSView {
         let current = imageLayer.contents as! CGImage?
         guard current !== image else { pending = nil; pendingTask?.cancel(); return }
         // First picture: no animation.
-        guard current != nil else { imageLayer.contents = image; return }
+        guard current != nil else { imageLayer.contents = image; syncEyes(); return }
         let wait = Self.settle - Date().timeIntervalSince(lastSwap)
         if wait > 0 {
             pending = (image, (pending?.beat ?? false) || moodChanged)
@@ -153,6 +237,7 @@ final class SpriteHostView: NSView {
         previousLayer.contents = imageLayer.contents
         previousLayer.opacity = 0
         imageLayer.contents = image
+        syncEyes()
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 1
         fade.toValue = 0

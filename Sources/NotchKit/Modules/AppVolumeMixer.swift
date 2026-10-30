@@ -56,11 +56,13 @@ final class AppVolumeMixer {
             }
             if AudioObjectAddPropertyListenerBlock(system, &address, .main, block) == noErr { listeners.append((selector, block)) }
         }
-        // "Is running output" changes per process without a list change: a slow look while on.
+        // "Is running output" changes per process without a list change: a slow look, and only
+        // while an app is turned up or down (nothing to apply otherwise; the list's own changes
+        // still arrive through the listener). It cost ~2 % CPU at rest polling every 2 s.
         refresh = Task { [weak self] in
             while !Task.isCancelled {
-                self?.reload()
-                try? await Task.sleep(for: .seconds(2))
+                if self?.levels.adjusted.isEmpty == false { self?.reload() }
+                try? await Task.sleep(for: .seconds(4))
             }
         }
     }
@@ -132,6 +134,17 @@ final class AppVolumeMixer {
         apply()
     }
 
+    /// Apps by process id, for audio processes without a bundle id of their own.
+    @ObservationIgnored private var appByPID: [pid_t: String] = [:]
+
+    private func appOf(_ pid: pid_t) -> String {
+        if let known = appByPID[pid] { return known }
+        let app = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+        if appByPID.count > 500 { appByPID.removeAll() }
+        appByPID[pid] = app
+        return app
+    }
+
     private func processes() -> [AppVolume.Process] {
         var address = Self.address(kAudioHardwarePropertyProcessObjectList)
         var size: UInt32 = 0
@@ -148,8 +161,9 @@ final class AppVolumeMixer {
             var runningSize = UInt32(MemoryLayout<UInt32>.size)
             var runningAddress = Self.address(kAudioProcessPropertyIsRunningOutput)
             AudioObjectGetPropertyData(id, &runningAddress, 0, nil, &runningSize, &running)
-            // Without a bundle id the process still has a pid: name it after its app.
-            let id2 = bundle.isEmpty ? (NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? "") : bundle
+            // Without a bundle id the process still has a pid: name it after its app (remembered;
+            // asking NSRunningApplication each look was the expensive part).
+            let id2 = bundle.isEmpty ? appOf(pid) : bundle
             return AppVolume.Process(objectID: id, pid: pid, bundleID: id2, isPlaying: running != 0)
         }
     }

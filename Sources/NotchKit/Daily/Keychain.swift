@@ -2,8 +2,9 @@ import Foundation
 import NotchCore
 import Security
 
-/// Secrets of the daily tools (Oura's and WHOOP's client secrets and tokens) as generic
-/// passwords in the login Keychain, under the app's identifier. Nothing else reads them.
+/// Secrets of the daily tools (Oura's and WHOOP's client secrets and tokens) and the meeting
+/// tools' API keys (Fireflies, Fathom) as generic passwords in the login Keychain, under the
+/// app's identifier. Nothing else reads them.
 enum Keychain {
     enum Item: String {
         case ouraToken = "oura.token"
@@ -11,6 +12,9 @@ enum Keychain {
         case whoopToken = "whoop.token"
         case ouraSecret = "oura.client-secret"
         case ouraOAuth = "oura.oauth-token"
+        case firefliesKey = "meetings.fireflies.api-key"
+        case fathomKey = "meetings.fathom.api-key"
+
     }
 
     private static var service: String { "\(Brand.identifier).daily" }

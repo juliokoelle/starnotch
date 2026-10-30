@@ -16,6 +16,26 @@ public enum MemorySource: String, Codable, CaseIterable, Sendable {
     case clipboard
     /// Your agent sessions (Claude Code's recent sessions); Starnotch keeps no copy of them.
     case sessions
+    /// How long each app is in front, per day (`app-time.json`). Off until the user turns it on.
+    case apps
+    /// Screen context: the text of the app in front, read through Accessibility. Off until the
+    /// user switches it on and agrees to what it reads (`MemoryPrivacy.screenConsent`).
+    case screen
+
+    /// Off until the user turns it on (the others are on until switched off).
+    public var isOptIn: Bool { self == .apps || self == .screen }
+
+    /// Whether this build has the source at all: screen context is left out of public builds
+    /// (compiled without `SCREEN_CONTEXT` and `NotchScreenContext` false in the Info.plist, see
+    /// scripts/build-app.sh). Without an Info.plist (tests, `swift run`) it is in.
+    public static var screenBuiltIn: Bool {
+        false
+    }
+
+    /// The sources this build offers, in order.
+    public static var offered: [MemorySource] {
+        allCases.filter { $0 != .screen && $0 != .apps }
+    }
 
     public var title: String {
         switch self {
@@ -24,16 +44,20 @@ public enum MemorySource: String, Codable, CaseIterable, Sendable {
         case .notes: "Notes vault"
         case .clipboard: "Clipboard history"
         case .sessions: "Agent sessions"
+        case .apps: "Apps you use"
+        case .screen: "Screen context"
         }
     }
 
     public var detail: String {
         switch self {
-        case .meetings: "Transcripts, meetings synced from Jamie, today's calendar"
+        case .meetings: "Transcripts, meetings synced from your meeting tools, today's calendar"
         case .captures: "Tasks, questions and notes you jot down with ⌃⌥N"
         case .notes: "Tasks and today's note from your vault, snapshots from other tools"
         case .clipboard: "What you copy, kept in memory until Starnotch quits"
         case .sessions: "Titles and folders of your recent agent sessions"
+        case .apps: "Which app is in front and for how long, only while you use the Mac. Never window titles or what's on screen."
+        case .screen: "The text of the app in front, read on this Mac, masked and encrypted"
         }
     }
 
@@ -44,6 +68,8 @@ public enum MemorySource: String, Codable, CaseIterable, Sendable {
         case .notes: "book.closed"
         case .clipboard: "doc.on.clipboard"
         case .sessions: "terminal"
+        case .apps: "macwindow"
+        case .screen: "text.viewfinder"
         }
     }
 }
@@ -85,15 +111,29 @@ public struct IgnoredApp: Codable, Equatable, Hashable, Sendable {
 public struct MemoryPrivacy: Codable, Equatable, Sendable {
     /// Paused until then (`.distantFuture`: until resumed); nil while not paused.
     public var pausedUntil: Date?
-    /// Sources switched off; all are on by default.
+    /// Sources switched off; all are on by default, except the opt-in ones.
     public var off: [MemorySource]
+    /// Opt-in sources the user turned on (`MemorySource.isOptIn`).
+    public var on: [MemorySource]
     /// Apps the user added to the ignore list (the password apps are always on it).
     public var ignoredApps: [IgnoredApp]
+    /// When the user agreed to screen context's consent sheet; nil until then. Without it the
+    /// source stays off, whatever `on` says.
+    public var screenConsent: Date?
+    /// Days screen context is kept (whole days, today included).
+    public var screenRetentionDays: Int
 
-    public init(pausedUntil: Date? = nil, off: [MemorySource] = [], ignoredApps: [IgnoredApp] = []) {
+    public static let defaultScreenRetention = 30
+    public static let screenRetentionChoices = [7, 14, 30, 90]
+
+    public init(pausedUntil: Date? = nil, off: [MemorySource] = [], on: [MemorySource] = [], ignoredApps: [IgnoredApp] = [],
+                screenConsent: Date? = nil, screenRetentionDays: Int = defaultScreenRetention) {
         self.pausedUntil = pausedUntil
-        self.off = off
+        self.off = off.filter { !$0.isOptIn }
+        self.on = on.filter(\.isOptIn)
         self.ignoredApps = ignoredApps
+        self.screenConsent = screenConsent
+        self.screenRetentionDays = max(1, screenRetentionDays)
     }
 
     public init(from decoder: Decoder) throws {
@@ -101,7 +141,11 @@ public struct MemoryPrivacy: Codable, Equatable, Sendable {
         pausedUntil = try? c.decodeIfPresent(Date.self, forKey: .pausedUntil)
         // A source this version doesn't know is dropped, the rest kept.
         off = ((try? c.decodeIfPresent([String].self, forKey: .off)) ?? []).compactMap(MemorySource.init(rawValue:))
+            .filter { !$0.isOptIn }
+        on = ((try? c.decodeIfPresent([String].self, forKey: .on)) ?? []).compactMap(MemorySource.init(rawValue:)).filter(\.isOptIn)
         ignoredApps = (try? c.decodeIfPresent([IgnoredApp].self, forKey: .ignoredApps)) ?? []
+        screenConsent = try? c.decodeIfPresent(Date.self, forKey: .screenConsent)
+        screenRetentionDays = max(1, (try? c.decodeIfPresent(Int.self, forKey: .screenRetentionDays)) ?? Self.defaultScreenRetention)
     }
 
     /// Password apps: never recorded, whatever the list says.
@@ -122,7 +166,17 @@ public struct MemoryPrivacy: Codable, Equatable, Sendable {
     /// A pause that lasts until the user resumes it.
     public var isPausedUntilResumed: Bool { pausedUntil.map { $0 >= .distantFuture } ?? false }
 
-    public func isOn(_ source: MemorySource) -> Bool { !off.contains(source) }
+    /// An opt-in source is on once switched on, and screen context only after its consent.
+    public func isOn(_ source: MemorySource) -> Bool {
+        guard source.isOptIn else { return !off.contains(source) }
+        return on.contains(source) && (source != .screen || (screenConsent != nil && MemorySource.screenBuiltIn))
+    }
+
+    /// Every source that is off now, opt-in ones not switched on included.
+    public var switchedOff: [MemorySource] { MemorySource.allCases.filter { !isOn($0) } }
+
+    /// Screen context was switched on but its consent sheet hasn't been agreed to yet.
+    public var screenAwaitsConsent: Bool { on.contains(.screen) && screenConsent == nil }
 
     /// Every app Tara keeps out: the password apps and the user's list.
     public var ignoredBundleIDs: Set<String> { Set((Self.passwordApps + ignoredApps).map(\.bundleID)) }
@@ -156,6 +210,11 @@ public struct MemoryPrivacy: Codable, Equatable, Sendable {
     }
 
     public mutating func set(_ source: MemorySource, on: Bool) {
+        if source.isOptIn {
+            self.on.removeAll { $0 == source }
+            if on { self.on.append(source) }
+            return
+        }
         off.removeAll { $0 == source }
         if !on { off.append(source) }
         off.sort { a, b in MemorySource.allCases.firstIndex(of: a)! < MemorySource.allCases.firstIndex(of: b)! }
@@ -172,13 +231,16 @@ public struct MemoryPrivacy: Codable, Equatable, Sendable {
 
     // MARK: For the sidecar
 
-    /// `privacy.json`: `{"paused": true, "paused_until": "…Z" or null, "off": [...], "ignored_apps": [...]}`.
+    /// `privacy.json`: `{"paused": true, "paused_until": "…Z" or null, "off": [...], "on": [...], "ignored_apps": [...]}`.
+    /// `off` lists every source that is off, screen context too while it isn't switched on; `on` lists the opt-in
+    /// sources that are on, so the sidecar never takes one for on when it isn't listed.
     /// `paused_until` is null for a pause that lasts until resumed; a pause that ran out isn't written.
     public func sidecarJSON(now: Date) -> Data {
         let paused = isPaused(at: now)
         var object: [String: Any] = [
             "paused": paused,
-            "off": off.map(\.rawValue),
+            "off": switchedOff.map(\.rawValue),
+            "on": MemorySource.allCases.filter { $0.isOptIn && isOn($0) }.map(\.rawValue),
             "ignored_apps": ignoredBundleIDs.sorted(),
         ]
         if paused, let until = pausedUntil, !isPausedUntilResumed {
@@ -217,6 +279,10 @@ public struct MemoryFiles: Sendable {
 
     public var privacyFile: URL { support.appending(path: "privacy.json") }
     public var meetingsFolder: URL { support.appending(path: "memory") }
+    /// Tara's wiki of people and projects (`agent.py --wiki` writes it).
+    public var wikiIndex: URL { meetingsFolder.appending(path: "wiki/index.json") }
+    /// The notes vault's full-text index (agent/vault_index.py).
+    public var vaultIndex: URL { meetingsFolder.appending(path: "vault-index.sqlite") }
     public var meetingFeed: URL { support.appending(path: "Meeting-Agent.md") }
     public var captureQueue: URL { support.appending(path: "capture-queue.jsonl") }
     public var connectorsFolder: URL { support.appending(path: "connectors") }
@@ -225,6 +291,10 @@ public struct MemoryFiles: Sendable {
     public var calendarSnapshot: URL { support.appending(path: "calendar-today.json") }
     /// Scripts that reopen a past agent session.
     public var resumeFolder: URL { support.appending(path: "resume") }
+    /// Time per app and day (`AppTimeLog`).
+    public var appTime: URL { support.appending(path: "app-time.json") }
+    /// Screen context, one encrypted file per day (`ScreenStore`).
+    public var screenFolder: URL { support.appending(path: "screen") }
 
     /// The files of a source as they are now.
     public func files(for source: MemorySource) -> [URL] {
@@ -236,20 +306,29 @@ public struct MemoryFiles: Sendable {
         switch source {
         case .meetings:
             // The Jamie sync state stays: a deleted meeting doesn't come back with the next sync.
+            // The wiki goes too: its pages list the meetings and their promises (built again from the vault).
             return listing(meetingsFolder) { $0.pathExtension == "json" }
-                + [meetingFeed, calendarSnapshot].filter { fm.fileExists(atPath: $0.path) }
+                + [meetingFeed, calendarSnapshot, wikiIndex].filter { fm.fileExists(atPath: $0.path) }
         case .captures:
             return fm.fileExists(atPath: captureQueue.path) ? [captureQueue] : []
         case .notes:
+            // With the snapshots, the vault's search index and the wiki built from it; the notes themselves stay.
             return listing(connectorsFolder) { $0.pathExtension == "json" }
+                + [vaultIndex, wikiIndex].filter { fm.fileExists(atPath: $0.path) }
         case .clipboard:
             return []
         case .sessions:
             return listing(resumeFolder) { $0.pathExtension == "command" }
+        case .apps:
+            return fm.fileExists(atPath: appTime.path) ? [appTime] : []
+        case .screen:
+            // The wiki goes too: its pages carry the work blocks (built again without them).
+            return listing(screenFolder) { $0.pathExtension == "screen" }
+                + [wikiIndex].filter { fm.fileExists(atPath: $0.path) }
         }
     }
 
-    /// How many things a source holds: meetings, captures, snapshots, scripts.
+    /// How many things a source holds: meetings, captures, snapshots, scripts, days with app time.
     public func count(_ source: MemorySource) -> Int {
         switch source {
         case .meetings:
@@ -257,6 +336,12 @@ public struct MemoryFiles: Sendable {
         case .captures:
             ((try? String(contentsOf: captureQueue, encoding: .utf8)) ?? "")
                 .split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        case .notes:
+            // The snapshots; the index and the wiki built from the vault aren't more snapshots.
+            ((try? FileManager.default.contentsOfDirectory(atPath: connectorsFolder.path)) ?? []).filter { $0.hasSuffix(".json") }.count
+        case .screen:
+            // The days; the wiki isn't one.
+            ((try? FileManager.default.contentsOfDirectory(atPath: screenFolder.path)) ?? []).filter { $0.hasSuffix(".screen") }.count
         default: files(for: source).count
         }
     }

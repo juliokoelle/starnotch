@@ -91,6 +91,10 @@ final class JamieConnect {
 
     /// Tara's privacy switches: no sync while her memory is paused or meetings are off.
     @ObservationIgnored var privacy: () -> MemoryPrivacy = { MemoryPrivacy() }
+    /// Jamie is one of the picked meeting sources (`MeetingSources`): only then does it sync on its own.
+    @ObservationIgnored var isEnabled: () -> Bool = { true }
+    /// Connecting picks Jamie as a meeting source.
+    @ObservationIgnored var enable: () -> Void = {}
 
     static let pausedLine = "Tara's memory is paused or meetings are off, so nothing comes in from Jamie"
 
@@ -100,6 +104,7 @@ final class JamieConnect {
             set(.failed(Localization.string(Self.pausedLine)))
             return
         }
+        enable()
         run("exec uv run python jamie_sync.py")
     }
 
@@ -107,6 +112,7 @@ final class JamieConnect {
     /// own Jamie session, so the user signs out there first).
     func useAnotherAccount() {
         loginLost = false
+        enable()
         run("uv run python jamie_sync.py --logout && exec uv run python jamie_sync.py")
     }
 
@@ -134,10 +140,18 @@ final class JamieConnect {
     /// newest ten meetings: an unchanged one still costs a request, and the buttons sync the full 50.
     func syncIfDue(_ trigger: JamieSyncSchedule.Trigger) {
         guard ticker != nil else { return }
-        schedule.connected = !loginLost && hasLogin
+        schedule.connected = !loginLost && hasLogin && isEnabled()
         schedule.meetingEnds = meetingEnds()
         guard schedule.shouldSync(trigger, now: Date()), privacy().records(.meetings, at: Date()) else { return }
         run("exec uv run python jamie_sync.py --no-login --limit 10", automatic: true)
+    }
+
+    /// Forgets the Jamie login on this Mac (as `jamie_sync.py --logout`); the meetings stay in the memory.
+    func disconnect() {
+        cancel()
+        if !simulated { try? FileManager.default.removeItem(at: tokenFile) }
+        loginLost = false
+        set(.idle)
     }
 
     func openLogin() {
@@ -198,6 +212,8 @@ final class JamieConnect {
             set(.login(url.flatMap(URL.init(string:))))
         case .status("paused", _):
             set(.failed(Localization.string(Self.pausedLine)))
+        case .status("off", _):
+            set(.failed("Not picked as a meeting source"))
         case .status("login_required", _):
             loginLost = true
             set(.failed("Jamie signed you out; connect again to keep your meetings in sync"))

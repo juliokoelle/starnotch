@@ -386,6 +386,7 @@ final class MeetingModule: NotchModule {
     func primaryAction() {}
 }
 
+@MainActor
 enum MeetingStyle {
     static func tint(_ kind: MeetingCard.Kind) -> Color {
         switch kind {

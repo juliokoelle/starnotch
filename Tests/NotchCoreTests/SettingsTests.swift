@@ -71,6 +71,22 @@ import TestSupport
         #expect(loaded.brain == .auto)
     }
 
+    @Test func quietEarsForNewAndExistingUsers() {
+        // A fresh install: just Tara beside the notch.
+        #expect(!SwitcherSettings().detailedEars)
+        // Saved before the switch, with the ears set to always: still the quiet look.
+        let isolated = IsolatedSettings()
+        isolated.writeRaw(#"{"earsMode":"always","didOnboard":true}"#)
+        let loaded = isolated.store.load()
+        #expect(loaded.earsMode == .always)
+        #expect(!loaded.detailedEars)
+        // The richer ears stay an opt-in that is kept.
+        var settings = loaded
+        settings.detailedEars = true
+        isolated.store.save(settings)
+        #expect(isolated.store.load().detailedEars)
+    }
+
     @Test func toolsGalleryAndBrainRoundTrip() {
         let isolated = IsolatedSettings()
         var settings = SwitcherSettings()
@@ -81,6 +97,29 @@ import TestSupport
         #expect(loaded.disabledFeatures == [.keepAwake])
         #expect(loaded.brain == .claudeCode)
         #expect(TaraBrain.claudeCode.rawValue == "claude-code")
+    }
+
+    @Test func notchOpeningAndTaraBesideRoundTrip() {
+        let isolated = IsolatedSettings()
+        var settings = SwitcherSettings()
+        // Defaults: a click opens, the last tab comes back, Tara shows when something is up.
+        #expect(settings.hoverOpen == .click && settings.hoverOpen.seconds == nil)
+        #expect(settings.reopenLastTab)
+        #expect(settings.taraBeside == .activity)
+        settings.hoverOpen = .half
+        settings.reopenLastTab = false
+        settings.taraBeside = .always
+        #expect(settings.eyeStyle == .lines)
+        settings.eyeStyle = .round
+        isolated.store.save(settings)
+        let loaded = isolated.store.load()
+        #expect(loaded.hoverOpen.seconds == 0.5)
+        #expect(!loaded.reopenLastTab)
+        #expect(loaded.eyeStyle == .round)
+        #expect(loaded.taraBeside == .always && loaded.taraAlways && loaded.earsMode == .always)
+        var never = loaded
+        never.taraBeside = .never
+        #expect(never.earsMode == .never && !never.taraAlways)
     }
 
     @Test func corruptDataFallsBackToDefaults() {

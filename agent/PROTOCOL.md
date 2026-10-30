@@ -7,6 +7,7 @@ How the Swift app talks to the Python sidecar in `agent/`. Three programs, all J
 | `agent.py` | runs for the whole session | utterances and commands | events and replies |
 | `transcribe.py` | runs while a meeting is transcribed | nothing | utterances and status |
 | `jamie_sync.py` | one run, then exits | nothing | progress and a summary |
+| `meeting_sources.py` | one run, then exits | the API key, one line (`--key-stdin`) | progress and a summary |
 | `notch_bridge.py` | as long as its input | any of the above | its input, unchanged; posts events to the notch |
 
 Shared rules:
@@ -39,6 +40,8 @@ uv run python agent.py [--memory DIR] [--today YYYY-MM-DD] [--offline] [--captur
 uv run python transcribe.py (--file AUDIO [--speed N] | --mic) [--names Max,Lisa]
 uv run python jamie_sync.py [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--query TEXT] [--force] [--no-login]
 uv run python jamie_sync.py --logout
+uv run python meeting_sources.py --source granola|wispr|fireflies|fathom [--memory DIR] [--limit N] [--since YYYY-MM-DD] [--force] [--no-login] [--key-stdin]
+uv run python meeting_sources.py --source granola|wispr --logout | --list-tools
 ```
 
 `DIR` defaults to `~/Library/Application Support/Starnotch/memory/`, one JSON file per meeting
@@ -124,10 +127,15 @@ Commands. `id` is optional (string or number); the reply carries it back as `rep
 `ask` answers from the meetings, the quick captures and the connector snapshots, through the brain (rules without
 one). Optional fields: `history`, the conversation so far for a follow-up, oldest first
 (`[{"question": "…", "answer": "…"}]`, the last 6 count); `image`, the path of a screenshot (PNG or JPEG) of the window
-the question is about. Claude Code gets the screenshot as a copy in its brain folder, readable with `Read` for that
+the question is about. `screen`, recent screen context the app picked for the question while that source is on
+(`[{"id", "app", "time", "title", "text", "label"}]`, text already masked); it goes into the question, not the cached
+system prompt, is dropped when `privacy.json` lists `screen` as off, and comes back as sources of kind `screen` titled
+like `Screen · Mail · 14:05`. Claude Code gets the screenshot as a copy in its brain folder, readable with `Read` for that
 file only, and deleted after the call; the API gets it as an image block. Apple's on-device model gets no picture:
 it is told it can't see one, and the answer's `text` opens with a sentence saying so ("I can't see pictures with
-Apple Intelligence." or the German one).
+Apple Intelligence." or the German one). `day` (`"2026-10-24"`) limits the material to that day: its meetings,
+captures and connector items with that date (the Timeline's day page); `context` is plain text the app counted that
+day besides (agent sessions, time per app), sent along with the question.
 
 With `apple`, the window holds 4,096 tokens for instructions, prompt, schema and answer: the prompt carries the
 whole memory when it fits and something in it shares a word with the question, else the facts, transcript lines
@@ -401,3 +409,41 @@ Without Jamie reachable at all, the error reads `jamie sync: Jamie isn't reachab
 there was none); it doesn't connect. The next sync opens the login again. Which account it signs in to is decided
 by the Jamie session in the browser: to switch accounts, sign out at app.meetjamie.ai first. Meetings already
 synced stay in the memory.
+
+## meeting_sources.py
+
+The meeting tools besides Jamie, one `--source` per run, with jamie_sync.py's output: one `synced` line per meeting,
+`warning`, `login`, `login_required` and `error` lines, then the summary line. A meeting that another source already
+holds is not written: its line has `duplicate_of` (the id that stays) instead of `path`, and the summary counts these
+as `duplicates` (only when there are some).
+
+| Source | Reached through | Login | What's read |
+|---|---|---|---|
+| `granola` | MCP, `https://mcp.granola.ai/mcp` | browser (OAuth, client registered on the fly, PKCE) | `list_meetings`, `get_meetings`, `get_meeting_transcript` (paid plans; the Free plan reaches the last 30 days, without transcripts) |
+| `wispr` | MCP, `https://api.wisprflow.ai/connect/mcp` | browser (as Granola) | `search_meetings` paged by `next_cursor`, `get_meeting` with the transcript in ranges of 40,000 characters |
+| `fireflies` | GraphQL, `https://api.fireflies.ai/graphql` | personal API key (`Authorization: Bearer`) | `transcripts` with summary, action items and sentences, 50 per request |
+| `fathom` | REST, `https://api.fathom.ai/external/v1/meetings` | personal API key (`X-Api-Key`) | the meetings list with transcript, summary and action items, paged by `next_cursor` |
+
+Browser logins are kept as Jamie's, in `<source>-oauth.json` next to the memory (0600), on the same callback port;
+`--logout` deletes the file. An API key comes on the first line of stdin with `--key-stdin` (the app reads it from the
+Keychain and never writes it to a file, the command line or the environment), else from `FIREFLIES_API_KEY` /
+`FATHOM_API_KEY`; without one, or when the provider refuses it, the run prints `login_required` and exits with 2.
+Fingerprints of what was written are kept in `<memory>/<source>-sync.state`.
+
+Ids are `<source>-<the provider's id>`. Every source hands one dict in common keys (`id`, `title`, `start`,
+`participants`, `summary`, `notes`, `action_items`, `transcript`) to `normalize`, which reads it as jamie_sync.py reads
+Jamie's meetings (summary sections, action items, `Name: text` lines) and adds `start`, the meeting's start as ISO
+8601 with its offset, and `date`, the user's local day of it.
+
+**Which sources feed the memory.** The app writes `meeting-sources.json` next to the memory
+(`STARNOTCH_MEETING_SOURCES` names another file): `{"enabled": ["starnotch", "jamie", "granola"]}`. Without the file,
+`starnotch` (the recordings) and `jamie` are on. A source not listed prints
+`{"type": "status", "state": "off", "message": …}` and syncs nothing (jamie_sync.py too); `agent.py` answers a `save`
+with `not_saved` while `starnotch` isn't listed. A pause or meetings switched off come first (`paused`).
+
+**One copy per meeting.** Before a meeting is written (by any source, the recordings' `save` too), the memory is
+searched for the same meeting from another source: both started within 20 minutes and share title words or a
+person; without start times, the same day and a similar title, and no people that tell them apart. A recording on
+this Mac always stays and replaces another source's copy; between two tools the copy with a transcript (then the
+longer one, then more notes and facts) stays, the one already there on a tie. A copy that is replaced is deleted.
+

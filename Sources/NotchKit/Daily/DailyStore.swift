@@ -47,9 +47,21 @@ final class DailyStore {
     private(set) var weather: WeatherReport?
     private(set) var weatherStatus = WeatherStatus.idle
     private(set) var health: HealthDay?
+    /// Location for the app, kept current: CoreLocation says when it changes in System Settings.
+    private(set) var locationStatus = CLAuthorizationStatus.notDetermined
     private(set) var healthStatus = HealthStatus.idle
-    /// The calendar shows the day card instead of the agenda.
-    var cardShown = false
+    /// The calendar shows Today (the day card) instead of the agenda.
+    var cardShown = true
+    /// The calendar tab opens on Today, unless a meeting is close (off for the calendar's previews).
+    @ObservationIgnored var opensOnToday = true
+    /// Today's to-dos (set by the app): the Today module's tasks and reminders.
+    @ObservationIgnored weak var today: TodayModule?
+    /// Apple Reminders are switched on and allowed (kept current by the app).
+    var remindersShown = false
+    /// Switches Apple Reminders on: macOS asks for access on this click, never before.
+    @ObservationIgnored var turnOnReminders: (() -> Void)?
+    /// Opens the settings for a place or a wearable.
+    @ObservationIgnored var openSettings: (() -> Void)?
     /// The minute on the clock, while a tool needs it (day progress follows it).
     private(set) var now = Date()
     let notes = NotesStore()
@@ -87,6 +99,12 @@ final class DailyStore {
         weather = Self.readCache(WeatherReport.self, "weather.json")
         health = Self.readCache(HealthDay.self, "health.json")
         notes.folder = notesFolder
+        locationStatus = locator.status
+        locator.onStatusChange = { [weak self] status in self?.locationChanged(status) }
+        // Back from System Settings: read again, CoreLocation may not have said yet.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self.map { $0.locationChanged($0.locator.status) } }
+        }
     }
 
     func isOn(_ feature: ToolFeature) -> Bool { on.contains(feature) }
@@ -165,19 +183,19 @@ final class DailyStore {
     }
 
     /// `force` (a new city or unit) starts over even while a request runs; its answer is dropped.
-    func refreshWeather(force: Bool = false) {
+    func refreshWeather(force: Bool = false, askLocation: Bool = false) {
         guard isOn(.weather), !preview, force || weatherTask == nil else { return }
         if !force, let weather = shownWeather, weather.isFresh(at: Date()) { return }
         weatherTask?.cancel()
         weatherGeneration += 1
         let generation = weatherGeneration
         weatherTask = Task { [weak self] in
-            await self?.loadWeather(generation)
+            await self?.loadWeather(generation, askLocation: askLocation)
             if self?.weatherGeneration == generation { self?.weatherTask = nil }
         }
     }
 
-    private func loadWeather(_ generation: Int) async {
+    private func loadWeather(_ generation: Int, askLocation: Bool) async {
         // What this request is for, read once: the settings may change while it waits.
         let unit = settings.unit, chosen = settings.place
         weatherStatus = shownWeather == nil ? .loading : weatherStatus
@@ -186,7 +204,7 @@ final class DailyStore {
             place = chosen
         } else {
             weatherStatus = shownWeather == nil ? .locating : weatherStatus
-            let found = await locate()
+            let found = await locate(ask: askLocation)
             guard generation == weatherGeneration else { return }
             guard let found else {
                 weatherStatus = .needsPlace
@@ -216,9 +234,9 @@ final class DailyStore {
 
     /// Where the Mac is, about a kilometre either way (rounded before it leaves the Mac). The last
     /// fix stands in when macOS has none right now.
-    private func locate() async -> GeoPlace? {
+    private func locate(ask: Bool) async -> GeoPlace? {
         let last = UserDefaults.standard.data(forKey: Self.locationKey).flatMap { try? JSONDecoder().decode(GeoPlace.self, from: $0) }
-        guard let location = await locator.locate() else { return last }
+        guard let location = await locator.locate(ask: ask) else { return last }
         let lat = (location.coordinate.latitude * 100).rounded() / 100
         let lon = (location.coordinate.longitude * 100).rounded() / 100
         var name = last.flatMap { abs($0.latitude - lat) < 0.05 && abs($0.longitude - lon) < 0.05 ? $0.name : nil }
@@ -230,7 +248,29 @@ final class DailyStore {
         return place
     }
 
-    var locationDenied: Bool { [.denied, .restricted].contains(locator.status) }
+    /// Off for the app, or Location Services off for the whole Mac (CoreLocation says denied then too).
+    var locationDenied: Bool { [.denied, .restricted].contains(locationStatus) }
+    var locationAllowed: Bool { ![.notDetermined, .denied, .restricted].contains(locationStatus) }
+
+    /// "Use my location" in the Today card and Settings › Daily. macOS asks on this click only, with
+    /// the app in front: it lives in the menu bar, and an app in the background may get no prompt.
+    /// After a no only System Settings can change it, so that opens at Location Services.
+    func useMyLocation() {
+        if locationDenied {
+            PrivacyPane.open("Privacy_LocationServices")
+            return
+        }
+        if locationStatus == .notDetermined { NSApp.activate() }
+        refreshWeather(force: true, askLocation: true)
+    }
+
+    /// Allowed in System Settings (or in the prompt) while the card waits for a place: the weather
+    /// comes without another click.
+    private func locationChanged(_ status: CLAuthorizationStatus) {
+        if status != locationStatus { locationStatus = status }
+        guard locationAllowed, settings.place == nil, weatherStatus == .needsPlace else { return }
+        refreshWeather(force: true)
+    }
 
     /// Cities matching a typed name (Settings).
     func searchPlaces(_ name: String) async -> [GeoPlace] {
@@ -541,11 +581,14 @@ final class DailyStore {
     }
 }
 
-/// One location fix from CoreLocation, approximate. macOS asks once; after a no, it stays no.
+/// One location fix from CoreLocation, approximate. macOS asks once, on the user's click; after a
+/// no, it stays no.
 @MainActor
 private final class Locator: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var waiting: [CheckedContinuation<CLLocation?, Never>] = []
+    /// Every change of the app's authorization, also the ones made in System Settings.
+    var onStatusChange: ((CLAuthorizationStatus) -> Void)?
 
     override init() {
         super.init()
@@ -555,9 +598,11 @@ private final class Locator: NSObject, CLLocationManagerDelegate {
 
     var status: CLAuthorizationStatus { manager.authorizationStatus }
 
-    func locate() async -> CLLocation? {
+    /// Not asked yet: only with `ask` (a click) does macOS put up its prompt; otherwise nil.
+    func locate(ask: Bool) async -> CLLocation? {
         switch manager.authorizationStatus {
         case .denied, .restricted: return nil
+        case .notDetermined where !ask: return nil
         default: break
         }
         return await withCheckedContinuation { continuation in
@@ -585,6 +630,7 @@ private final class Locator: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
         MainActor.assumeIsolated {
+            onStatusChange?(status)
             guard !waiting.isEmpty else { return }
             switch status {
             case .notDetermined: break

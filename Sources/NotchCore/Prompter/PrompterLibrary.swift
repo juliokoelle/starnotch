@@ -120,11 +120,12 @@ public struct PrompterSettings: Codable, Equatable, Sendable {
     public var lines: Int
     public var wordsPerMinute: Int
 
-    public static let textSizes: ClosedRange<Double> = 18...36
+    /// Small enough that a line stays a short eye movement under the camera.
+    public static let textSizes: ClosedRange<Double> = 12...30
     public static let lineCounts: ClosedRange<Int> = 3...5
     public static let speeds: ClosedRange<Int> = 60...220
 
-    public init(mode: Mode = .voice, textSize: Double = 26, lines: Int = 4, wordsPerMinute: Int = 130) {
+    public init(mode: Mode = .voice, textSize: Double = 16, lines: Int = 4, wordsPerMinute: Int = 130) {
         self.mode = mode
         self.textSize = min(max(textSize, Self.textSizes.lowerBound), Self.textSizes.upperBound)
         self.lines = min(max(lines, Self.lineCounts.lowerBound), Self.lineCounts.upperBound)
@@ -144,6 +145,11 @@ public struct PrompterSettings: Codable, Equatable, Sendable {
     /// Ten words a minute faster or slower, within `speeds`.
     public mutating func stepSpeed(_ direction: Int) {
         self = PrompterSettings(mode: mode, textSize: textSize, lines: lines, wordsPerMinute: wordsPerMinute + 10 * direction)
+    }
+
+    // The size is saved under a new name: sizes saved before the smaller default start over at it.
+    private enum CodingKeys: String, CodingKey {
+        case mode, textSize = "readingSize", lines, wordsPerMinute
     }
 
     // Tolerant decoding: a missing or odd value falls back to its default.

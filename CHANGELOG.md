@@ -19,6 +19,7 @@ What changed in Starnotch, newest first: one section per day an update landed, g
 - **New:** Tools that are off show dimmed with Turn on, which switches them on like Settings › Tools (macOS asks only then, where the tool asks). Settings › Tools › Switched-off tools in All tools hides them. On for everyone, and always the last tab.
 
 ### Teleprompter
+- **Improved:** Smaller text by default (16 pt, 12 to 30 with ⌘±) in a narrow column centred under the camera, so your eyes move less and it looks less like reading.
 - **New:** Teleprompter: your script in a band under the notch, close to the camera, so your eyes stay near the lens. It follows your voice as you read, with Apple's recognition on this Mac (nothing is recorded, no audio leaves the Mac), in German or English after the script. Paste a script, drop a .txt or .md file on it, or pick a recent one; it goes on where you stopped. Space pauses, ↑↓ or scrolling move a line, esc closes. Start it from ⌃⌥K or the menu bar.
 - **New:** Constant speed instead of following, in words a minute, for when listening isn't possible; the band switches to it by itself and says why. Text size and 3 to 5 lines in the band; [square brackets] in a script are stage directions you don't have to say. Like the rest of the island, the band stays out of screen sharing: your audience never sees the script.
 

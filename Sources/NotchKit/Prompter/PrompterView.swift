@@ -258,7 +258,7 @@ private struct PrompterReading: View {
             Capsule()
                 .fill(prompter.paused ? Theme.textTertiary : Theme.accent)
                 .frame(width: 3, height: (lineHeight * 0.56).rounded())
-                .padding(.leading, Prompter.sideInset - 13)
+                .padding(.leading, prompter.columnInset - 13)
                 .padding(.top, CGFloat(prompter.anchorLine) * lineHeight + (lineHeight * 0.22).rounded())
         }
         .padding(.top, Prompter.readingTop)
@@ -304,7 +304,7 @@ private struct PrompterReading: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .offset(y: CGFloat(prompter.anchorLine) * layout.lineHeight - y)
-        .padding(.horizontal, Prompter.sideInset)
+        .padding(.horizontal, prompter.columnInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 

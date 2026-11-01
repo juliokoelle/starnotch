@@ -53,6 +53,8 @@ final class Prompter {
     private(set) var rollingSince: Date?
 
     @ObservationIgnored private var textWidth: CGFloat = 0
+    /// The space left and right of the reading column, which sits centred under the camera.
+    private(set) var columnInset: CGFloat = Prompter.sideInset
     @ObservationIgnored private var follower: PrompterFollower?
     @ObservationIgnored private let listener = PrompterListener()
     @ObservationIgnored private let library: PrompterLibrary?
@@ -426,10 +428,15 @@ final class Prompter {
     var anchorLine: Int { settings.lines >= 4 ? 1 : 0 }
 
     /// The band's width, for the lines (the island fits itself between menu bar icons).
+    /// The widest the reading column gets: short lines keep the eyes close to the camera.
+    static let readingColumn: CGFloat = 420
+
     func fit(width: CGFloat) {
-        let available = max(0, width - 2 * Self.sideInset)
-        guard abs(available - textWidth) > 0.5 else { return }
-        textWidth = available
+        let column = min(max(0, width - 2 * Self.sideInset), Self.readingColumn)
+        let inset = ((width - column) / 2).rounded()
+        if inset != columnInset { columnInset = inset }
+        guard abs(column - textWidth) > 0.5 else { return }
+        textWidth = column
         relayout()
     }
 

@@ -109,12 +109,16 @@ public enum IslandDisplay: String, Codable, CaseIterable, Sendable {
     case main
     /// The display the pointer is on; it moves along at rest.
     case pointer
+    /// Every display: the island follows the pointer like `pointer`, and the others show a copy of
+    /// it at rest (the same ears and lines, no second prompt or sound).
+    case all
 
     public var title: String {
         switch self {
         case .automatic: "Notch"
         case .main: "Main display"
         case .pointer: "With pointer"
+        case .all: "All displays"
         }
     }
 }
@@ -189,13 +193,49 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
     public var disabledProviders: [String]
     /// Apple Reminders due today show in Today.
     public var remindersInToday: Bool
+    /// Shuffle, repeat and favorite beside the transport in Now Playing, where the player has them.
+    public var musicModes: Bool
+    /// Check camera beside Join: a mirrored preview of the camera before a call.
+    public var cameraCheck: Bool
+    /// Time to leave for today's events with a place: the leave time in the event's card and a
+    /// line when it's time to go. On by default; the location is asked for on a click only.
+    public var timeToLeave: Bool
+    /// How Apple Maps works out the way there when Calendar has no travel time.
+    public var travelMode: TravelMode
+    /// Zip, Open with, Share and Copy to for a file on the shelf. On by default.
+    public var shelfActions: Bool
+    /// The shelf's files are still there after a restart (bookmarks, nothing copied). On by default.
+    public var shelfKeeps: Bool
+    /// The "+" in Today adds a reminder, the one in the calendar an event; Today deletes a reminder
+    /// with a short undo. On by default; macOS asks for access on the first save.
+    public var addInNotch: Bool
+    /// Apple Notes in the Notepad (read through Notes' scripting, on this Mac). Off by default.
+    public var appleNotes: Bool
+    /// Note captures are also copied into this Apple Notes folder (`notesDefault` for Notes' own
+    /// default); nil: they aren't.
+    public var appleNotesCapture: AppleNotesFolder?
     /// Tab order, set by dragging a tab in the island (`ModuleOrder`); empty = the built-in order.
     public var moduleOrder: [ModuleKind]
     /// The Tools tab's own tabs (Clipboard, Timer, Shelf, Notepad) in the order dragged there, by
     /// name; empty = the built-in order.
     public var toolOrder: [String]
+    /// The launcher's shortcuts and apps in the Tools tab, in the order picked in Settings.
+    public var launcher: [LauncherItem]
     /// Tara's memory: paused, sources switched off, apps kept out (Settings › Tara's memory).
     public var privacy: MemoryPrivacy
+    /// All tools shows the tools that are off too, dimmed with Turn on; off: only those that are on.
+    public var allToolsShowsOff: Bool
+    /// A slim volume bar in the notch when the output volume or mute changes (Apple's HUD shows
+    /// too). Off by default.
+    public var levelHUD: Bool
+    /// While the camera or microphone is in use or a calendar meeting runs, no sounds and no lines
+    /// but agents' approvals and questions. On by default.
+    public var meetingQuiet: Bool
+    /// The island's width and height as a share of the notch (`NotchGeometry.islandScales`).
+    public var islandWidthScale: Double
+    public var islandHeightScale: Double
+    /// A thin light outline around the island, so the pill shows on a dark menu bar.
+    public var islandOutline: Bool
 
     public init(
         slots: [SlotApp?] = Array(repeating: nil, count: slotCount),
@@ -228,9 +268,25 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         watchTimer: WatchTimer = .twoHours,
         disabledProviders: [String] = [],
         remindersInToday: Bool = false,
+        musicModes: Bool = true,
+        cameraCheck: Bool = true,
+        timeToLeave: Bool = true,
+        travelMode: TravelMode = .driving,
+        shelfActions: Bool = true,
+        shelfKeeps: Bool = true,
+        addInNotch: Bool = true,
+        appleNotes: Bool = false,
+        appleNotesCapture: AppleNotesFolder? = nil,
         moduleOrder: [ModuleKind] = [],
         toolOrder: [String] = [],
-        privacy: MemoryPrivacy = MemoryPrivacy()
+        launcher: [LauncherItem] = [],
+        privacy: MemoryPrivacy = MemoryPrivacy(),
+        allToolsShowsOff: Bool = true,
+        levelHUD: Bool = false,
+        meetingQuiet: Bool = true,
+        islandWidthScale: Double = 1,
+        islandHeightScale: Double = 1,
+        islandOutline: Bool = false
     ) {
         self.slots = Self.normalized(slots)
         self.modules = Self.normalized(modules)
@@ -263,9 +319,25 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
         self.watchTimer = watchTimer
         self.disabledProviders = disabledProviders
         self.remindersInToday = remindersInToday
+        self.musicModes = musicModes
+        self.cameraCheck = cameraCheck
+        self.timeToLeave = timeToLeave
+        self.travelMode = travelMode
+        self.shelfActions = shelfActions
+        self.shelfKeeps = shelfKeeps
+        self.addInNotch = addInNotch
+        self.appleNotes = appleNotes
+        self.appleNotesCapture = appleNotesCapture
         self.moduleOrder = moduleOrder
         self.toolOrder = toolOrder
+        self.launcher = launcher
         self.privacy = privacy
+        self.allToolsShowsOff = allToolsShowsOff
+        self.levelHUD = levelHUD
+        self.meetingQuiet = meetingQuiet
+        self.islandWidthScale = islandWidthScale
+        self.islandHeightScale = islandHeightScale
+        self.islandOutline = islandOutline
     }
 
     /// Tara beside the closed notch, as the user picks it. Always also shows activity (agents at
@@ -383,9 +455,25 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             watchTimer: (try? c.decodeIfPresent(WatchTimer.self, forKey: .watchTimer)) ?? .twoHours,
             disabledProviders: (try? c.decodeIfPresent([String].self, forKey: .disabledProviders)) ?? [],
             remindersInToday: (try? c.decodeIfPresent(Bool.self, forKey: .remindersInToday)) ?? false,
+            musicModes: (try? c.decodeIfPresent(Bool.self, forKey: .musicModes)) ?? true,
+            cameraCheck: (try? c.decodeIfPresent(Bool.self, forKey: .cameraCheck)) ?? true,
+            timeToLeave: (try? c.decodeIfPresent(Bool.self, forKey: .timeToLeave)) ?? true,
+            travelMode: (try? c.decodeIfPresent(TravelMode.self, forKey: .travelMode)) ?? .driving,
+            shelfActions: (try? c.decodeIfPresent(Bool.self, forKey: .shelfActions)) ?? true,
+            shelfKeeps: (try? c.decodeIfPresent(Bool.self, forKey: .shelfKeeps)) ?? true,
+            addInNotch: (try? c.decodeIfPresent(Bool.self, forKey: .addInNotch)) ?? true,
+            appleNotes: (try? c.decodeIfPresent(Bool.self, forKey: .appleNotes)) ?? false,
+            appleNotesCapture: try? c.decodeIfPresent(AppleNotesFolder.self, forKey: .appleNotesCapture),
             moduleOrder: (try? c.decodeIfPresent([ModuleKind].self, forKey: .moduleOrder)) ?? [],
             toolOrder: (try? c.decodeIfPresent([String].self, forKey: .toolOrder)) ?? [],
-            privacy: (try? c.decodeIfPresent(MemoryPrivacy.self, forKey: .privacy)) ?? MemoryPrivacy()
+            launcher: (try? c.decodeIfPresent([LauncherItem].self, forKey: .launcher)) ?? [],
+            privacy: (try? c.decodeIfPresent(MemoryPrivacy.self, forKey: .privacy)) ?? MemoryPrivacy(),
+            allToolsShowsOff: (try? c.decodeIfPresent(Bool.self, forKey: .allToolsShowsOff)) ?? true,
+            levelHUD: (try? c.decodeIfPresent(Bool.self, forKey: .levelHUD)) ?? false,
+            meetingQuiet: (try? c.decodeIfPresent(Bool.self, forKey: .meetingQuiet)) ?? true,
+            islandWidthScale: (try? c.decodeIfPresent(Double.self, forKey: .islandWidthScale)) ?? 1,
+            islandHeightScale: (try? c.decodeIfPresent(Double.self, forKey: .islandHeightScale)) ?? 1,
+            islandOutline: (try? c.decodeIfPresent(Bool.self, forKey: .islandOutline)) ?? false
         )
         // Saved by an older version: tools added since start off. Without the stamp the settings
         // come from before it, and every tool of this version counts as known.

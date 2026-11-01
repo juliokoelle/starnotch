@@ -9,7 +9,11 @@ import TestSupport
         for kind in [ModuleKind.meeting, .today, .system, .dictation, .tools] {
             #expect(!ToolSwitches.isOn(.module(kind), in: settings))
         }
-        for feature in ToolFeature.allCases { #expect(!ToolSwitches.isOn(feature, in: settings)) }
+        for feature in ToolFeature.allCases where !ToolSwitches.startsOn.contains(feature) {
+            #expect(!ToolSwitches.isOn(feature, in: settings))
+        }
+        // The teleprompter does nothing until started, so it is on from the start.
+        #expect(ToolSwitches.isOn(.prompter, in: settings))
     }
 
     @Test func olderSettingsKeepEveryTool() {
@@ -96,6 +100,41 @@ import TestSupport
         #expect(ToolSwitches.isOn(.module(.meeting), in: loaded))
         #expect(ToolSwitches.isOn(.clipboard, in: loaded))
         #expect(loaded.knownTools == ToolSwitches.known)
+    }
+
+    @Test func launcherAndDeviceBatteriesComeWithTheirTabDownloadsWaitForAClick() {
+        var settings = SwitcherSettings()
+        #expect(!ToolSwitches.isOn(.deviceBattery, in: settings))
+        ToolSwitches.set(.module(.system), on: true, in: &settings)
+        #expect(ToolSwitches.isOn(.deviceBattery, in: settings))
+        #expect(!ToolSwitches.isOn(.downloads, in: settings))
+        // Saved by the version before them: on where their tab is, Finished downloads off.
+        let isolated = IsolatedSettings()
+        var everything = SwitcherSettings()
+        everything.disabledModules = []
+        everything.disabledFeatures = []
+        isolated.store.save(everything)
+        let new = ["feature.launcher", "feature.downloads", "feature.deviceBattery"]
+        isolated.editSaved { $0["knownTools"] = ToolSwitches.known.filter { !new.contains($0) } }
+        let loaded = isolated.store.load()
+        #expect(ToolSwitches.isOn(.launcher, in: loaded))
+        #expect(ToolSwitches.isOn(.deviceBattery, in: loaded))
+        #expect(!ToolSwitches.isOn(.downloads, in: loaded))
+    }
+
+    @Test func theTeleprompterStaysOnForOlderSettingsAndCanBeSwitchedOff() {
+        let isolated = IsolatedSettings()
+        isolated.store.save(SwitcherSettings())
+        // Saved by a version without the teleprompter: unlike other new tools, it is on.
+        isolated.editSaved { $0["knownTools"] = ToolSwitches.known.filter { $0 != "feature.prompter" } }
+        var loaded = isolated.store.load()
+        #expect(ToolSwitches.isOn(.prompter, in: loaded))
+        // Outside the tabs: switching it leaves them alone, and off stays off.
+        let tabs = loaded.disabledModules
+        ToolSwitches.set(.prompter, on: false, in: &loaded)
+        #expect(loaded.disabledModules == tabs)
+        isolated.store.save(loaded)
+        #expect(!ToolSwitches.isOn(.prompter, in: isolated.store.load()))
     }
 
     @Test func wheelOffersOnlyTabsThatAreOn() {

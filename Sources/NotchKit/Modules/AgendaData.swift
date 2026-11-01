@@ -167,12 +167,14 @@ enum AgendaSamples {
 
 /// Sample connector for previews and the test mode (`--preview`, `--sample-data`): a Today list
 /// and meeting prep with made-up people. Shows what a connector provides without any setup.
-final class SampleConnector: NotchConnector, TodayCompleting, PeopleProvider, @unchecked Sendable {
+final class SampleConnector: NotchConnector, TodayCompleting, PeopleProvider, ReminderEditing, @unchecked Sendable {
     static let id = "sample"
     static let displayName = "Sample data"
     var confirmations = true
-    /// Ticked off in the sample mode (in memory only).
+    /// Ticked off or deleted in the sample mode (in memory only).
     private var done: Set<String> = []
+    /// Added with Today's "+" in the sample mode (in memory only).
+    private var added: [TodayItem] = []
     private let lock = NSLock()
 
     init(config: ConfigSection) {}
@@ -198,7 +200,7 @@ final class SampleConnector: NotchConnector, TodayCompleting, PeopleProvider, @u
                           help: "Open in Reminders", group: "Personal"),
                 TodayItem(id: "t3", kind: .task, title: "Book flights for the offsite"),
                 TodayItem(id: "t4", kind: .task, title: "Clean up old branches"),
-            ].filter { item in !lock.withLock { done.contains(item.id) } },
+            ].filter { item in !lock.withLock { done.contains(item.id) } } + lock.withLock { added.filter { !done.contains($0.id) } },
             followUps: [
                 TodayItem(id: "f1", kind: .followUp, title: "Grace: contract draft", detail: "Waiting", date: day(-1), people: ["Grace Hopper"]),
                 TodayItem(id: "f2", kind: .followUp, title: "Alan: benchmark numbers", detail: "Waiting", date: day(0), people: ["Alan Turing"]),
@@ -219,6 +221,22 @@ final class SampleConnector: NotchConnector, TodayCompleting, PeopleProvider, @u
     func complete(_ id: String) -> TodayCompletion {
         lock.withLock { _ = done.insert(id) }
         return .done
+    }
+
+    func addReminder(title: String, due: DateComponents?) async -> String? {
+        let date = due.flatMap { Calendar.current.date(from: $0) }.map { AgentScanner.day($0) }
+        lock.withLock {
+            added.append(TodayItem(id: "reminder-added-\(added.count)", kind: .task, title: title, detail: "Personal", date: date,
+                                   help: "Open in Reminders", group: "Personal"))
+        }
+        return nil
+    }
+
+    func canDelete(_ id: String) -> Bool { id.hasPrefix("reminder-") }
+
+    func delete(_ id: String) -> Bool {
+        lock.withLock { _ = done.insert(id) }
+        return true
     }
 
     func people() -> [Person] { Self.people.map { Person(slug: $0.slug, name: $0.name) } }

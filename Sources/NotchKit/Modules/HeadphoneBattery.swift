@@ -43,7 +43,8 @@ final class HeadphoneBattery {
         }
     }
 
-    private nonisolated static func profile() -> Data? {
+    /// `system_profiler`'s Bluetooth list as JSON (the System tab's device batteries read it too).
+    nonisolated static func profile() -> Data? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
         process.arguments = ["SPBluetoothDataType", "-json", "-detailLevel", "basic"]

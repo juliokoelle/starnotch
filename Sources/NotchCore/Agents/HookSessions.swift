@@ -343,7 +343,7 @@ public struct HookSessions: Equatable, Sendable {
             let busy = entry.isBusy && quiet < Self.staleBusy
             let cwd = entry.cwd ?? ""
             let subs = (children[entry.sessionID] ?? []).sorted { $0.lastSeen > $1.lastSeen }
-            let shown = subs.prefix(5).map { child -> AgentSubagent in
+            let shown = subs.prefix(AgentSubagent.listed).map { child -> AgentSubagent in
                 let running = child.isBusy && now.timeIntervalSince(child.lastSeen) < Self.staleBusy
                 var progress = SubagentProgress()
                 progress.steps = child.steps

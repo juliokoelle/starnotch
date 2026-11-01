@@ -231,7 +231,8 @@ struct SubagentList: View {
                 SubagentRow(module: module, parent: parent, sub: sub, last: index == parent.subagents.count - 1)
             }
             if parent.earlierSubagents > 0 {
-                Text("+\(parent.earlierSubagents) earlier").font(Theme.font(11)).foregroundStyle(Theme.textTertiary).padding(.leading, 20)
+                Text(String(format: Localization.string("%lld older not listed"), parent.earlierSubagents))
+                    .font(Theme.font(11)).foregroundStyle(Theme.textTertiary).padding(.leading, 20)
             }
         }
     }

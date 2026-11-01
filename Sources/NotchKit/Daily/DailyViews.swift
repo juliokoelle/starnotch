@@ -1,3 +1,4 @@
+import EventKit
 import NotchCore
 import SwiftUI
 
@@ -210,7 +211,8 @@ struct DailyCard: View {
 /// The day's to-dos: the connector's tasks and, when switched on, Apple Reminders due today or
 /// overdue, then under "Later" the open reminders not due yet or without a date. A circle ticks
 /// one off where it lives; a click on the title opens its place. Without
-/// Reminders a quiet row offers them; macOS asks for access only on that click.
+/// Reminders a quiet row offers them; macOS asks for access only on that click. The "+" adds a
+/// reminder, a reminder's bin deletes it with a short undo.
 private struct TodoPanel: View {
     let store: DailyStore
 
@@ -219,9 +221,28 @@ private struct TodoPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 let items = store.today?.todos ?? []
                 let later = store.today?.later ?? []
-                SectionLabel(title: Localization.string("To do"), trailing: items.isEmpty ? nil : "\(items.count)")
-                    .padding(.horizontal, 6)
-                if items.isEmpty && later.isEmpty {
+                HStack(spacing: 4) {
+                    SectionLabel(title: Localization.string("To do"), trailing: items.isEmpty ? nil : "\(items.count)")
+                    if let today = store.today, today.canAddReminders, today.reminderDraft == nil {
+                        Button { today.startReminder() } label: {
+                            Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.textSecondary)
+                                .frame(width: 22, height: 14)
+                                .contentShape(Rectangle().inset(by: -5))
+                        }
+                        .buttonStyle(PressScale())
+                        .help("New reminder")
+                        .transition(.opacity)
+                    }
+                }
+                .padding(.horizontal, 6)
+                if let today = store.today, today.reminderDraft != nil {
+                    ReminderComposer(module: today)
+                        .transition(.blurSlide(y: -6))
+                }
+                if items.isEmpty && later.isEmpty && store.today?.reminderDraft != nil {
+                    Spacer(minLength: 0)
+                } else if items.isEmpty && later.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Nothing due today").font(Theme.font(13, .medium)).foregroundStyle(Theme.textBody)
                         Text("Tasks from your notes and reminders due today show up here.")
@@ -257,8 +278,13 @@ private struct TodoPanel: View {
                     .scrollIndicators(.never)
                     .scrollEdgeFade(bottom: 10)
                 }
+                if let today = store.today, let gone = today.pendingDelete {
+                    UndoBar(title: gone.title) { today.undoDelete() }
+                        .transition(.blurSlide(y: 6))
+                }
                 if !store.remindersShown, store.turnOnReminders != nil { remindersOffer }
             }
+            .animation(Theme.snappy, value: store.today?.pendingDelete?.id)
         }
     }
 
@@ -339,6 +365,16 @@ private struct TodoRow: View {
             }
             .buttonStyle(PressScale())
             .help(Localization.string(item.help.isEmpty ? (reminder ? "Open in Reminders" : "Open") : item.help))
+            if hovering, module.canDelete(item) {
+                Button { module.delete(item) } label: {
+                    Image(systemName: "trash").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 22, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .help("Delete in Reminders (with undo)")
+            }
         }
         .padding(.trailing, 6)
         .background(Color.white.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -351,6 +387,112 @@ private struct TodoRow: View {
     private var when: String {
         guard let date = item.date else { return "" }
         return Localization.string(R5Clock.due(date, today: module.today))
+    }
+}
+
+/// Today's "+": the title, where a day and a time count as in quick capture ("tomorrow 15:00"), and
+/// the day chip. ↵ saves to Reminders' default list, esc cancels; macOS asks for access on the
+/// first save.
+private struct ReminderComposer: View {
+    let module: TodayModule
+    @FocusState private var focused: Bool
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        let draft = module.reminderDraft ?? ReminderDraft()
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: "circle").font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: 24, height: 28)
+                TextField("New reminder", text: Binding(get: { module.reminderDraft?.text ?? "" }, set: { module.updateReminder(text: $0) }))
+                    .textFieldStyle(.plain)
+                    .font(Theme.font(12.5))
+                    .foregroundStyle(Theme.textPrimary)
+                    .focused($focused)
+                    .onSubmit { module.saveReminder() }
+                    .simultaneousGesture(TapGesture().onEnded { NotchPanel.takeKeyboard() })
+                Button {
+                    module.cycleReminderDay()
+                    focused = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "calendar").font(.system(size: 9.5, weight: .semibold))
+                        dueLabel(draft)
+                    }
+                    .font(Theme.font(11, .medium))
+                    .foregroundStyle(draft.day == nil ? Theme.textTertiary : TaraAccent.current)
+                    .padding(.horizontal, 7)
+                    .frame(height: 20)
+                    .background((draft.day == nil ? Color.white : TaraAccent.current).opacity(0.1), in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressScale())
+                .help("Due: no date, today, tomorrow or next week. Or type it: tomorrow 15:00")
+            }
+            .padding(.trailing, 6)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .opacity(module.savingReminder ? 0.55 : 1)
+            HStack(spacing: 8) {
+                if let error = module.reminderError {
+                    Text(LocalizedStringKey(error)).foregroundStyle(Theme.textSecondary)
+                    if EKEventStore.authorizationStatus(for: .reminder) == .denied {
+                        Button("Open Privacy Settings") { Haptics.tick(); PrivacyPane.open("Privacy_Reminders") }
+                            .buttonStyle(PressScale())
+                            .foregroundStyle(TaraAccent.current)
+                    }
+                } else {
+                    Text("↵ add to Reminders  esc")
+                }
+            }
+            .font(Theme.font(10.5))
+            .foregroundStyle(Theme.textTertiary)
+            .lineLimit(1)
+            .padding(.leading, 30)
+        }
+        .onAppear {
+            NotchPanel.takeKeyboard()
+            focused = true
+        }
+    }
+
+    /// "No date", "today", "tomorrow 15:00", "Mon 2 Nov".
+    private func dueLabel(_ draft: ReminderDraft) -> Text {
+        guard let day = draft.day, let offset = draft.dayOffset(now: R5Clock.now(), calendar: .current) else { return Text("No date") }
+        let name: Text = switch offset {
+        case 0: Text("today")
+        case 1: Text("tomorrow")
+        default: Text(verbatim: day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).locale(locale)))
+        }
+        guard let hour = draft.hour else { return name }
+        return name + Text(verbatim: String(format: " %02d:%02d", hour, draft.minute ?? 0))
+    }
+}
+
+/// A reminder just deleted: its title and Undo, for the five seconds before it's deleted for good.
+private struct UndoBar: View {
+    let title: String
+    let undo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "trash").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.textTertiary)
+            Text("Deleted “\(title)”").font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 6)
+            Button(action: undo) {
+                Text("Undo").font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 10).frame(height: 22)
+                    .background(Color.white.opacity(0.1), in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressScale())
+            .help("Bring it back")
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .frame(height: 30)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }
 

@@ -5,15 +5,15 @@ import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The small tools: clipboard history, a focus timer, and a shelf for files (drag in, drag out,
-/// AirDrop, convert images). The clipboard is watched every half second, kept in memory only,
-/// and never takes copies marked secret or made in a password app.
+/// The small tools: clipboard history, a focus timer, a shelf for files (drag in, drag out,
+/// AirDrop, convert images) and a launcher for shortcuts and apps. The clipboard is watched every
+/// half second, kept in memory only, and never takes copies marked secret or made in a password app.
 @MainActor
 @Observable
 final class ToolsModule: NotchModule {
     enum Tab: String, CaseIterable {
         case clipboard = "Clipboard", timer = "Timer", shelf = "Shelf"
-        case notes = "Notepad", files = "Files"
+        case notes = "Notepad", files = "Files", launcher = "Launcher"
 
         var symbol: String {
             switch self {
@@ -22,6 +22,7 @@ final class ToolsModule: NotchModule {
             case .shelf: "tray.and.arrow.down"
             case .notes: "note.text"
             case .files: "folder"
+            case .launcher: "square.grid.2x2"
             }
         }
     }
@@ -64,6 +65,23 @@ final class ToolsModule: NotchModule {
     private(set) var simple = SimpleTimer()
     var timerKind = TimerKind.pomodoro
     private(set) var shelf: [URL] = []
+    /// Zip, Open with, Share and Copy to on a shelf file's menu (Settings › Tools).
+    var shelfActions = true
+    /// Files being zipped or copied: their row shows it, and a second click waits.
+    private(set) var shelfBusy: Set<URL> = []
+    /// The shelf survives a restart (Settings › Tools): its files are kept as bookmarks, never
+    /// copied. Switched on the first time, it puts back what was kept.
+    var keepsShelf = false {
+        didSet {
+            guard keepsShelf != oldValue else { return }
+            if keepsShelf, !shelfRestored { restoreShelf() } else { saveShelf() }
+        }
+    }
+    /// Previews and the sample data neither read nor keep the shelf.
+    @ObservationIgnored var persistsShelf = true
+    @ObservationIgnored private var shelfRestored = false
+    /// Previews: the row that shows its actions as if the pointer were on it.
+    var previewHover: URL?
     /// The row under the keyboard in the clipboard list.
     var selected: UUID?
     /// The clipboard's search, shown once the list is long (`ClipboardList.searchFrom`).
@@ -74,6 +92,14 @@ final class ToolsModule: NotchModule {
     var clips: [ClipItem] { history.list(matching: clipQuery) }
     /// One line after an action ("Copied", "Converted to PNG").
     private(set) var note: String?
+    /// The launcher's shortcuts and apps, as picked in Settings (read from the settings, so a
+    /// change there shows at once).
+    @ObservationIgnored var launcherItems: () -> [LauncherItem] = { [] }
+    /// The launcher's empty state opens its part of Settings.
+    @ObservationIgnored var openLauncherSettings: (() -> Void)?
+    /// A shortcut running, or how its last run went (for a moment), by item id.
+    enum LaunchState: Equatable { case running, done, failed }
+    private(set) var launchStates: [String: LaunchState] = [:]
 
     /// A focus or break ended: the app shows a sneak.
     @ObservationIgnored var onPhaseEnd: ((FocusTimer.Phase, FocusTimer.Phase) -> Void)?
@@ -320,6 +346,48 @@ final class ToolsModule: NotchModule {
         }
     }
 
+    // MARK: Launcher
+
+    /// Runs a shortcut (off the main thread; its tile shows it running, then done or failed) or
+    /// opens an app. A shortcut already running isn't started twice.
+    func launch(_ item: LauncherItem) {
+        Haptics.tick()
+        switch item.kind {
+        case .app:
+            guard let app = item.app, let url = AppIcons.url(for: app) else {
+                show(String(format: Localization.string("Couldn't find %@"), item.name))
+                return
+            }
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        case .shortcut:
+            guard launchStates[item.id] != .running else { return }
+            withAnimation(Theme.snappy) { launchStates[item.id] = .running }
+            Task { [weak self] in
+                let finished = await ShortcutsTool.run(item.name)
+                guard let self else { return }
+                if finished { Haptics.confirm() }
+                withAnimation(Theme.snappy) { self.launchStates[item.id] = finished ? .done : .failed }
+                try? await Task.sleep(for: .seconds(finished ? 2 : 4))
+                guard self.launchStates[item.id] != .running else { return }
+                withAnimation(Theme.snappy) { self.launchStates[item.id] = nil }
+            }
+        }
+    }
+
+    /// Previews: a launcher with made-up shortcuts and a few apps of this Mac, one shortcut
+    /// running and one just done.
+    func previewLauncher(empty: Bool = false) {
+        let apps = [("com.apple.Safari", "Safari", "/Applications/Safari.app"),
+                    ("com.apple.Notes", "Notes", "/System/Applications/Notes.app"),
+                    ("com.apple.iCal", "Calendar", "/System/Applications/Calendar.app"),
+                    ("com.apple.Terminal", "Terminal", "/System/Applications/Utilities/Terminal.app")]
+        let items: [LauncherItem] = empty ? [] : [.shortcut("Morning routine"), .shortcut("Log water")]
+            + apps.map { .app(SlotApp(bundleID: $0.0, name: $0.1, path: $0.2)) }
+            + [.shortcut("Turn on Do Not Disturb"), .shortcut("Send ETA home"), .shortcut("Resize images for the web")]
+        launcherItems = { items }
+        launchStates = empty ? [:] : ["shortcut:Log water": .running, "shortcut:Morning routine": .done]
+    }
+
     // MARK: Tara beside the shelf
 
     func dropOnTara(_ url: URL) {
@@ -356,6 +424,7 @@ final class ToolsModule: NotchModule {
         guard !new.isEmpty else { return }
         Haptics.confirm()
         withAnimation(Theme.snappy) { shelf.insert(contentsOf: new, at: 0) }
+        saveShelf()
     }
 
     /// One line in the header for a moment ("Moved to Downloads").
@@ -363,10 +432,129 @@ final class ToolsModule: NotchModule {
 
     func removeFromShelf(_ url: URL) {
         withAnimation(Theme.snappy) { shelf.removeAll { $0 == url } }
+        saveShelf()
     }
 
     func clearShelf() {
         withAnimation(Theme.snappy) { shelf.removeAll() }
+        saveShelf()
+    }
+
+    // MARK: Shelf across restarts
+
+    private static let shelfKey = "shelf.items"
+
+    /// Puts back the shelf kept at the last quit, without the files that are gone; resolved off
+    /// the main thread (it looks at the disk).
+    private func restoreShelf() {
+        guard persistsShelf, let data = UserDefaults.standard.data(forKey: Self.shelfKey),
+              let memory = try? JSONDecoder().decode(ShelfMemory.self, from: data) else {
+            shelfRestored = true
+            saveShelf()
+            return
+        }
+        Task { [weak self] in
+            let urls = await Task.detached(priority: .utility) { memory.restore() }.value
+            guard let self else { return }
+            self.shelfRestored = true
+            if self.keepsShelf { self.shelf += urls.filter { !self.shelf.contains($0) } }
+            self.saveShelf()
+        }
+    }
+
+    private func saveShelf() {
+        guard persistsShelf else { return }
+        if !keepsShelf {
+            UserDefaults.standard.removeObject(forKey: Self.shelfKey)
+        } else if shelfRestored, let data = try? JSONEncoder().encode(ShelfMemory(shelf)) {
+            UserDefaults.standard.set(data, forKey: Self.shelfKey)
+        }
+    }
+
+    // MARK: Shelf actions (they open, share or copy; the file itself is never moved or changed)
+
+    /// A zipped copy next to the file (or in the shelf's own folder); it joins the shelf.
+    func zip(_ url: URL) {
+        guard !shelfBusy.contains(url) else { return }
+        Haptics.tick()
+        withAnimation(Theme.snappy) { _ = shelfBusy.insert(url) }
+        Task { [weak self] in
+            let zipped = await ShelfFiles.zip(url)
+            guard let self else { return }
+            withAnimation(Theme.snappy) { _ = self.shelfBusy.remove(url) }
+            guard let zipped else {
+                self.show(String(format: Localization.string("Couldn't zip %@"), url.lastPathComponent))
+                return
+            }
+            self.add([zipped])
+            self.show(String(format: Localization.string("Saved %@"), zipped.lastPathComponent))
+        }
+    }
+
+    func open(_ url: URL, with app: URL) {
+        Haptics.tick()
+        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    /// Open With › Other…: any app, picked in an open panel.
+    func openWithOther(_ url: URL) {
+        Haptics.tick()
+        pick(app: true, prompt: Localization.string("Open")) { [weak self] app in self?.open(url, with: app) }
+    }
+
+    /// A copy in a folder picked in an open panel, under a free name.
+    func copyTo(_ url: URL) {
+        guard !shelfBusy.contains(url) else { return }
+        Haptics.tick()
+        pick(app: false, prompt: Localization.string("Copy Here")) { [weak self] folder in self?.copy(url, into: folder) }
+    }
+
+    private func copy(_ url: URL, into folder: URL) {
+        guard !ShelfNames.isInside(folder.path, of: url.path) else {
+            show(Localization.string("A folder can't go into itself"))
+            return
+        }
+        withAnimation(Theme.snappy) { _ = shelfBusy.insert(url) }
+        Task { [weak self] in
+            let copied = await ShelfFiles.copy(url, into: folder)
+            guard let self else { return }
+            withAnimation(Theme.snappy) { _ = self.shelfBusy.remove(url) }
+            if copied != nil { Haptics.confirm() }
+            self.show(copied == nil ? String(format: Localization.string("Couldn't copy %@"), url.lastPathComponent)
+                      : String(format: Localization.string("Copied to %@"), FileManager.default.displayName(atPath: folder.path)))
+        }
+    }
+
+    /// An open panel for an app or a folder, with the app in front; the island stays open until
+    /// it closes.
+    private func pick(app: Bool, prompt: String, chosen: @escaping @MainActor (URL) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = app
+        panel.canChooseDirectories = !app
+        panel.allowsMultipleSelection = false
+        panel.prompt = prompt
+        if app {
+            panel.directoryURL = URL(fileURLWithPath: "/Applications")
+            panel.allowedContentTypes = [.applicationBundle]
+        }
+        let lock = IslandLock.shared.acquire(app ? "open with" : "copy to")
+        NSApp.activate()
+        panel.begin { response in
+            MainActor.assumeIsolated {
+                IslandLock.shared.release(lock)
+                if response == .OK, let url = panel.url { chosen(url) }
+            }
+        }
+    }
+
+    /// Previews: made-up files on the shelf, one showing its actions as on hover, one being
+    /// zipped, and the header's note.
+    func previewShelf(_ urls: [URL], hover: URL?, busy: URL?, note: String?) {
+        persistsShelf = false
+        shelf = urls
+        previewHover = hover
+        shelfBusy = Set([busy].compactMap { $0 })
+        self.note = note
     }
 
     func airDrop(_ urls: [URL]) {
@@ -471,7 +659,7 @@ final class ToolsModule: NotchModule {
         case .clipboard:
             if let item = clips.first(where: { $0.id == selected }) ?? clips.first { copy(item) }
         case .timer: startOrPause()
-        case .shelf, .notes, .files: break
+        case .shelf, .notes, .files, .launcher: break
         }
     }
 
@@ -574,6 +762,75 @@ enum ImageFormat: String, CaseIterable {
     }
 }
 
+/// The files the shelf's actions make: a zip next to the original (or in the shelf's own folder
+/// when that one can't take it) and copies in a picked folder. Under free names, so nothing is
+/// ever replaced; the original is only read.
+enum ShelfFiles {
+    /// The shelf's own folder in Application Support.
+    static var folder: URL { Brand.supportFolder.appending(path: "Shelf", directoryHint: .isDirectory) }
+
+    static func zip(_ url: URL) async -> URL? {
+        await Task.detached(priority: .userInitiated) { () -> URL? in
+            let files = FileManager.default
+            // Zipped in a folder of its own first, then put in place.
+            let scratch = files.temporaryDirectory.appending(path: "shelf-zip-\(UUID().uuidString)", directoryHint: .isDirectory)
+            defer { try? files.removeItem(at: scratch) }
+            let made = scratch.appending(path: ShelfNames.zip(of: url.lastPathComponent))
+            guard (try? files.createDirectory(at: scratch, withIntermediateDirectories: true)) != nil else { return nil }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            // Like Finder's Compress: the item itself in the archive (a folder with its name, a
+            // file without the folder it sits in), resource forks set aside.
+            let folderItem = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            process.arguments = ["-c", "-k", "--sequesterRsrc"] + (folderItem ? ["--keepParent"] : []) + [url.path, made.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return nil }
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            // Next to the original; the shelf's folder when that one can't be written to.
+            try? files.createDirectory(at: folder, withIntermediateDirectories: true)
+            for target in [url.deletingLastPathComponent(), folder] {
+                let name = ShelfNames.free(made.lastPathComponent) { files.fileExists(atPath: target.appending(path: $0).path) }
+                // moveItem never overwrites: a name taken meanwhile fails instead.
+                if (try? files.moveItem(at: made, to: target.appending(path: name))) != nil { return target.appending(path: name) }
+            }
+            return nil
+        }.value
+    }
+
+    static func copy(_ url: URL, into folder: URL) async -> URL? {
+        await Task.detached(priority: .userInitiated) { () -> URL? in
+            let files = FileManager.default
+            let output = folder.appending(path: ShelfNames.free(url.lastPathComponent) { files.fileExists(atPath: folder.appending(path: $0).path) })
+            // copyItem never overwrites: a name taken meanwhile fails instead.
+            return (try? files.copyItem(at: url, to: output)) != nil ? output : nil
+        }.value
+    }
+
+    /// The apps that open the file, its default app first, as Finder's Open With lists them.
+    static func apps(for url: URL) -> [URL] {
+        let workspace = NSWorkspace.shared
+        var seen = Set<String>()
+        return ([workspace.urlForApplication(toOpen: url)].compactMap { $0 } + workspace.urlsForApplications(toOpen: url))
+            .filter { seen.insert($0.standardizedFileURL.path).inserted }
+            .prefix(12)
+            .map { $0 }
+    }
+
+    static func name(of app: URL) -> String {
+        let name = FileManager.default.displayName(atPath: app.path)
+        return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
+    }
+
+    /// Menu-sized.
+    static func icon(of app: URL) -> NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: app.path)
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
+    }
+}
+
 enum ImageConverter {
     enum Failure: Error { case unreadable, unwritable }
 
@@ -623,29 +880,14 @@ private struct ToolsBody: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: Self.spacing) {
-                ForEach(module.tabs, id: \.self) { tab in
-                    let selected = module.tab == tab
-                    Button {
-                        Haptics.tick()
-                        withAnimation(Theme.snappy) { module.tab = tab }
-                    } label: {
-                        Label(LocalizedStringKey(tab.rawValue), systemImage: tab.symbol)
-                            .font(Theme.font(12, .semibold))
-                            .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
-                            .padding(.horizontal, 10)
-                            .frame(height: 24)
-                            .background(Color.white.opacity(selected ? 0.12 : 0), in: Capsule())
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(PressScale())
-                    .offset(x: dragging == tab ? offset : 0)
-                    .zIndex(dragging == tab ? 1 : 0)
-                    .scaleEffect(dragging == tab && !reduceMotion ? 1.06 : 1)
-                    .simultaneousGesture(reorderGesture(tab))
-                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths[tab] = $0 }
-                    .help(Text(LocalizedStringKey(tab.rawValue)) + Text(verbatim: " · ") + Text("Hold and drag to move"))
-                    .accessibilityHint(Text("Hold and drag to move"))
+                // Where the names don't all fit (six tabs in the compact panel), only the open tab
+                // keeps its name and the others show their icon, the name in the tooltip. The tabs
+                // take their room before the note does.
+                ViewThatFits(in: .horizontal) {
+                    tabStrip(titled: true)
+                    tabStrip(titled: false)
                 }
+                .layoutPriority(1)
                 Spacer(minLength: 6)
                 if let note = module.note {
                     Text(note).font(Theme.font(11.5)).foregroundStyle(Theme.ok).lineLimit(1)
@@ -660,11 +902,47 @@ private struct ToolsBody: View {
             case .shelf: ShelfCard(module: module)
             case .notes: if let notes = module.notes { NotesCard(store: notes) }
             case .files: FilesCard(module: module)
+            case .launcher: LauncherCard(module: module)
             }
         }
     }
 
     private static let spacing: CGFloat = 4
+
+    private func tabStrip(titled: Bool) -> some View {
+        HStack(spacing: Self.spacing) {
+            ForEach(module.tabs, id: \.self) { tab in
+                let selected = module.tab == tab
+                Button {
+                    Haptics.tick()
+                    withAnimation(Theme.snappy) { module.tab = tab }
+                } label: {
+                    Group {
+                        if titled || selected {
+                            Label(LocalizedStringKey(tab.rawValue), systemImage: tab.symbol)
+                        } else {
+                            Image(systemName: tab.symbol)
+                        }
+                    }
+                    .font(Theme.font(12, .semibold))
+                    .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .frame(height: 24)
+                    .background(Color.white.opacity(selected ? 0.12 : 0), in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressScale())
+                .offset(x: dragging == tab ? offset : 0)
+                .zIndex(dragging == tab ? 1 : 0)
+                .scaleEffect(dragging == tab && !reduceMotion ? 1.06 : 1)
+                .simultaneousGesture(reorderGesture(tab))
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths[tab] = $0 }
+                .help(Text(LocalizedStringKey(tab.rawValue)) + Text(verbatim: " · ") + Text("Hold and drag to move"))
+                .accessibilityLabel(Text(LocalizedStringKey(tab.rawValue)))
+                .accessibilityHint(Text("Hold and drag to move"))
+            }
+        }
+    }
 
     private func reorderGesture(_ tab: ToolsModule.Tab) -> some Gesture {
         LongPressGesture(minimumDuration: 0.35)
@@ -1245,6 +1523,7 @@ private struct ShelfRow: View {
     @State private var hovering = false
 
     var body: some View {
+        let hovering = hovering || module.previewHover == url
         HStack(spacing: 8) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                 .resizable().frame(width: 22, height: 22)
@@ -1252,7 +1531,10 @@ private struct ShelfRow: View {
                 .font(Theme.font(12.5)).foregroundStyle(Theme.textBody)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 4)
-            if hovering {
+            if module.shelfBusy.contains(url) {
+                // Being zipped or copied.
+                ProgressView().controlSize(.mini).help("Working on a copy …")
+            } else if hovering {
                 if module.converts, ImageConverter.isImage(url) {
                     Menu {
                         ForEach(ImageFormat.allCases, id: \.self) { format in
@@ -1268,6 +1550,15 @@ private struct ShelfRow: View {
                 }
                 icon("airplayaudio", help: "AirDrop") { module.airDrop([url]) }
                 icon("magnifyingglass", help: "Show in Finder") { module.reveal(url) }
+                if module.shelfActions {
+                    Menu { ShelfActions(module: module, url: url) } label: {
+                        Image(systemName: "ellipsis").font(.system(size: 11, weight: .semibold))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Open With, Share, Zip, Copy to …")
+                }
                 icon("xmark", help: "Remove from the shelf") { module.removeFromShelf(url) }
             }
         }
@@ -1276,18 +1567,66 @@ private struct ShelfRow: View {
         .frame(height: 30)
         .background(Color.white.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
+        .onHover { self.hovering = $0 }
         .onDrag { NSItemProvider(object: url as NSURL) }
         .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
+        .contextMenu { if module.shelfActions { ShelfActions(module: module, url: url) } }
     }
 
     private func icon(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            Haptics.tick()
+            action()
+        } label: {
             Image(systemName: symbol).font(.system(size: 10.5, weight: .semibold))
                 .frame(width: 18, height: 22)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressScale())
         .help(help)
+    }
+}
+
+/// A shelf file's actions, on its … button and on right-click. None moves or changes the file:
+/// they open it, share it or make a copy.
+private struct ShelfActions: View {
+    let module: ToolsModule
+    let url: URL
+
+    var body: some View {
+        Menu {
+            ForEach(ShelfFiles.apps(for: url), id: \.self) { app in
+                Button { module.open(url, with: app) } label: {
+                    Label { Text(verbatim: ShelfFiles.name(of: app)) } icon: { Image(nsImage: ShelfFiles.icon(of: app)) }
+                }
+            }
+            Divider()
+            Button("Other…") { module.openWithOther(url) }
+        } label: {
+            Label("Open With", systemImage: "arrow.up.forward.app")
+        }
+        ShareLink(item: url) { Label("Share", systemImage: "square.and.arrow.up") }
+        Button {
+            Haptics.tick()
+            module.airDrop([url])
+        } label: {
+            Label("AirDrop", systemImage: "airplayaudio")
+        }
+        Divider()
+        Button { module.zip(url) } label: { Label("Zip", systemImage: "doc.zipper") }
+        Button { module.copyTo(url) } label: { Label("Copy to…", systemImage: "doc.on.doc") }
+        Divider()
+        Button {
+            Haptics.tick()
+            module.reveal(url)
+        } label: {
+            Label("Show in Finder", systemImage: "magnifyingglass")
+        }
+        Button {
+            Haptics.tick()
+            module.removeFromShelf(url)
+        } label: {
+            Label("Remove from the shelf", systemImage: "xmark")
+        }
     }
 }

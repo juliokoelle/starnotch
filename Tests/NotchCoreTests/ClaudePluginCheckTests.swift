@@ -15,7 +15,10 @@ import TestSupport
 
     static func directory(_ path: String) -> String { #"{"source":"directory","path":"\#(path)"}"# }
     static let github = #"{"source":"github","repo":"juliokoelle/starnotch"}"#
-    static let installed = Data(#"{"version":2,"plugins":{"starnotch-approvals@starnotch":[{"scope":"user","version":"0.1.0"}]}}"#.utf8)
+    /// The plugin's version in the repository, as an up-to-date install carries it.
+    static let bundledVersion = ClaudePluginCheck.pluginVersion(try? Data(contentsOf: SetupSandbox.repo
+        .appending(path: "integrations/claude-code/starnotch-approvals/.claude-plugin/plugin.json"))) ?? "?"
+    static let installed = Data(#"{"version":2,"plugins":{"starnotch-approvals@starnotch":[{"scope":"user","version":"\#(bundledVersion)"}]}}"#.utf8)
     static let notInstalled = Data(#"{"version":2,"plugins":{}}"#.utf8)
     static let enabled = Data(#"{"enabledPlugins":{"starnotch-approvals@starnotch":true}}"#.utf8)
 
@@ -293,6 +296,22 @@ import TestSupport
         #expect(mode == 0o700)
         // The next launch: nothing left to do.
         #expect(try SetupActions.checkClaudePlugin(paths, ledger: ledger, run: fake.run) == .fine)
+    }
+
+    @Test func anOlderInstallIsUpdated() throws {
+        // The decision: an install older than the app's plugin is updated.
+        let old = Data(#"{"version":2,"plugins":{"starnotch-approvals@starnotch":[{"scope":"user","version":"0.0.1"}]}}"#.utf8)
+        #expect(ClaudePluginCheck.decide(marketplaces: Self.marketplaces(Self.github), installed: old, settings: Self.enabled,
+                                         stableCopy: Self.copy, copyStale: false, bundledVersion: "0.2.0", exists: { _ in true }) == .update)
+        #expect(ClaudePluginCheck.decide(marketplaces: Self.marketplaces(Self.github), installed: old, settings: Self.enabled,
+                                         stableCopy: Self.copy, copyStale: false, bundledVersion: "0.0.1", exists: { _ in true }) == .fine)
+        // At launch: the marketplace is refreshed and the plugin updated through the claude command.
+        let (paths, ledger) = Self.home(marketplace: Self.github, installed: old)
+        defer { Fixtures.remove(paths.home) }
+        let fake = FakeRunner()
+        #expect(try SetupActions.checkClaudePlugin(paths, ledger: ledger, run: fake.run) == .update)
+        #expect(fake.calls.contains { $0 == "plugin marketplace update starnotch" })
+        #expect(fake.calls.contains { $0 == "plugin update starnotch-approvals@starnotch" })
     }
 
     @Test func aFailedStepKeepsAShortReason() throws {

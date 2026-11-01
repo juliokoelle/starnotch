@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import TestSupport
 @testable import NotchCore
@@ -88,6 +89,27 @@ import TestSupport
         #expect(session.contextWindow == 272_000)
     }
 
+    @Test func codexQuestionWaitsForTheUser() throws {
+        let args = #"{\"questions\":[{\"id\":\"db\",\"header\":\"Database\",\"question\":\"Which database?\",\"options\":[{\"label\":\"Postgres\",\"description\":\"Server\"},{\"label\":\"SQLite\",\"description\":\"File\"}]},{\"id\":\"orm\",\"header\":\"ORM\",\"question\":\"Use an ORM?\",\"options\":[{\"label\":\"Yes\"},{\"label\":\"No\"}]}]}"#
+        let lines = """
+        {"timestamp":"2026-10-31T10:00:00.000Z","type":"event_msg","payload":{"type":"task_started"}}
+        {"timestamp":"2026-10-31T10:00:05.000Z","type":"response_item","payload":{"type":"function_call","name":"request_user_input","arguments":"\(args)","call_id":"call_q1"}}
+        """
+        var rollout = CodexRollout()
+        rollout.feed(lines: Substring(lines))
+        let question = try #require(rollout.question)
+        #expect(question.text == "Which database?")
+        #expect(question.options == ["Postgres", "SQLite"])
+        #expect(question.count == 2)
+        #expect(CodexProvider.waitingLine(question) == "Codex asks: Which database? (Postgres / SQLite) · +1 more")
+        // The answer in the log, or a new turn, ends the wait.
+        rollout.feed(lines: #"{"timestamp":"2026-10-31T10:01:00.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_q1","output":"Postgres"}}"#)
+        #expect(rollout.question == nil)
+        // Also under a namespace.
+        #expect(CodexRollout.isQuestionTool("functions.request_user_input"))
+        #expect(!CodexRollout.isQuestionTool("shell"))
+    }
+
     @Test func olderFormatLimits() throws {
         var rollout = CodexRollout()
         rollout.feed(lines: Substring(Fixtures.text("codex/legacy.jsonl")))
@@ -163,6 +185,27 @@ import TestSupport
         let named = AgentSession(id: "x", project: "p", title: "Mine", cwd: "/", isBusy: false)
         #expect(session.enrich(named, userNamed: true).title == "Mine")
         #expect(ClaudeDesktop.Session.parse(Bytes.data("{}")) == nil)
+    }
+
+    @Test func listsTwelveSubagentsAndCountsTheRest() async throws {
+        let fixture = Fixtures.claudeHome()
+        defer { Fixtures.remove(fixture.home.deletingLastPathComponent()) }
+        let id = "5e550000-0000-4000-8000-000000000001"
+        let projects = fixture.home.appending(path: "projects")
+        let transcript = try #require(FileManager.default.enumerator(at: projects, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.first { $0.lastPathComponent == "\(id).jsonl" })
+        let dir = transcript.deletingPathExtension().appending(path: "subagents")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for index in 0..<14 {
+            let file = dir.appending(path: "agent-\(index).jsonl")
+            try Data().write(to: file)
+            try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(Double(-index) * 600)], ofItemAtPath: file.path)
+        }
+        let session = try #require(await ClaudeCodeProvider(root: fixture.home, desktop: nil).scan(now: now).sessions.first)
+        #expect(session.subagents.count == AgentSubagent.listed)
+        #expect(session.earlierSubagents == 14 - AgentSubagent.listed)
+        // Newest first.
+        #expect(session.subagents.first?.id == "agent-0")
     }
 
     @Test func sameProjectAcrossTools() async throws {

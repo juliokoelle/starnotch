@@ -6,7 +6,8 @@ import SwiftUI
 /// Is the Mac overloaded, and by what? CPU, GPU, memory and network with a two-minute history,
 /// and the apps behind them (helpers summed into their app). Samples every 2 s while the panel is
 /// open, every 10 s otherwise (CPU and memory only, for the warning). Nothing is ever quit from
-/// here. Below: keep awake, dark mode and the desktop icons as quick switches.
+/// here. Below: the batteries of the Mac and its devices, and keep awake, dark mode and the
+/// desktop icons as quick switches.
 @MainActor
 @Observable
 final class SystemModule: NotchModule {
@@ -28,8 +29,14 @@ final class SystemModule: NotchModule {
     private(set) var alertLevel = SystemAlert.Level.none
     /// Battery and charging (nil on a Mac without one).
     var battery: BatteryState?
+    /// Mice, keyboards, trackpads and headphones with their battery (Settings › Device batteries).
+    var devices: [DeviceBattery] = []
+    /// The panel opened: the devices are read again if their levels are old.
+    @ObservationIgnored var onRefreshDevices: (() -> Void)?
     /// Camera or microphone in use right now, and by which app.
     private(set) var media = MediaUse()
+    /// The camera or microphone went on or off (quiet during meetings follows it).
+    @ObservationIgnored var onMediaChange: ((MediaUse) -> Void)?
     /// The main character, who listens in the ear while the camera or microphone is in use.
     @ObservationIgnored var cast: AvatarCast?
     /// "Keep awake" holds the display on.
@@ -87,7 +94,10 @@ final class SystemModule: NotchModule {
             mediaTask = Task { [weak self] in
                 while !Task.isCancelled {
                     let next = MediaUse.read()
-                    if let self, next != self.media { withAnimation(.easeInOut(duration: 0.2)) { self.media = next } }
+                    if let self, next != self.media {
+                        withAnimation(.easeInOut(duration: 0.2)) { self.media = next }
+                        self.onMediaChange?(next)
+                    }
                     try? await Task.sleep(for: .seconds(3))
                 }
             }
@@ -265,6 +275,7 @@ final class SystemModule: NotchModule {
         if expanded, !previewMode {
             darkMode = DarkMode.isOn
             desktopHidden = DesktopIcons.hidden
+            onRefreshDevices?()
             // Restart the loop so the 2 s cadence (and the app list) starts now, not in 10 s.
             task?.cancel()
             task = nil
@@ -745,8 +756,9 @@ private struct AppRow: View {
     }
 }
 
-/// One quiet row: battery, the camera or microphone in use and long terminal commands on the
-/// left; the switches (keep awake, dark mode, desktop icons) on the right. Status gives way first.
+/// One quiet row: battery, the devices' batteries, the camera or microphone in use and long
+/// terminal commands on the left; the switches (keep awake, dark mode, desktop icons) on the
+/// right. Status gives way first.
 /// While keep awake is on, a laptop gets its second level beside it: also with the lid closed,
 /// chosen for a time in the same row.
 private struct StatusChips: View {
@@ -759,16 +771,20 @@ private struct StatusChips: View {
                     .transition(.opacity)
             } else {
                 // Status gives way before the switches lose their words: the long command first,
-                // then the battery's detail, then the switches' short words. Only at the very end
-                // do the switches that are off show their icon alone (the word in the tooltip);
-                // "Pause Tara" keeps hers, her icon alone says nothing.
+                // then the battery's detail, then the switches' short words, then the Mac's own
+                // battery (the menu bar has it; the devices' levels show nowhere else), then the
+                // devices that aren't low. Only at the very end do the switches that are off show
+                // their icon alone (the word in the tooltip); "Pause Tara" keeps hers, her icon
+                // alone says nothing. A battery running low always stays.
                 ViewThatFits(in: .horizontal) {
                     row(.full, command: true)
                     row(.full, command: false)
                     row(.full, command: false, battery: .short)
                     row(.short, command: false, battery: .short, media: false)
                     row(.short, command: false, battery: .none, media: false)
-                    row(.lit, command: false, battery: .none, media: false)
+                    row(.short, command: false, battery: .short, media: false, devices: .low)
+                    row(.short, command: false, battery: .none, media: false, devices: .low)
+                    row(.lit, command: false, battery: .none, media: false, devices: .low)
                 }
                 .transition(.opacity)
             }
@@ -779,8 +795,11 @@ private struct StatusChips: View {
     private enum Titles { case full, short, lit }
     /// The battery chip: with its state, the percentage alone, or not at all.
     private enum Battery { case full, short, none }
+    /// The devices' chip: every device, or only those running low.
+    private enum Devices { case all, low }
 
-    private func row(_ titles: Titles, command showsCommand: Bool, battery: Battery = .full, media mediaDetail: Bool = true) -> some View {
+    private func row(_ titles: Titles, command showsCommand: Bool, battery: Battery = .full, media mediaDetail: Bool = true,
+                     devices: Devices = .all) -> some View {
         func title(_ full: LocalizedStringKey, _ short: LocalizedStringKey, on: Bool) -> LocalizedStringKey? {
             switch titles {
             case .full: full
@@ -795,6 +814,7 @@ private struct StatusChips: View {
                      tint: state.isLow ? Theme.textPrimary : Theme.textBody)
                     .help(state.line)
             }
+            deviceChip(devices)
             if module.media.inUse {
                 // The camera or microphone always shows; narrow, the app's name alone.
                 HStack(spacing: 6) {
@@ -912,6 +932,31 @@ private struct StatusChips: View {
         .help(on ? Text(LidAwakeText.line(module.lidAwake)) + Text(verbatim: " · ") + Text("Click to switch off")
                  : Text("Also stay awake with the lid closed"))
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// The devices in one capsule, each its symbol and level (the lower earbud for AirPods); the
+    /// names and every level in the tooltip.
+    @ViewBuilder private func deviceChip(_ shown: Devices) -> some View {
+        let devices = module.devices.filter { device in
+            guard let level = device.lowest else { return false }
+            return shown == .all || level < DeviceBatteryAlerts.low
+        }
+        if !devices.isEmpty {
+            HStack(spacing: 10) {
+                ForEach(devices, id: \.key) { device in
+                    let level = device.lowest ?? 0
+                    HStack(spacing: 4) {
+                        Image(systemName: device.symbol).font(.system(size: 11, weight: .semibold))
+                        Text(verbatim: "\(level) %").font(Theme.font(12, .medium).monospacedDigit())
+                    }
+                    .foregroundStyle(level < DeviceBatteryAlerts.low ? Theme.textPrimary : Theme.textBody)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(Color.white.opacity(0.06), in: Capsule())
+            .help(devices.map { "\($0.name): \($0.line)" }.joined(separator: "\n"))
+        }
     }
 
     private func chip(symbol: String, text: String, tint: Color) -> some View {

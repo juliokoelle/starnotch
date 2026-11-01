@@ -48,12 +48,21 @@ enum ModuleAvailability {
             return Status(available: true, detail: "CPU, GPU, memory and the apps behind them")
         case .tools:
             return Status(available: true, detail: "Clipboard history (⌃⌥V), timers, file shelf")
+        case .allTools:
+            return Status(available: true, detail: "Every tool in one tab, with its shortcut")
         case .meeting:
             let found = FileManager.default.fileExists(atPath: Runtime.meetingAgentDir.appending(path: "agent.py").path)
             let missing = MeetingAgentSetup.missing(agentFound: found)
             return Status(available: found, detail: missing.isEmpty ? "Meeting agent: contradictions, questions, commitments"
                                                     : "Needs \(missing.joined(separator: ", ")): Settings › Meeting agent")
         }
+    }
+
+    /// For All tools: there, there once the switch's click has asked macOS (Today without a
+    /// connector turns on Apple Reminders, as its row in the gallery does), or missing.
+    static func availability(_ kind: ModuleKind, settings: SwitcherSettings) -> TabAvailability {
+        if status(kind, settings: settings).available { return .ready }
+        return kind == .today && Runtime.today == nil && EKEventStore.authorizationStatus(for: .reminder) != .restricted ? .asks : .missing
     }
 
     /// Shown in the notch: available and not switched off (the Tools tab: one of its tools is on).
@@ -84,6 +93,10 @@ enum ToolInfo {
         case .feature(.appVolume): "slider.horizontal.3"
         case .feature(.askTara): "bubble.left.and.text.bubble.right"
         case .feature(.files): "folder"
+        case .feature(.launcher): "square.grid.2x2"
+        case .feature(.downloads): "arrow.down.circle"
+        case .feature(.deviceBattery): "battery.75percent"
+        case .feature(.prompter): "text.alignleft"
         }
     }
 
@@ -110,6 +123,7 @@ enum ToolInfo {
         case .module(.system): "CPU, GPU, memory and the apps behind them"
         case .module(.dictation): "Wispr Flow hands-free, from the notch"
         case .module(.tools): "Clipboard history, timers, file shelf"
+        case .module(.allTools): "The last tab: every tool with its shortcut, started or turned on with a click"
         case .feature(.clipboard): "What you copied, on ⌃⌥V; never from password apps"
         case .feature(.timers): "Pomodoro, countdown and stopwatch beside the notch"
         case .feature(.shelf): "Drop files on the notch, drag them out or AirDrop them"
@@ -125,6 +139,10 @@ enum ToolInfo {
         case .feature(.appVolume): "A mixer for each app's volume; asks to capture system audio"
         case .feature(.askTara): "Ask about your meetings and notes, on ⌃⌥T or a click on Tara"
         case .feature(.files): "A small Finder: recent files and your folders, drag files out"
+        case .feature(.launcher): "Your shortcuts and apps as a grid in the Tools tab, also on ⌃⌥K"
+        case .feature(.downloads): "A line when a download finishes. Watches only names and sizes in Downloads, never reads or sends a file; macOS asks once"
+        case .feature(.deviceBattery): "Mouse, keyboard, trackpad and headphones in the System tab; a line when one runs low"
+        case .feature(.prompter): "Your script under the notch, near the camera; it follows your voice, on ⌃⌥K"
         }
     }
 }
@@ -195,6 +213,12 @@ struct ToolRow: View {
 
     private func switchTo(_ on: Bool) {
         Haptics.tick()
+        Self.set(item, on: on, state: state)
+    }
+
+    /// The switch, also All tools' Turn on: Today without a connector asks for Apple Reminders
+    /// first, on this click.
+    static func set(_ item: ToolItem, on: Bool, state: AppState) {
         if on, item == .module(.today), Runtime.today == nil, !(state.settings.remindersInToday && RemindersSource.authorized) {
             RemindersSource.requestAccess { granted in
                 Task { @MainActor in

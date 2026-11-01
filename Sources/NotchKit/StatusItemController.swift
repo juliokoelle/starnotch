@@ -22,6 +22,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var keepingAwake: () -> Bool = { false }
     var onToggleKeepAwake: () -> Void = {}
     var onOpenSetup: () -> Void = {}
+    private let prompterItem = NSMenuItem(title: Localization.string("Teleprompter"), action: nil, keyEquivalent: "")
+    /// The teleprompter's band is up, and the toggle.
+    var prompterOpen: () -> Bool = { false }
+    var onTogglePrompter: () -> Void = {}
     var onOpenDashboard: () -> Void = {}
     /// Release builds with Sparkle: "Check for Updates…".
     var updater: Updater? {
@@ -81,6 +85,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         awakeItem.target = self
         menu.addItem(awakeItem)
 
+        prompterItem.action = #selector(togglePrompter)
+        prompterItem.image = NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil)
+        prompterItem.target = self
+        menu.addItem(prompterItem)
+
         let setup = NSMenuItem(title: "Set up…", action: #selector(openSetup), keyEquivalent: "")
         setup.target = self
         menu.addItem(setup)
@@ -100,6 +109,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func toggleWatch() { onToggleWatch() }
     @objc private func toggleAwake() { onToggleKeepAwake() }
+    @objc private func togglePrompter() { onTogglePrompter() }
     @objc private func openSetup() { onOpenSetup() }
     @objc private func openDashboard() { onOpenDashboard() }
     @objc private func checkUpdates() { updater?.checkForUpdates() }
@@ -111,6 +121,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         awakeItem.state = keepingAwake() ? .on : .off
         // Only the tools switched on in Settings › Tools.
         awakeItem.isHidden = !ToolSwitches.isOn(.keepAwake, in: state.settings)
+        prompterItem.isHidden = !ToolSwitches.isOn(.prompter, in: state.settings)
+        prompterItem.state = prompterOpen() ? .on : .off
         inboxItem.isHidden = CaptureInbox.markdownFile == nil || !ToolSwitches.isOn(.quickCapture, in: state.settings)
         meetingNotesItem.isHidden = !FileManager.default.fileExists(atPath: Self.meetingNotesFile.path)
             || state.settings.disabledModules.contains(.meeting)

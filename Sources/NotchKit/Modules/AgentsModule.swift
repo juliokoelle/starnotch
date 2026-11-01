@@ -24,6 +24,8 @@ final class AgentsModule: NotchModule {
     /// Subagent lists the user opened or closed in the side card, by session; the rest follow
     /// `showsSubagents`.
     private var subagentsOpen: [String: Bool] = [:]
+    /// Sessions whose older subagents (finished more than two hours ago) are unfolded in the side card.
+    private var earlierOpen: Set<String> = []
     /// Sessions that just finished their turn, shown celebrating for a moment.
     private(set) var finishedAt: [String: Date] = [:]
     let cast: AvatarCast
@@ -204,6 +206,16 @@ final class AgentsModule: NotchModule {
         Haptics.tick()
         let open = !showsSubagents(of: agent)
         withAnimation(Theme.snappy) { subagentsOpen[agent.id] = open }
+    }
+
+    func showsEarlier(of agent: AgentSnapshot.Agent) -> Bool { earlierOpen.contains(agent.id) }
+
+    /// "+N earlier" under a session's subagents: unfolds the older ones in place, or folds them.
+    func toggleEarlier(of agent: AgentSnapshot.Agent) {
+        Haptics.tick()
+        withAnimation(Theme.snappy) {
+            if earlierOpen.contains(agent.id) { earlierOpen.remove(agent.id) } else { earlierOpen.insert(agent.id) }
+        }
     }
 
     /// The plan limits page in place of the sessions, or back from it.
@@ -1310,7 +1322,8 @@ private struct SideCard: View {
         case chip(Chip)
         case fold(AgentSnapshot.Agent)
         case sub(AgentSnapshot.Agent, AgentSnapshot.Subagent, last: Bool)
-        case earlier(String, Int)
+        /// The older subagents: folded to "+N earlier", or unfolded above it.
+        case earlier(AgentSnapshot.Agent, folded: Int, unlisted: Int, open: Bool)
 
         var id: String {
             switch self {
@@ -1318,7 +1331,7 @@ private struct SideCard: View {
             case .chip(let chip): "c-\(chip.id)"
             case .fold(let agent): "f-\(agent.id)"
             case .sub(_, let sub, _): "s-\(sub.id)"
-            case .earlier(let parent, _): "e-\(parent)"
+            case .earlier(let parent, _, _, _): "e-\(parent.id)"
             }
         }
     }
@@ -1334,16 +1347,22 @@ private struct SideCard: View {
                     branch: agent.branch)
     }
 
-    /// In the side card: running subagents and those that finished in the last two hours; the
-    /// rest count as earlier (the session's detail card lists the last five).
+    /// In the side card: running subagents and those that finished in the last two hours. Older
+    /// ones fold to "+N earlier", which unfolds them in place; beyond the listed ones they're counted.
     private func nested(_ agent: AgentSnapshot.Agent) -> [Row] {
         guard module.showsSubagents(of: agent) else { return [] }
         let recent = agent.subagents.filter(\.isRecent)
-        let earlier = agent.earlierSubagents + agent.subagents.count - recent.count
-        var rows = recent.enumerated().map { index, sub in
-            Row.sub(agent, sub, last: index == recent.count - 1 && earlier == 0)
+        let older = agent.subagents.filter { !$0.isRecent }
+        let open = module.showsEarlier(of: agent) && !older.isEmpty
+        let listed = open ? recent + older : recent
+        let folded = open ? 0 : older.count
+        let hasEarlierRow = !older.isEmpty || agent.earlierSubagents > 0
+        var rows = listed.enumerated().map { index, sub in
+            Row.sub(agent, sub, last: index == listed.count - 1 && !hasEarlierRow)
         }
-        if earlier > 0 { rows.append(.earlier(agent.id, earlier)) }
+        if hasEarlierRow {
+            rows.append(.earlier(agent, folded: folded, unlisted: agent.earlierSubagents, open: open))
+        }
         return rows
     }
 
@@ -1394,12 +1413,8 @@ private struct SideCard: View {
                                 case .sub(let parent, let sub, let last):
                                     SubagentRow(module: module, parent: parent, sub: sub, last: last)
                                         .padding(.leading, 10)
-                                case .earlier(_, let count):
-                                    Text("+\(count) earlier")
-                                        .font(Theme.font(11)).foregroundStyle(Theme.textTertiary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.leading, 34)
-                                        .frame(height: 16)
+                                case .earlier(let parent, let folded, let unlisted, let open):
+                                    earlierRow(parent, folded: folded, unlisted: unlisted, open: open)
                                 }
                             }
                         }
@@ -1408,6 +1423,34 @@ private struct SideCard: View {
                     LoopStrip(module: module)
                 }
             }
+        }
+    }
+
+    /// "+N earlier": a button that unfolds the older subagents, "Hide earlier" once they show.
+    /// Ones beyond the listed count can't be opened (their transcripts aren't read) and say so.
+    @ViewBuilder private func earlierRow(_ agent: AgentSnapshot.Agent, folded: Int, unlisted: Int, open: Bool) -> some View {
+        let note = unlisted > 0 ? String(format: Localization.string("%lld older not listed"), unlisted) : nil
+        if folded > 0 || open {
+            Button { module.toggleEarlier(of: agent) } label: {
+                HStack(spacing: 5) {
+                    Text(open ? Localization.string("Hide earlier") : String(format: Localization.string("+%lld earlier"), folded + unlisted))
+                        .foregroundStyle(Theme.textSecondary)
+                    if open, let note { Text("· \(note)").foregroundStyle(Theme.textTertiary) }
+                    Spacer(minLength: 0)
+                }
+                .font(Theme.font(11))
+                .lineLimit(1)
+                .frame(height: 18)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScale())
+            .padding(.leading, 34)
+            .help(Localization.string(open ? "Fold the earlier subagents" : "Show the earlier subagents"))
+        } else if let note {
+            Text(note).font(Theme.font(11)).foregroundStyle(Theme.textTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 34)
+                .frame(height: 16)
         }
     }
 

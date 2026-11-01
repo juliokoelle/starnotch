@@ -15,6 +15,9 @@ public enum ClaudePluginRepair: Equatable, Sendable {
     case reregister
     /// The marketplace is fine, the plugin is missing: install it.
     case install
+    /// Installed, but an older version than the app brings (Claude Code keeps its own copy of
+    /// each version): refresh the marketplace and update the plugin.
+    case update
 }
 
 /// Where Claude Code's registry says the "starnotch" marketplace comes from.
@@ -75,7 +78,7 @@ public enum ClaudePluginCheck {
     /// Code alone; `enabledPlugins` false means the user switched the plugin off, and stays so; a
     /// marketplace Claude Code doesn't know (the user removed it) isn't skipped, and stays away.
     public static func decide(marketplaces: Data?, installed: Data?, settings: Data?, stableCopy: URL,
-                              copyStale: Bool, exists: (String) -> Bool) -> ClaudePluginRepair {
+                              copyStale: Bool, bundledVersion: String? = nil, exists: (String) -> Bool) -> ClaudePluginRepair {
         let keep: ClaudePluginRepair = copyStale ? .refreshCopy : .fine
         guard let marketplaces, let source = marketplace(marketplaces),
               let installed, let root = try? JSONSerialization.jsonObject(with: installed) as? [String: Any],
@@ -90,7 +93,17 @@ public enum ClaudePluginCheck {
         guard isCurrent(source, stableCopy: stableCopy, exists: exists) else { return .reregister }
         // Installed in any scope and any format; an empty list is none.
         let isInstalled = plugins[SetupPaths.pluginID].map { ($0 as? [Any])?.isEmpty != true } ?? false
-        return isInstalled ? keep : .install
+        guard isInstalled else { return .install }
+        // Any installed copy older than the app's: Claude Code would go on running the old hooks.
+        let versions = (plugins[SetupPaths.pluginID] as? [[String: Any]] ?? []).compactMap { $0["version"] as? String }
+        if let bundledVersion, !versions.isEmpty, versions.contains(where: { $0 != bundledVersion }) { return .update }
+        return keep
+    }
+
+    /// The version in a plugin's `.claude-plugin/plugin.json`.
+    public static func pluginVersion(_ data: Data?) -> String? {
+        guard let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (object["version"] as? String)?.nilIfEmpty
     }
 }
 
@@ -184,6 +197,9 @@ extension SetupActions {
             installed: try? Data(contentsOf: paths.installedPlugins),
             settings: try? Data(contentsOf: paths.claudeSettings),
             stableCopy: paths.claudePluginCopy, copyStale: stale,
+            bundledVersion: ClaudePluginCheck.pluginVersion(paths.claudePluginBundle.flatMap {
+                try? Data(contentsOf: $0.appending(path: "starnotch-approvals/.claude-plugin/plugin.json"))
+            }),
             exists: { FileManager.default.fileExists(atPath: $0) })
         let env = ["HOME": paths.home.path]
         func install(_ claude: String) throws {
@@ -202,6 +218,12 @@ extension SetupActions {
             guard let claude = paths.claudeBinary else { throw SetupError.missing("The claude command") }
             if stale { try placeClaudePluginCopy(paths) }
             try install(claude)
+        case .update:
+            guard let claude = paths.claudeBinary else { throw SetupError.missing("The claude command") }
+            if stale { try placeClaudePluginCopy(paths) }
+            _ = run(claude, ["plugin", "marketplace", "update", SetupPaths.marketplaceName], env)
+            let updated = run(claude, ["plugin", "update", SetupPaths.pluginID], env)
+            guard updated.status == 0 else { throw SetupError.failed("Couldn't update the plugin: \(firstLine(updated.output))") }
         }
         return repair
     }

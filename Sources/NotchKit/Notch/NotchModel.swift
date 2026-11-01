@@ -18,10 +18,14 @@ final class NotchModel {
         case palette
         /// Agents inbox (⌃⌥A): what needs the user, one at a time.
         case inbox
+        /// The teleprompter's band (⌃⌥K › Teleprompter): stays until closed.
+        case prompter
     }
 
     var interaction = Interaction.rest
-    var module = ModuleKind.agents
+    var module = ModuleKind.agents {
+        didSet { if module != oldValue { download = nil } }
+    }
     /// +1 when the last tab change went right, -1 when left; content slides that way.
     var direction: CGFloat = 1
     /// Size of the hardware notch (or the fallback zone).
@@ -31,12 +35,24 @@ final class NotchModel {
     var keyboardFocus = false
     /// A sneak peek on the closed island (driven by `NotchController.sneak`).
     var sneak: Sneak?
+    /// The volume bar under the notch for a moment after a change (`NotchController.showLevel`).
+    var level: LevelReading?
+    /// Quiet during a meeting (a setting): only agents' approvals and questions get through; a
+    /// small bell shows on hover.
+    var meetingQuiet = false
+    /// A thin outline around the island (a setting).
+    var outline = false
     /// Quick capture while open.
     var capture: QuickCapture?
+    /// A finished download opened from its line (`NotchController.showDownload`): its card takes
+    /// the panel until a tab is picked or the panel closes.
+    var download: URL?
     /// The command palette while open.
     var palette: CommandPalette?
     /// Everything agents and loops need from the user (also counted in the Agents ear).
     var inbox: AgentsInbox?
+    /// The teleprompter, while it is switched on in Settings › Tools.
+    var prompter: Prompter?
     /// Round-4 design preview (`--preview`): new modules and visuals that aren't shipped yet.
     var previewFeatures = false
     /// The moon in the panel: Watch mode on or off.
@@ -142,12 +158,13 @@ final class NotchModel {
     /// (the agents module), so a hover never shows the stats of the tab that was open last.
     private var idle: NotchModule { detailedEars ? current : module(.agents) ?? current }
 
-    enum Presentation: Equatable { case closed, compact, sneak, peek, expanded, capture, palette, inbox }
+    enum Presentation: Equatable { case closed, compact, sneak, level, peek, expanded, capture, palette, inbox, prompter }
 
     var presentation: Presentation {
         switch interaction {
         case .rest:
-            sneak != nil ? .sneak
+            level != nil ? .level
+                : sneak != nil ? .sneak
                 : ambient != nil && (held != nil && !watching || Quiet.showsEars(ambientLevel, mode: earsMode, watching: watching)) ? .compact
                 : restEarsShown != nil || taraAlways && !watching && earsMode != .never ? .compact : .closed
         case .peek: .peek
@@ -155,6 +172,7 @@ final class NotchModel {
         case .capture: .capture
         case .palette: .palette
         case .inbox: .inbox
+        case .prompter: .prompter
         }
     }
 
@@ -162,14 +180,57 @@ final class NotchModel {
     /// empty without Accessibility permission or on a display without a notch.
     var menuBarItems: [ClosedRange<CGFloat>] = []
 
-    /// The open panel's size class: the current tab's, large while an approval card shows.
-    var panelSize: PanelSize { approvals?.current != nil || interaction == .inbox ? .large : current.panelSize }
+    /// What a copy of the island on another display shows at rest (`IslandSatellites`): everything
+    /// but the geometry, which is the copy's own display's.
+    struct Mirror {
+        var modules: [NotchModule]
+        var module: ModuleKind
+        var cast: AvatarCast?
+        var earsMode: EarsMode
+        var detailedEars: Bool
+        var taraAlways: Bool
+        var watching: Bool
+        var sneak: Sneak?
+        var level: LevelReading?
+        var memoryPaused: Bool
+        var previewScreenReading: Bool?
+        var outline: Bool
+    }
+
+    var mirror: Mirror {
+        Mirror(modules: modules, module: module, cast: cast, earsMode: earsMode, detailedEars: detailedEars,
+               taraAlways: taraAlways, watching: watching, sneak: sneak, level: level, memoryPaused: memoryPaused,
+               previewScreenReading: previewScreenReading, outline: outline)
+    }
+
+    /// Takes on another island's state; only what changed is set, so the copy's view redraws no
+    /// more than the island's.
+    func show(_ mirror: Mirror) {
+        if !modules.elementsEqual(mirror.modules, by: ===) { modules = mirror.modules }
+        if module != mirror.module { module = mirror.module }
+        if cast !== mirror.cast { cast = mirror.cast }
+        if earsMode != mirror.earsMode { earsMode = mirror.earsMode }
+        if detailedEars != mirror.detailedEars { detailedEars = mirror.detailedEars }
+        if taraAlways != mirror.taraAlways { taraAlways = mirror.taraAlways }
+        if watching != mirror.watching { watching = mirror.watching }
+        if sneak != mirror.sneak { sneak = mirror.sneak }
+        if level != mirror.level { level = mirror.level }
+        if memoryPaused != mirror.memoryPaused { memoryPaused = mirror.memoryPaused }
+        if previewScreenReading != mirror.previewScreenReading { previewScreenReading = mirror.previewScreenReading }
+        if outline != mirror.outline { outline = mirror.outline }
+    }
+
+    /// The open panel's size class: the current tab's, large while an approval card, a finished
+    /// download's card or the teleprompter shows.
+    var panelSize: PanelSize { approvals?.current != nil || interaction == .inbox || interaction == .prompter || download != nil ? .large : current.panelSize }
 
     var layout: NotchLayout {
         let panel = panelSize
         return NotchLayout(presentation: presentation, notch: notchSize, panel: panel,
                            bodyHeight: interaction == .inbox ? inbox?.bodyHeight ?? InboxView.emptyHeight
-                               : approvals?.current.map { $0.request.asksForAnswer ? 196 : 150 } ?? panel.height,
+                               : interaction == .prompter ? prompter?.bodyHeight ?? panel.height
+                               : approvals?.current.map { ApprovalCard.height(for: $0.request) }
+                                   ?? (download != nil ? DownloadCard.height : panel.height),
                            earWidth: earModule.compactEarWidth, oneEar: !detailedEars, peekStyle: peekStyle,
                            menuBarRoom: Runtime.menuBarRoom, menuBarItems: menuBarItems)
     }
@@ -237,8 +298,8 @@ struct NotchLayout: Equatable {
         case .closed, .compact: 6
         // One-eared like the rest: the same flares, so the island's edges stay where they were.
         case .peek where peekStyle != .line: 6
-        case .peek, .sneak: 9
-        case .expanded, .capture, .palette, .inbox: 14
+        case .peek, .sneak, .level: 9
+        case .expanded, .capture, .palette, .inbox, .prompter: 14
         }
     }
 
@@ -248,8 +309,9 @@ struct NotchLayout: Equatable {
         case .compact: 11
         case .peek where peek == .ear: 11
         case .peek, .sneak: 17
+        case .level: 14
         case .expanded, .inbox: 30
-        case .capture, .palette: 24
+        case .capture, .palette, .prompter: 24
         }
     }
 
@@ -261,8 +323,11 @@ struct NotchLayout: Equatable {
         case .peek: peek == .line ? notch.width + 2 * besideNotch : oneEarIsland.width
         // A sneak is unasked for: like the ears it stays out of the icons beside the notch.
         case .sneak: notch.width + 2 * min(besideNotch, earRoom)
+        // The volume bar: as wide as a sneak, so it stays out of the icons too.
+        case .level: notch.width + 2 * min(besideNotch, earRoom)
         // The straight sides are what runs through the icons; the flares only touch the top rows.
-        case .expanded, .inbox:
+        // The teleprompter's band is as wide as the large panel: room for long lines.
+        case .expanded, .inbox, .prompter:
             MenuBarFit.width(preferred: panel.width, in: panel.widthRange, items: menuBarItems)
         case .capture:
             MenuBarFit.width(preferred: Self.captureWidth, in: Self.captureWidth - 48 ... Self.captureWidth + 24, items: menuBarItems)
@@ -302,6 +367,8 @@ struct NotchLayout: Equatable {
 
     /// Below the notch in the one-eared peek: Tara whole and the line beside her.
     static let quietBand: CGFloat = 38
+    /// Below the notch while the volume bar shows: a slim band, the speaker and the bar.
+    static let levelBand: CGFloat = 24
 
     /// How far the island's centre sits left (negative) of the notch's: only with one ear at rest
     /// and in the one-eared peek.
@@ -340,7 +407,10 @@ struct NotchLayout: Equatable {
             case .earLine: notch.height + Self.quietBand
             }
         case .sneak: notch.height + 36
+        case .level: notch.height + Self.levelBand
         case .expanded, .inbox: notch.height + Self.bodyTop + min(bodyHeight, panel.height) + Self.bodyBottom
+        // The band's own height, within the largest island (`maxSize`).
+        case .prompter: notch.height + min(bodyHeight, Self.bodyTop + Self.panelHeight + Self.bodyBottom)
         case .capture: notch.height + 8 + 44 + 9 + 24 + 14
         // The field and six rows; fewer results leave the room empty instead of resizing.
         case .palette: notch.height + 8 + PaletteView.fieldHeight + 6 + PaletteView.visibleRows * PaletteView.rowHeight + 10
@@ -360,6 +430,8 @@ struct NotchLayout: Equatable {
 struct NotchShape: Shape {
     var topRadius: CGFloat
     var bottomRadius: CGFloat
+    /// Open along the top edge: the outline (a setting) draws no line across the screen's top.
+    var closed = true
 
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(topRadius, bottomRadius) }
@@ -403,7 +475,7 @@ struct NotchShape: Shape {
             control1: CGPoint(x: rect.maxX - t, y: rect.minY + t * (1 - k)),
             control2: CGPoint(x: rect.maxX - t * k, y: rect.minY)
         )
-        p.closeSubpath()
+        if closed { p.closeSubpath() }
         return p
     }
 }

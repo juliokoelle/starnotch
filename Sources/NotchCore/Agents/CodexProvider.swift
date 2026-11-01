@@ -81,6 +81,14 @@ public actor CodexProvider: AgentProvider, UsageProvider, AgentEventSource, Appr
         return ProviderScan(sessions: sessions(from: rollouts, now: now))
     }
 
+    /// "Codex asks: Which database? (Postgres / SQLite)" for the notch and the inbox.
+    static func waitingLine(_ question: CodexRollout.Question) -> String {
+        var line = "Codex asks: " + question.text
+        if !question.options.isEmpty { line += " (" + question.options.joined(separator: " / ") + ")" }
+        if question.count > 1 { line += " · +\(question.count - 1) more" }
+        return line
+    }
+
     func sessions(from rollouts: [(Thread, CodexRollout, Date)], now: Date) -> [AgentSession] {
         // Subagents hang under their parent; the automatic reviewer isn't shown.
         let children = Dictionary(grouping: rollouts.filter { !$0.1.isGuardian && $0.1.parentThreadID != nil }) { $0.1.parentThreadID! }
@@ -92,13 +100,15 @@ public actor CodexProvider: AgentProvider, UsageProvider, AgentEventSource, Appr
             let threadID = rollout.threadID ?? thread.id
             let cwd = rollout.cwd ?? thread.cwd ?? root.path
             let fresh = now.timeIntervalSince(mtime) < Self.staleWorking
-            let working = rollout.phase == .working && fresh
+            // Waiting on the user's answer to its question is not working.
+            let asking = rollout.question != nil && rollout.phase == .working && (fresh || liveCwds[Self.resolved(cwd)] != nil)
+            let working = rollout.phase == .working && fresh && !asking
             var live = liveCwds[Self.resolved(cwd)]
             if live != nil, claimedCwds.contains(Self.resolved(cwd)) { live = nil }
             guard working || now.timeIntervalSince(mtime) < Self.recentWindow || live != nil else { continue }
             if live != nil { claimedCwds.insert(Self.resolved(cwd)) }
             let subs = (children[threadID] ?? []).sorted { $0.2 > $1.2 }
-            let shown = subs.prefix(5).map { child -> AgentSubagent in
+            let shown = subs.prefix(AgentSubagent.listed).map { child -> AgentSubagent in
                 let (childThread, childRollout, childTime) = child
                 let running = childRollout.phase == .working && now.timeIntervalSince(childTime) < Self.staleWorking
                 let status: SubagentProgress.Status = running ? .running : childRollout.phase == .aborted ? .stopped : .done
@@ -137,6 +147,7 @@ public actor CodexProvider: AgentProvider, UsageProvider, AgentEventSource, Appr
                 contextTokens: rollout.contextTokens,
                 provider: Self.id,
                 contextWindow: rollout.contextWindow,
+                needsYou: asking ? rollout.question.map(Self.waitingLine) : nil,
                 tty: live?.tty))
             if sessions.count >= Self.maxSessions { break }
         }

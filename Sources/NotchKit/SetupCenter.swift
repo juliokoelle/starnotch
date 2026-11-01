@@ -273,6 +273,8 @@ final class SetupCenter {
                 status[.claudePlugin] = .done(Localization.string("Registered again from the app's copy. Restart running sessions."))
             case .success(.install):
                 status[.claudePlugin] = .done(Localization.string("Installed again. Restart running sessions."))
+            case .success(.update):
+                status[.claudePlugin] = .done(Localization.string("Updated: questions with options can be answered in the notch. Restart running sessions."))
             case .success:
                 break
             case .failure(let error):

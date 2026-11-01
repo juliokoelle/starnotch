@@ -16,12 +16,17 @@ struct NotchRootView: View {
     /// The confirmation's buttons: the Notepad on "Tara's notes", or the Markdown inbox.
     var onCaptureShowNotes: () -> Void = {}
     var onCaptureOpenInbox: () -> Void = {}
+    var onCaptureOpenAppleNote: () -> Void = {}
     /// A palette row was clicked (or ↵): its index, and whether ⌘ was held.
     var onPaletteActivate: (Int, Bool) -> Void = { _, _ in }
     /// The inbox card's own button: ↵ (true) or ⌘↵, and the id of the item it shows.
     var onInboxKey: (Bool, String) -> Void = { _, _ in }
     /// The inbox ran out while open (the last prompt answered by click).
     var onInboxEmpty: () -> Void = {}
+    /// The download card's buttons.
+    var onDownload: (DownloadCard.Action) -> Void = { _ in }
+    /// The teleprompter's close button.
+    var onPrompterClose: () -> Void = {}
 
     @Namespace private var namespace
     @FocusState private var focused: Bool
@@ -36,10 +41,18 @@ struct NotchRootView: View {
                 .background(
                     NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius)
                         .fill(Color.black)
-                        .shadow(color: .black.opacity([.expanded, .palette, .inbox].contains(layout.presentation) ? 0.55 : 0),
+                        .shadow(color: .black.opacity([.expanded, .palette, .inbox, .prompter].contains(layout.presentation) ? 0.55 : 0),
                                 radius: 22, y: 10)
                 )
                 .clipShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
+                // A thin outline (a setting), so the pill shows on a dark menu bar or wallpaper.
+                .overlay {
+                    if model.outline {
+                        NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius, closed: false)
+                            .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .coordinateSpace(.named(Self.space))
                 .environment(\.notch, NotchEnvironment(namespace: namespace))
                 .environment(\.figuresHidden, model.watching)
@@ -48,7 +61,7 @@ struct NotchRootView: View {
                 .environment(\.figureCue, figureCue)
                 .environment(\.handlePressed, model.handlePressed)
                 .contentShape(NotchShape(topRadius: layout.topRadius, bottomRadius: layout.bottomRadius))
-                .onTapGesture { if ![.expanded, .palette, .inbox].contains(model.interaction) { onTapIsland() } }
+                .onTapGesture { if ![.expanded, .palette, .inbox, .prompter].contains(model.interaction) { onTapIsland() } }
                 // One ear at rest (the quiet look): the island grows to the left only.
                 .offset(x: layout.centerOffset)
             Spacer(minLength: 0)
@@ -56,7 +69,7 @@ struct NotchRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Watch mode at rest: nothing at all, also no pill over a fullscreen video on a display
         // without a notch. A hover or an urgent line brings the island back.
-        .opacity(model.watching && model.interaction == .rest && model.sneak == nil ? 0 : 1)
+        .opacity(model.watching && model.interaction == .rest && model.sneak == nil && model.level == nil ? 0 : 1)
         // Ears come and go softly when attention or Watch mode changes.
         .animation(.easeInOut(duration: 0.2), value: model.presentation)
         .environment(\.colorScheme, .dark)
@@ -105,7 +118,8 @@ struct NotchRootView: View {
                 if let capture = model.capture {
                     CaptureView(capture: capture, cast: model.cast, notch: notch,
                                 onSend: onCaptureSend, onMic: onCaptureMic, onEvent: onCaptureEvent,
-                                onShowNotes: onCaptureShowNotes, onOpenInbox: onCaptureOpenInbox)
+                                onShowNotes: onCaptureShowNotes, onOpenInbox: onCaptureOpenInbox,
+                                onOpenAppleNote: onCaptureOpenAppleNote)
                         .padding(.horizontal, layout.topRadius)
                         .transition(.blurSlide(y: -12, scale: 0.94))
                 }
@@ -118,6 +132,12 @@ struct NotchRootView: View {
             case .inbox:
                 if let inbox = model.inbox {
                     InboxView(inbox: inbox, notch: notch, onKey: onInboxKey, onEmpty: onInboxEmpty)
+                        .padding(.horizontal, layout.topRadius)
+                        .transition(.blurSlide(y: -14, scale: 0.94))
+                }
+            case .prompter:
+                if let prompter = model.prompter {
+                    PrompterView(prompter: prompter, notch: notch, width: layout.innerWidth, onClose: onPrompterClose)
                         .padding(.horizontal, layout.topRadius)
                         .transition(.blurSlide(y: -14, scale: 0.94))
                 }
@@ -142,6 +162,19 @@ struct NotchRootView: View {
                             .frame(maxHeight: .infinity)
                             .id(sneak)
                             .transition(.blurSlide(y: -6, scale: 0.96))
+                    }
+                }
+                .padding(.horizontal, layout.topRadius)
+                .transition(.blurSlide(scale: 0.9))
+            case .level:
+                // The volume bar: the notch row empty, the speaker and the level in a slim band.
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: notch.height)
+                    if let level = model.level {
+                        LevelBar(reading: level)
+                            .padding(.horizontal, 14)
+                            .frame(maxHeight: .infinity)
+                            .transition(.blurSlide(y: -4, scale: 0.96))
                     }
                 }
                 .padding(.horizontal, layout.topRadius)
@@ -191,7 +224,7 @@ struct NotchRootView: View {
                 // screen context reads, dimmed and asleep while paused or off; `taraResting`).
                 // Right-click pauses or resumes her memory.
                 .contextMenu { memoryMenu }
-                // Watch mode on: a tiny moon, only while hovered.
+                // Watch mode on: a tiny moon, only while hovered; quiet during a meeting: a bell.
                 .overlay(alignment: .bottomTrailing) {
                     if isPeek && model.watching {
                         Image(systemName: "moon.fill").font(.system(size: 8, weight: .semibold))
@@ -199,6 +232,12 @@ struct NotchRootView: View {
                             .padding(.trailing, layout.topRadius + 8)
                             .padding(.bottom, 5)
                             .help("Watch mode is on (⌃⌥W)")
+                    } else if isPeek && model.meetingQuiet {
+                        Image(systemName: "bell.slash.fill").font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .padding(.trailing, layout.topRadius + 8)
+                            .padding(.bottom, 5)
+                            .help("Quiet during your meeting: only approvals and questions get through")
                     }
                 }
                 .transition(.blurSlide(scale: 0.9))
@@ -238,6 +277,11 @@ struct NotchRootView: View {
                         if let approvals = model.approvals, let pending = approvals.current {
                             ApprovalCard(center: approvals, pending: pending, agents: model.module(.agents) as? AgentsModule)
                                 .id(pending.id)
+                                .transition(.blurSlide(y: -10))
+                        } else if let download = model.download {
+                            DownloadCard(url: download, canShelve: (model.module(.tools) as? ToolsModule)?.tabs.contains(.shelf) == true,
+                                         act: onDownload)
+                                .id(download)
                                 .transition(.blurSlide(y: -10))
                         } else {
                             model.current.body()
@@ -347,10 +391,11 @@ private struct TabStrip: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
                     if module.kind == model.module { step = width + 2 }
                 }
-                // The hover tooltip also says that tabs can be moved: hold, then drag.
-                .help(Text(LocalizedStringKey(module.kind.title)) + Text(verbatim: " · ") + Text("Hold and drag to move"))
+                // The hover tooltip also says that tabs can be moved: hold, then drag (All tools stays last).
+                .help(module.kind == ModuleOrder.pinnedLast ? Text(LocalizedStringKey(module.kind.title))
+                      : Text(LocalizedStringKey(module.kind.title)) + Text(verbatim: " · ") + Text("Hold and drag to move"))
                 .accessibilityLabel(module.kind.title)
-                .accessibilityHint(Text("Hold and drag to move"))
+                .accessibilityHint(module.kind == ModuleOrder.pinnedLast ? Text(verbatim: "") : Text("Hold and drag to move"))
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
             if badge && model.memoryPaused { paused }
@@ -411,7 +456,7 @@ private struct TabStrip: View {
         LongPressGesture(minimumDuration: 0.35)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
             .onChanged { value in
-                guard case .second(true, let drag) = value else { return }
+                guard case .second(true, let drag) = value, kind != ModuleOrder.pinnedLast else { return }
                 if dragging == nil {
                     dragging = kind
                     spent = 0
@@ -436,11 +481,11 @@ private struct TabStrip: View {
             }
     }
 
-    /// Moves the dragged tab one place; `false` at either end.
+    /// Moves the dragged tab one place; `false` at either end, and before All tools (it stays last).
     private func move(_ kind: ModuleKind, by step: Int) -> Bool {
         guard let from = model.modules.firstIndex(where: { $0.kind == kind }) else { return false }
         let to = from + step
-        guard model.modules.indices.contains(to) else { return false }
+        guard model.modules.indices.contains(to), model.modules[to].kind != ModuleOrder.pinnedLast else { return false }
         withAnimation(reduceMotion ? nil : Theme.snappy) { model.modules.swapAt(from, to) }
         Haptics.tick()
         return true

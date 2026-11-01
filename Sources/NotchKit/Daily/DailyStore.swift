@@ -581,19 +581,22 @@ final class DailyStore {
     }
 }
 
-/// One location fix from CoreLocation, approximate. macOS asks once, on the user's click; after a
-/// no, it stays no.
+/// One location fix from CoreLocation, approximate for the weather (time to leave asks for a
+/// closer one, with the same permission). macOS asks once, on the user's click; after a no, it
+/// stays no.
 @MainActor
-private final class Locator: NSObject, CLLocationManagerDelegate {
+final class Locator: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var waiting: [CheckedContinuation<CLLocation?, Never>] = []
+    /// Counts requests: a timeout only ends the one it was started for.
+    private var request = 0
     /// Every change of the app's authorization, also the ones made in System Settings.
     var onStatusChange: ((CLAuthorizationStatus) -> Void)?
 
-    override init() {
+    init(accuracy: CLLocationAccuracy = kCLLocationAccuracyReduced) {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyReduced
+        manager.desiredAccuracy = accuracy
     }
 
     var status: CLAuthorizationStatus { manager.authorizationStatus }
@@ -608,6 +611,8 @@ private final class Locator: NSObject, CLLocationManagerDelegate {
         return await withCheckedContinuation { continuation in
             waiting.append(continuation)
             guard waiting.count == 1 else { return }
+            request += 1
+            let mine = request
             if manager.authorizationStatus == .notDetermined {
                 manager.requestWhenInUseAuthorization()
             } else {
@@ -616,6 +621,7 @@ private final class Locator: NSObject, CLLocationManagerDelegate {
             // macOS may never answer (no Wi-Fi, prompt left open): give up after a while.
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(45))
+                guard self?.request == mine else { return }
                 self?.finish(nil)
             }
         }

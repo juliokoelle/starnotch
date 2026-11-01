@@ -1,5 +1,6 @@
 #!/bin/bash
-# PermissionRequest hook: asks the Starnotch island, prints its decision.
+# PermissionRequest hook: asks the Starnotch island, prints its decision. Claude Code's questions
+# with options (AskUserQuestion) come through PreToolUse; the island answers them with the picks.
 #
 #   ask-notch.sh          # Claude Code (the plugin's hooks.json)
 #   ask-notch.sh codex    # Codex (~/.codex/hooks.json, see ../codex/install-hook.sh)
@@ -48,10 +49,12 @@ fi
 reply=$( { printf '%s\n' "$input"; while sleep 0.2; do printf '\n' || exit 0; done; } 2>/dev/null \
     | /usr/bin/nc -U -w "${STARNOTCH_WAIT:-70}" "$sock" 2>/dev/null | head -c 65536 )
 
-# Only a decision for this event goes through; anything else means "ask in the terminal".
+# Only a decision for these events goes through; anything else means "ask in the terminal".
 case "$reply" in
     '{"hookSpecificOutput":{"decision":{"behavior":"allow"'*'"hookEventName":"PermissionRequest"}}' | \
-    '{"hookSpecificOutput":{"decision":{"behavior":"deny"'*'"hookEventName":"PermissionRequest"}}')
+    '{"hookSpecificOutput":{"decision":{"behavior":"deny"'*'"hookEventName":"PermissionRequest"}}' | \
+    '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{'*'}}}' | \
+    '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"'*'}}')
         printf '%s' "$reply" ;;
 esac
 exit 0

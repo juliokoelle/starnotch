@@ -132,6 +132,35 @@ struct SettingsView: View {
                              : "Reminders access is off in System Settings › Privacy & Security › Reminders.")
                     }
                 }
+                if !state.settings.disabledModules.contains(.nowPlaying) {
+                    Toggle(isOn: Binding(get: { state.settings.musicModes },
+                                         set: { Haptics.tick(); state.settings.musicModes = $0 })) {
+                        Text("Shuffle, repeat and like in Now playing")
+                        Text("Beside the controls when the player has them: Music all three, Spotify shuffle and repeat. macOS asks once whether the player may be controlled, on your first click.")
+                    }
+                }
+                if !state.settings.disabledModules.contains(.calendar) {
+                    Toggle(isOn: Binding(get: { state.settings.cameraCheck },
+                                         set: { Haptics.tick(); state.settings.cameraCheck = $0 })) {
+                        Text("Check camera before a meeting")
+                        Text("A mirrored preview of your camera beside Join, only while it shows; nothing is recorded. macOS asks for the camera on your first click.")
+                    }
+                    LeaveSettingsRows(state: state)
+                }
+                Toggle(isOn: $state.settings.addInNotch) {
+                    Text("Add reminders and events in the notch")
+                    Text("A + in Today adds a reminder, the one in the calendar an event; Today deletes a reminder with a short undo. macOS asks for access on the first save.")
+                }
+                if !state.settings.disabledModules.contains(.allTools) {
+                    Toggle(isOn: Binding(get: { state.settings.allToolsShowsOff },
+                                         set: { Haptics.tick(); state.settings.allToolsShowsOff = $0 })) {
+                        Text("Switched-off tools in All tools")
+                        Text("Dimmed, with Turn on. Off: the last tab lists only the tools that are on.")
+                    }
+                }
+                if ToolSwitches.isOn(.shelf, in: state.settings) {
+                    ShelfSettingsRows(state: state)
+                }
             } header: {
                 Text("Tools")
             } footer: {
@@ -141,6 +170,9 @@ struct SettingsView: View {
 
             // The daily tools' details (strand daily), only while one of them is on.
             DailySettingsSection(state: state)
+            // The launcher's shortcuts and apps, while it is on.
+            LauncherSettingsSection(state: state, catalog: catalog)
+            AppleNotesSettings(state: state)
             }
 
             if shows(.general) {
@@ -161,6 +193,25 @@ struct SettingsView: View {
                     Text("Open on the last tab")
                     Text("The notch opens where you left it, on music for example. Off, it always opens on the first tab.")
                 }
+                LabeledContent {
+                    GlassSegmented(label: Localization.string("Island width"), selection: scaleBinding(\.islandWidthScale), options: Self.scales)
+                } label: {
+                    Text("Island width")
+                    Text("Below 100 % only for the pill on a display without a notch.")
+                }
+                LabeledContent("Island height") {
+                    GlassSegmented(label: Localization.string("Island height"), selection: scaleBinding(\.islandHeightScale), options: Self.scales)
+                }
+                Toggle(isOn: Binding(get: { state.settings.islandOutline },
+                                     set: { Haptics.tick(); state.settings.islandOutline = $0 })) {
+                    Text("Outline around the island")
+                    Text("A thin light line, so the island shows on a dark menu bar.")
+                }
+                Toggle(isOn: Binding(get: { state.settings.levelHUD },
+                                     set: { Haptics.tick(); state.settings.levelHUD = $0 })) {
+                    Text("Volume in the notch")
+                    Text("A slim bar under the notch for a moment when you change the volume or mute. macOS still shows its own volume display too; apps can't hide it. Brightness isn't shown: macOS gives apps no way to read it.")
+                }
             } header: {
                 Text("Notch")
             } footer: {
@@ -176,7 +227,8 @@ struct SettingsView: View {
             } header: {
                 Text("Display")
             } footer: {
-                Text("On a display without a notch, the island is a small pill at the top center.")
+                (Text("On a display without a notch, the island is a small pill at the top center.") + Text(verbatim: " ")
+                    + Text("With All displays every display shows it, and it opens on the one the pointer is on."))
                     .foregroundStyle(.secondary)
             }
 
@@ -191,6 +243,11 @@ struct SettingsView: View {
                 }
                 LabeledContent("Watch mode by hand (⌃⌥W) lasts") {
                     GlassSegmented(label: Localization.string("Watch mode by hand (⌃⌥W) lasts"), selection: $state.settings.watchTimer, options: WatchTimer.allCases.map { ($0, Localization.string($0.title)) })
+                }
+                Toggle(isOn: Binding(get: { state.settings.meetingQuiet },
+                                     set: { Haptics.tick(); state.settings.meetingQuiet = $0 })) {
+                    Text("Quiet during meetings")
+                    Text("While the camera or microphone is in use or a meeting from your calendar runs: no sounds and no lines, only your agents' approvals and questions. Afterwards one line says what waited.")
                 }
             } header: {
                 Text("Quiet")
@@ -295,12 +352,58 @@ struct SettingsView: View {
         }
     }
 
+    /// The island's width and height: a share of the notch (`NotchGeometry.islandScales`).
+    private static let scales: [(value: Double, title: String)] = NotchGeometry.islandScales.map { ($0, "\(Int(($0 * 100).rounded())) %") }
+
+    /// A size picked in Settings › Notch, with a tick like the switches.
+    private func scaleBinding(_ key: WritableKeyPath<SwitcherSettings, Double>) -> Binding<Double> {
+        Binding(get: { state.settings[keyPath: key] }, set: { value in
+            guard value != state.settings[keyPath: key] else { return }
+            Haptics.tick()
+            state.settings[keyPath: key] = value
+        })
+    }
+
     private static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 }
 
 /// The parts of Settings, one at a time on the Dashboard's Settings page.
+/// Settings › Tools › Time to leave and how the way is worked out, beside the calendar's switches.
+struct LeaveSettingsRows: View {
+    @Bindable var state: AppState
+
+    var body: some View {
+        Toggle(isOn: Binding(get: { state.settings.timeToLeave }, set: { Haptics.tick(); state.settings.timeToLeave = $0 })) {
+            Text("Time to leave")
+            Text("For today's events with a place: when to leave in the event's card, and a line in the notch when it's time, once per event. Calendar's own travel time comes first; else Apple Maps works out the way from where you are, with the location the weather uses. macOS asks on your first click in an event's card.")
+        }
+        if state.settings.timeToLeave {
+            LabeledContent("Travel by") {
+                GlassSegmented(label: Localization.string("Travel by"), selection: $state.settings.travelMode,
+                               options: TravelMode.allCases.map { ($0, Localization.string($0.title)) })
+            }
+        }
+    }
+}
+
+/// Settings › Tools: the shelf's file actions and whether it survives a restart, while the shelf is on.
+struct ShelfSettingsRows: View {
+    @Bindable var state: AppState
+
+    var body: some View {
+        Toggle(isOn: Binding(get: { state.settings.shelfActions }, set: { Haptics.tick(); state.settings.shelfActions = $0 })) {
+            Text("File actions on the shelf")
+            Text("Open With, Share, Zip and Copy to on a file's … button and on right-click. They open the file or make copies; the file itself is never moved or changed.")
+        }
+        Toggle(isOn: Binding(get: { state.settings.shelfKeeps }, set: { Haptics.tick(); state.settings.shelfKeeps = $0 })) {
+            Text("Keep the shelf after a restart")
+            Text("The shelf points at the same files again after the app or the Mac restarts. Nothing is copied; a file that's gone drops off.")
+        }
+    }
+}
+
 enum SettingsPane: String, CaseIterable, Identifiable {
     case general, characters, notch, agents, tara
     var id: String { rawValue }
@@ -1038,7 +1141,7 @@ private struct SlotPicker: View {
     }
 }
 
-private struct PickerRowStyle: ButtonStyle {
+struct PickerRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(Color.primary.opacity(configuration.isPressed ? 0.12 : 0.0001),

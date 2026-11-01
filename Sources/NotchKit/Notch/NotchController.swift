@@ -64,6 +64,8 @@ final class NotchController {
     var hoverOpenDelay: () -> Double? = { nil }
     /// Closed, the panel keeps its tab for the next open (a setting); else it goes back to the first.
     var reopensLastTab: () -> Bool = { true }
+    /// The Apple Notes folder note captures are copied to (Settings › Apple Notes); nil: none.
+    var appleNotesCapture: () -> AppleNotesFolder? = { nil }
     static let stayMargin: CGFloat = 30
     private var pointerInside = false
     /// Demos and screenshots (`--expand`, `--tour`): ignore the real pointer so the states stay put.
@@ -82,14 +84,23 @@ final class NotchController {
 
     /// For our own screenshots and recordings (`--capturable`); otherwise the island stays out
     /// of screen sharing and captures.
-    func allowCapture() { panel.sharingType = .readOnly }
+    func allowCapture() {
+        panel.sharingType = .readOnly
+        satellites.capturable = true
+    }
 
     /// Which display the island lives on (a setting).
     private let display: () -> IslandDisplay
+    /// The island's width and height as a share of the notch (Settings › Notch).
+    private let scale: () -> (width: Double, height: Double)
+    /// "All displays": copies of the island at rest on the other displays.
+    private lazy var satellites = IslandSatellites(source: model)
 
-    init(model: NotchModel, display: @escaping () -> IslandDisplay = { .automatic }) {
+    init(model: NotchModel, display: @escaping () -> IslandDisplay = { .automatic },
+         scale: @escaping () -> (width: Double, height: Double) = { (1, 1) }) {
         self.model = model
         self.display = display
+        self.scale = scale
         // When the last lock goes, re-check the pointer: if it left meanwhile, collapse as usual.
         IslandLock.shared.onUnlock = { [weak self] in
             Task { @MainActor in
@@ -115,14 +126,20 @@ final class NotchController {
             onCaptureEvent: { [weak self] in self?.createCaptureEvent() },
             onCaptureShowNotes: { [weak self] in self?.showCapturedNotes() },
             onCaptureOpenInbox: { [weak self] in self?.openCaptureInbox() },
+            onCaptureOpenAppleNote: { [weak self] in self?.openCapturedAppleNote() },
             onPaletteActivate: { [weak self] index, secondary in self?.activatePalette(index, secondary: secondary) },
             onInboxKey: { [weak self] primary, id in self?.inboxKey(primary: primary, id: id) },
-            onInboxEmpty: { [weak self] in self?.inboxEmptied() }
+            onInboxEmpty: { [weak self] in self?.inboxEmptied() },
+            onDownload: { [weak self] in self?.downloadAction($0) },
+            onPrompterClose: { [weak self] in self?.closePrompter() }
         )
         let hosting = NSHostingView(rootView: root)
         hosting.safeAreaRegions = []
         panel.contentView = hosting
-        menuBar.onChange = { [weak self] in self?.fitToMenuBar() }
+        menuBar.onChange = { [weak self] in
+            self?.fitToMenuBar()
+            self?.satellites.refit()
+        }
         place()
         watchEars()
         panel.orderFrontRegardless()
@@ -143,15 +160,15 @@ final class NotchController {
     }
 
     /// The display for the island: the notch screen (else the main one), the main screen (the one
-    /// with the menu bar), or the screen under the pointer. Displays without a notch get a pill in
-    /// menu bar height at the top center.
+    /// with the menu bar), or the screen under the pointer (also with copies on every display).
+    /// Displays without a notch get a pill in menu bar height at the top center.
     private func targetScreen() -> NSScreen? {
         switch display() {
         case .automatic:
             return NSScreen.screens.first(where: { $0.notch.hasNotch }) ?? NSScreen.main
         case .main:
             return NSScreen.screens.first ?? NSScreen.main
-        case .pointer:
+        case .pointer, .all:
             let mouse = NSEvent.mouseLocation
             return NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
         }
@@ -161,35 +178,60 @@ final class NotchController {
         guard let screen = targetScreen() else { return }
         self.screen = screen
         let notch = screen.notch
-        model.notchSize = notch.rect.size
+        model.notchSize = islandNotch(on: screen)
         model.hasNotch = notch.hasNotch
-        let max = NotchLayout.maxSize(notch: notch.rect.size)
-        let shadowPad: CGFloat = 40
-        let size = CGSize(width: max.width + 2 * shadowPad, height: max.height + shadowPad)
-        panel.setFrame(
-            CGRect(x: notch.rect.midX - size.width / 2, y: screen.frame.maxY - size.height, width: size.width, height: size.height),
-            display: true
-        )
+        panel.setFrame(Self.panelFrame(on: screen, notch: model.notchSize), display: true)
         fitToMenuBar()
         menuBar.refresh(full: true)
+        satellites.update(on: display() == .all ? NSScreen.screens : [], island: screen,
+                          notch: { [unowned self] in self.islandNotch(on: $0) },
+                          items: { [unowned self] in self.menuBarItems(on: $0) })
+    }
+
+    /// Previews (`displays-all`): the copy a display without a notch shows, a pill lower on this one.
+    func previewSatellite() {
+        guard let screen else { return }
+        let pill = CGSize(width: NotchGeometry.fallbackWidth, height: NotchGeometry.fallbackHeight)
+        var frame = Self.panelFrame(on: screen, notch: pill)
+        frame.origin.y -= 260
+        satellites.preview(frame: frame, notch: pill)
+    }
+
+    /// The notch the island is drawn for on a display: the notch (or the pill's zone) at the size
+    /// picked in Settings › Notch.
+    private func islandNotch(on screen: NSScreen) -> CGSize {
+        let notch = screen.notch
+        let scale = scale()
+        return NotchGeometry.islandSize(notch: notch.rect.size, hasNotch: notch.hasNotch, widthScale: scale.width, heightScale: scale.height)
+    }
+
+    /// The panel at the top of a display, room for the largest island and its shadow.
+    static func panelFrame(on screen: NSScreen, notch: CGSize) -> CGRect {
+        let max = NotchLayout.maxSize(notch: notch)
+        let shadowPad: CGFloat = 40
+        let size = CGSize(width: max.width + 2 * shadowPad, height: max.height + shadowPad)
+        return CGRect(x: screen.notch.rect.midX - size.width / 2, y: screen.frame.maxY - size.height, width: size.width, height: size.height)
+    }
+
+    /// The menu bar icons beside a display's notch, as extents from its centre; none without a notch.
+    private func menuBarItems(on screen: NSScreen) -> [ClosedRange<CGFloat>] {
+        let notch = screen.notch
+        guard notch.hasNotch else { return [] }
+        let height = max(notch.rect.height, screen.frame.maxY - screen.visibleFrame.maxY)
+        let bar = CGRect(x: screen.frame.minX, y: screen.frame.maxY - height, width: screen.frame.width, height: height)
+        return menuBar.frames
+            .filter { bar.contains(CGPoint(x: $0.midX, y: $0.midY)) }
+            .map { ($0.minX - notch.rect.midX) ... ($0.maxX - notch.rect.midX) }
     }
 
     /// Hands the layout the menu bar icons beside this screen's notch, so the open island ends
     /// between two of them. A display without a notch keeps the island's own widths.
     private func fitToMenuBar() {
         guard let screen else { return }
-        let notch = screen.notch
-        var items: [ClosedRange<CGFloat>] = []
-        if notch.hasNotch {
-            let height = max(notch.rect.height, screen.frame.maxY - screen.visibleFrame.maxY)
-            let bar = CGRect(x: screen.frame.minX, y: screen.frame.maxY - height, width: screen.frame.width, height: height)
-            items = menuBar.frames
-                .filter { bar.contains(CGPoint(x: $0.midX, y: $0.midY)) }
-                .map { ($0.minX - notch.rect.midX) ... ($0.maxX - notch.rect.midX) }
-        }
+        var items = menuBarItems(on: screen)
         if let simulatedMenuBarItems { items = simulatedMenuBarItems }
         guard items != model.menuBarItems else { return }
-        if model.interaction == .expanded || model.interaction == .capture {
+        if [.expanded, .capture, .prompter].contains(model.interaction) {
             withAnimation(Theme.snappy) { model.menuBarItems = items }
         } else {
             model.menuBarItems = items
@@ -236,7 +278,7 @@ final class NotchController {
     /// peeking, dictating), wider than the notch's own hot zone. Never quick capture: a click in
     /// its field that slid down a little pulled Tara out and closed it.
     func canPullFigure(at point: CGPoint) -> Bool {
-        ![.expanded, .palette, .inbox, .capture].contains(model.interaction) && islandRect.insetBy(dx: -4, dy: -4).contains(point)
+        ![.expanded, .palette, .inbox, .capture, .prompter].contains(model.interaction) && islandRect.insetBy(dx: -4, dy: -4).contains(point)
     }
 
     // MARK: Pointer
@@ -290,6 +332,12 @@ final class NotchController {
             && board.types?.contains(where: { $0 == .fileURL || FileDrop.promiseTypes.contains($0) }) == true
     }
 
+    /// Only text files are dragged (the teleprompter reads .txt and .md).
+    private func isScriptDrag() -> Bool {
+        let urls = NSPasteboard(name: .drag).readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return !urls.isEmpty && urls.allSatisfy { Prompter.fileTypes.contains($0.pathExtension.lowercased()) }
+    }
+
     /// Below this distance from the top edge a move at rest is ignored (well beyond the ears and
     /// the hover zone).
     static let farBelow: CGFloat = 140
@@ -298,8 +346,9 @@ final class NotchController {
         GazeCenter.shared.pointerMoved()  // Tara's eyes follow (throttled; nothing while none show)
         guard !wheelOpen, !isLocked, var screen else { return }
         let location = NSEvent.mouseLocation
-        // "With pointer": at rest, the island follows the pointer to another display.
-        if display() == .pointer, model.interaction == .rest, !screen.frame.contains(location),
+        // "With pointer" and "All displays": at rest, the island follows the pointer to another
+        // display (with all of them, the copy there gives way to it).
+        if [.pointer, .all].contains(display()), model.interaction == .rest, !screen.frame.contains(location),
            NSScreen.screens.contains(where: { $0.frame.contains(location) }) {
             place()
             guard let moved = self.screen else { return }
@@ -318,7 +367,7 @@ final class NotchController {
         case .rest:
             // Enter on the notch itself (or the compact ears), with the usual edge tolerance.
             inside = NotchGeometry.hotZone(for: screen.notch.rect).contains(location) || island.contains(location)
-        case .peek, .expanded, .capture, .palette, .inbox:
+        case .peek, .expanded, .capture, .palette, .inbox, .prompter:
             // Stay zone: 30 pt around the visible shape.
             inside = island.insetBy(dx: -Self.stayMargin, dy: -Self.stayMargin).contains(location)
         }
@@ -326,12 +375,21 @@ final class NotchController {
         panel.ignoresMouseEvents = !island.insetBy(dx: -4, dy: -4).contains(location)
             && !(model.interaction == .rest && inside)
 
-        if inside, dragging, model.interaction != .expanded, model.modules.contains(where: { $0.kind == .tools }), onFileDrag != nil, isFileDrag() {
-            // A file over the notch: straight to the shelf, held open until the drop.
-            pointerInside = true
-            onFileDrag?()
-            expand(.tools, pinned: true)
-            return
+        if inside, dragging, ![.expanded, .prompter].contains(model.interaction), isFileDrag() {
+            let shelf = model.modules.contains(where: { $0.kind == .tools }) && onFileDrag != nil
+            if !shelf, model.prompter != nil, isScriptDrag() {
+                // No shelf: a script file over the notch opens the teleprompter to drop it on.
+                pointerInside = true
+                openPrompter(keyboard: false)
+                return
+            }
+            if shelf {
+                // A file over the notch: straight to the shelf, held open until the drop.
+                pointerInside = true
+                onFileDrag?()
+                expand(.tools, pinned: true)
+                return
+            }
         }
         if inside {
             if !pointerInside, model.interaction == .rest, Date() > suppressUntil {
@@ -390,6 +448,13 @@ final class NotchController {
     /// Only on the island, and while it's open only on its top band, so scrolling content
     /// inside the panel stays scrolling.
     private func handleScroll(_ event: NSEvent) -> Bool {
+        // The band: scrolling moves the script a line at a time (its recent list scrolls itself).
+        if model.interaction == .prompter {
+            guard !wheelOpen, let prompter = model.prompter, prompter.phase == .reading,
+                  islandRect.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation) else { return false }
+            if event.momentumPhase.isEmpty { prompter.scrolled(by: event.scrollingDeltaY, precise: event.hasPreciseScrollingDeltas) }
+            return true
+        }
         guard !wheelOpen, !isLocked, event.hasPreciseScrollingDeltas else { return false }
         let location = NSEvent.mouseLocation
         let island = islandRect
@@ -448,17 +513,27 @@ final class NotchController {
 
     private func set(_ interaction: NotchModel.Interaction, animation: Animation) {
         let wasExpanded = model.interaction == .expanded
+        let wasPrompter = model.interaction == .prompter
         withAnimation(animation) { model.interaction = interaction }
+        // The band covered by another island pauses; showing it again goes on.
+        if wasPrompter != (interaction == .prompter), let prompter = model.prompter {
+            if interaction == .prompter { prompter.shown() } else { prompter.covered() }
+        }
         let isExpanded = interaction == .expanded
         if wasExpanded != isExpanded {
             for module in model.modules { module.setExpanded(isExpanded) }
+        }
+        // Hovered or opened: the volume bar has done its job.
+        if interaction != .rest, model.level != nil {
+            levelTask?.cancel()
+            model.level = nil
         }
         if !isExpanded {
             if model.keyboardFocus { model.keyboardFocus = false }
             if panel.isKeyWindow { panel.resignKey() }
         }
-        // A prompt that arrived while the palette was open shows once it has closed.
-        if interaction != .palette, approvalWaiting {
+        // A prompt that arrived while the palette or the teleprompter was open shows once it has closed.
+        if interaction != .palette, interaction != .prompter, approvalWaiting {
             approvalWaiting = false
             if [.rest, .expanded].contains(interaction) {
                 Task { [weak self] in
@@ -504,6 +579,12 @@ final class NotchController {
     func collapse() {
         leaveTask?.cancel()
         leaveTask = nil
+        // The teleprompter's band closes only with its own close (esc, its button, the palette, the
+        // menu); from anything covering it, collapsing goes back to the band.
+        if model.prompter?.isOpen == true, model.interaction != .rest {
+            if model.interaction != .prompter { showPrompter(keyboard: panel.isKeyWindow) }
+            return
+        }
         pinned = false
         guard model.interaction != .rest else { return }
         set(.rest, animation: Theme.close)
@@ -521,7 +602,49 @@ final class NotchController {
                 if self?.model.interaction == .rest { self?.model.capture = nil }
             }
         }
+        if model.download != nil {
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(400))
+                if self?.model.interaction == .rest { self?.model.download = nil }
+            }
+        }
         showNextSneak()
+    }
+
+    // MARK: Finished downloads
+
+    /// A finished download's line was clicked: its card in the open panel.
+    func showDownload(_ url: URL) {
+        expand(pinned: true)
+        withAnimation(Theme.snappy) { model.download = url }
+    }
+
+    /// The card's buttons. Nothing moves the file: the shelf only points at it.
+    private func downloadAction(_ action: DownloadCard.Action) {
+        guard let url = model.download else { return }
+        switch action {
+        case .open:
+            Haptics.tick()
+            NSWorkspace.shared.open(url)
+            collapse()
+        case .reveal:
+            Haptics.tick()
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            collapse()
+        case .shelve:
+            guard let tools = model.module(.tools) as? ToolsModule else { return }
+            // The shelf confirms a new file itself.
+            if tools.shelf.contains(url) { Haptics.tick() }
+            tools.add([url])
+            tools.tab = .shelf
+            withAnimation(Theme.snappy) {
+                model.download = nil
+                model.module = .tools
+            }
+        case .close:
+            Haptics.tick()
+            collapse()
+        }
     }
 
     // MARK: Sneak peek
@@ -531,19 +654,21 @@ final class NotchController {
 
     /// Shows one line on the closed island for a moment. Events queue up; one with the same
     /// key replaces a waiting one. While the panel or the hover peek is open, the line waits.
-    /// Updates held back while watching, for the summary when it ends.
-    private(set) var heldWhileWatching = 0
+    /// Updates held back while watching or in a meeting, for the summary when it ends.
+    private(set) var heldWhileQuiet = 0
 
     /// - Parameters:
     ///   - urgent: gets through Watch mode (approvals, a meeting about to start).
+    ///   - asks: an agent's approval or question, the only line that gets through a meeting.
     ///   - counts: held back while watching, it counts toward "N updates while you watched".
     /// - Returns: whether the line shows or waits its turn; false when it was dropped.
     @discardableResult
-    func sneak(_ sneak: Sneak, key: String, onlyAtRest: Bool = false, urgent: Bool = false, counts: Bool = true) -> Bool {
+    func sneak(_ sneak: Sneak, key: String, onlyAtRest: Bool = false, urgent: Bool = false, asks: Bool = false,
+               counts: Bool = true) -> Bool {
         // Some events are stale by the time the panel closes (a track change seen in the panel).
         if onlyAtRest && model.interaction != .rest { return false }
-        guard Quiet.letsThrough(urgent: urgent, watching: model.watching) else {
-            if counts { heldWhileWatching += 1 }
+        guard Quiet.letsThrough(urgent: urgent, watching: model.watching, asks: asks, inMeeting: model.meetingQuiet) else {
+            if counts { heldWhileQuiet += 1 }
             return false
         }
         sneaks.push(sneak, key: key)
@@ -568,16 +693,54 @@ final class NotchController {
         }
     }
 
-    /// Watch mode changed: hide the ears softly; when it ends, one line for what waited.
+    /// Watch mode changed: hide the ears softly; when it ends, one line for what waited (after
+    /// the meeting, if one is still on).
     func setWatching(_ on: Bool) {
         withAnimation(.easeInOut(duration: 0.2)) { model.watching = on }
         if on {
-            heldWhileWatching = 0
+            if !model.meetingQuiet { heldWhileQuiet = 0 }
             if model.interaction != .expanded, model.sneak != nil { withAnimation(.easeInOut(duration: 0.2)) { model.sneak = nil } }
-        } else if let line = Quiet.summary(heldWhileWatching) {
-            heldWhileWatching = 0
+        } else if !model.meetingQuiet, let line = Quiet.summary(heldWhileQuiet) {
+            heldWhileQuiet = 0
             sneak(Sneak(visual: .dot, title: line, duration: 3.2),
                   key: "watch.summary")
+        }
+    }
+
+    /// Quiet during a meeting (a setting) went on or off: only agents' approvals and questions get
+    /// through meanwhile; when it ends, one line for what waited.
+    func setMeetingQuiet(_ on: Bool) {
+        guard on != model.meetingQuiet else { return }
+        model.meetingQuiet = on
+        if on {
+            if !model.watching { heldWhileQuiet = 0 }
+        } else if !model.watching, heldWhileQuiet > 0 {
+            let count = heldWhileQuiet
+            heldWhileQuiet = 0
+            let line = count == 1 ? Localization.string("1 update during your meeting")
+                : String(format: Localization.string("%lld updates during your meeting"), count)
+            sneak(Sneak(visual: .dot, title: line, duration: 3.2), key: "meeting.summary")
+        }
+    }
+
+    // MARK: Volume bar
+
+    private var levelTask: Task<Void, Never>?
+
+    /// The volume changed (Settings › Notch): a slim bar under the closed island, gone 1.5 s after
+    /// the last change. Held keys update it in place; hovered or open, the island shows nothing.
+    func showLevel(_ reading: LevelReading) {
+        guard model.interaction == .rest else { return }
+        if model.level == nil {
+            withAnimation(Theme.open) { model.level = reading }
+        } else {
+            model.level = reading
+        }
+        levelTask?.cancel()
+        levelTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(LevelHUD.duration))
+            guard let self, !Task.isCancelled else { return }
+            withAnimation(Theme.close) { self.model.level = nil }
         }
     }
 
@@ -594,9 +757,9 @@ final class NotchController {
     /// A permission prompt arrived: open on it, with keyboard focus for ↵ / ⌘↵ / esc.
     func showApproval() {
         // The inbox shows it already, among the rest; the palette keeps its query and focus, and
-        // the prompt waits until it closes.
-        if model.interaction == .palette { approvalWaiting = true }
-        guard ![.inbox, .palette].contains(model.interaction) else { return }
+        // the prompt waits until it closes; so does the teleprompter's band, which someone reads from.
+        if model.interaction == .palette || model.interaction == .prompter { approvalWaiting = true }
+        guard ![.inbox, .palette, .prompter].contains(model.interaction) else { return }
         expand(pinned: true)
         model.keyboardFocus = true
         panel.makeKey()
@@ -629,6 +792,14 @@ final class NotchController {
             dictation.stop()
         }
         capture.dictating = false
+        // A note goes to Apple Notes too when Settings say so: a new note there, nothing moved or deleted.
+        if capture.route == .note, let folder = appleNotesCapture() {
+            let text = capture.text, preview = model.previewFeatures
+            Task {
+                let id = preview ? "preview" : await AppleNotesStore.shared.create(text: text, in: folder)
+                withAnimation(Theme.snappy) { capture.appleNote = id }
+            }
+        }
         Task { [weak self] in
             guard let self else { return }
             // Recordings (--preview) never touch the real queue or the hub.
@@ -660,6 +831,14 @@ final class NotchController {
         notes.showsTara = true
         expandWithFocus(.tools)
         model.capture = nil
+    }
+
+    /// The confirmation's Apple Notes button: Notes comes forward on the copy.
+    func openCapturedAppleNote() {
+        guard let id = model.capture?.appleNote else { return }
+        Haptics.tick()
+        AppleNotesStore.shared.open(id: id)
+        collapse()
     }
 
     /// The confirmation's file button: the Markdown inbox in its app (Obsidian for a vault).
@@ -705,6 +884,8 @@ final class NotchController {
 
     /// A tap on the hardware notch: opens, or closes when already open.
     func tapNotch() {
+        // The band hangs from the notch: a tap there is on the band, which has its own buttons.
+        if model.interaction == .prompter { return }
         if model.interaction == .expanded {
             collapse()
             // The same mouse-up reaches the island's tap handler next; don't reopen.
@@ -837,6 +1018,9 @@ final class NotchController {
             items.append(PaletteItem(id: "ask-tara", title: Localization.string("Ask Tara"), subtitle: "⌃⌥T", symbol: "sparkle",
                                      kind: .action, keywords: ["question", "memory", "assistant"], perform: { ask("") }))
         }
+        if let prompter = model.prompter {
+            items += prompterItems(prompter)
+        }
         if let toggle = model.toggleWatch {
             items.append(PaletteItem(id: "watch", title: Localization.string(model.watching ? "Watch mode off" : "Watch mode on"),
                                      subtitle: "⌃⌥W", symbol: model.watching ? "moon.fill" : "moon", kind: .action,
@@ -944,6 +1128,17 @@ final class NotchController {
             }
             capture.step(step)
             return true
+        case .prompter:
+            guard let prompter = model.prompter else { return false }
+            if event.keyCode == 53 {  // esc: from the scripts back to the script, else close
+                if !prompter.backToReading() { closePrompter() }
+                return true
+            }
+            if command, isK {
+                openPalette()
+                return true
+            }
+            return prompter.handleKey(event)
         case .inbox:
             guard let inbox = model.inbox else { return false }
             switch event.keyCode {
@@ -970,6 +1165,63 @@ final class NotchController {
         }
     }
 
+    // MARK: Teleprompter
+
+    /// ⌃⌥K › Teleprompter, the menu bar, or a script file dragged onto the notch: the band, on its
+    /// setup or reading `script`. With `keyboard` it takes the keys (↑↓, space, esc) until the
+    /// user clicks into another app; a drag leaves them where they are.
+    func openPrompter(_ script: PrompterScript? = nil, keyboard: Bool = true) {
+        guard let prompter = model.prompter else { return }
+        if !prompter.isOpen { prompter.open() }
+        if let script { prompter.read(script) }
+        if model.interaction != .prompter { Haptics.open() }
+        showPrompter(keyboard: keyboard)
+    }
+
+    func closePrompter() {
+        guard let prompter = model.prompter, prompter.isOpen else { return }
+        Haptics.tick()
+        prompter.close()
+        if model.interaction == .prompter { collapse() }
+    }
+
+    /// The menu bar's Teleprompter item.
+    func togglePrompter() {
+        if model.prompter?.isOpen == true { closePrompter() } else { openPrompter() }
+    }
+
+    /// The band, held open until closed: the pointer leaving or a click elsewhere (on the slides,
+    /// in the call) leaves it be.
+    private func showPrompter(keyboard: Bool) {
+        hoverTask?.cancel()
+        hoverTask = nil
+        leaveTask?.cancel()
+        leaveTask = nil
+        pinned = true
+        menuBar.refresh()
+        set(.prompter, animation: Theme.open)
+        guard keyboard else { return }
+        model.keyboardFocus = true
+        panel.makeKey()
+    }
+
+    /// The palette's rows: open or close the band, and the recent scripts to read straight away.
+    private func prompterItems(_ prompter: Prompter) -> [PaletteItem] {
+        let keywords = ["prompter", "teleprompter", "script", "speech", "talk", "presentation", "read"]
+        guard !prompter.isOpen else {
+            return [PaletteItem(id: "prompter:close", title: Localization.string("Close teleprompter"), symbol: "xmark",
+                                kind: .action, keywords: keywords, perform: { [weak self] in self?.closePrompter() })]
+        }
+        let open = PaletteItem(id: "prompter", title: Localization.string("Teleprompter"),
+                               subtitle: Localization.string("Read a script under the notch"), symbol: "text.alignleft",
+                               kind: .action, keywords: keywords, perform: { [weak self] in self?.openPrompter() })
+        return [open] + prompter.recent().prefix(5).map { script in
+            PaletteItem(id: "prompter-script:\(script.id)", title: script.title, subtitle: Localization.string("Teleprompter"),
+                        symbol: "text.alignleft", kind: .tool, keywords: keywords,
+                        perform: { [weak self] in self?.openPrompter(script) })
+        }
+    }
+
     // MARK: Keyboard
 
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
@@ -982,7 +1234,28 @@ final class NotchController {
         }
         guard model.interaction == .expanded else { return .ignored }
         // A permission prompt: ↵ allow once, ⌘↵ allow for the session, esc deny.
-        if let approvals = model.approvals, approvals.current != nil {
+        if let approvals = model.approvals, let current = approvals.current {
+            // Claude Code's questions: 1–9 pick, ↵ next or send, esc hands it to the terminal.
+            if !current.request.questions.isEmpty {
+                if let digit = press.characters.first?.wholeNumberValue, (1...9).contains(digit) {
+                    approvals.pick(digit - 1)
+                    return .handled
+                }
+                switch press.key {
+                case .return: approvals.next(); return .handled
+                case .escape: approvals.passThrough(); return .handled
+                case .leftArrow where approvals.draft(current.id).step > 0: approvals.back(); return .handled
+                default: return .ignored
+                }
+            }
+            // "Instead…": ↵ sends the deny with the note, esc goes back to the buttons.
+            if approvals.notingID == current.id {
+                switch press.key {
+                case .return: approvals.sendNote(); return .handled
+                case .escape: approvals.cancelNote(); return .handled
+                default: return .ignored
+                }
+            }
             switch press.key {
             case .return where press.modifiers.contains(.command): approvals.answer(.allowSession); return .handled
             case .return: approvals.answer(.allowOnce); return .handled

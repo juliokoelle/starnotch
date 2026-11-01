@@ -9,6 +9,11 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
     case askTara
     /// A small Finder in the Tools tab.
     case files
+    /// Shortcuts and apps as a grid in the Tools tab; a line when a download finishes; the
+    /// battery of mice, keyboards and headphones in the System tab.
+    case launcher, downloads, deviceBattery
+    /// The teleprompter: a script under the notch that follows the voice.
+    case prompter
 
     /// The tab it lives in; nil for tools outside the tabs (the menu, a shortcut, the plus button).
     public var module: ModuleKind? {
@@ -18,7 +23,10 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .notes, .files: .tools
         case .weather, .dayProgress, .health: nil
         case .lyrics, .lyricsOnHover, .appVolume: .nowPlaying
-        case .askTara: nil
+        case .askTara, .prompter: nil
+        case .launcher: .tools
+        case .downloads: nil
+        case .deviceBattery: .system
         }
     }
 
@@ -49,6 +57,10 @@ public enum ToolFeature: String, Codable, CaseIterable, Sendable {
         case .appVolume: "Volume per app"
         case .askTara: "Ask Tara"
         case .files: "Files"
+        case .launcher: "Shortcuts and apps"
+        case .downloads: "Finished downloads"
+        case .deviceBattery: "Device batteries"
+        case .prompter: "Teleprompter"
         }
     }
 }
@@ -63,18 +75,29 @@ public enum ToolItem: Hashable, Sendable {
 /// `disabledFeatures`; the Tools tab itself has no row and shows while one of its tools is on.
 /// A fresh install starts with the core on and everything else off; settings saved before the
 /// gallery existed keep every tool the user had. The settings also keep which tools existed when
-/// they were saved (`known`), so a tool a later version adds starts off for everyone.
+/// they were saved (`known`), so a tool a later version adds starts off for everyone (unless it
+/// is one of the few that do nothing until started, `startsOn`).
 public enum ToolSwitches {
     /// On from the start.
     public static let core: [ModuleKind] = [.agents, .calendar, .nowPlaying]
 
-    /// The gallery in page order: the tabs, then the small tools.
-    public static let tabs: [ModuleKind] = core + [.meeting, .today, .system, .dictation]
+    /// The gallery in page order: the tabs (All tools last, as in the island), then the small tools.
+    public static let tabs: [ModuleKind] = core + [.meeting, .today, .system, .dictation, .allTools]
     public static let gallery: [ToolItem] = tabs.map(ToolItem.module) + ToolFeature.allCases.map(ToolItem.feature)
 
-    /// A fresh install: everything but the core is off.
-    public static let offModules: [ModuleKind] = ModuleKind.allCases.filter { !core.contains($0) }
-    public static let offFeatures: [ToolFeature] = ToolFeature.allCases
+    /// A fresh install: everything but the core and `tabsStartOn` is off (`startsOn` waits for its tab).
+    public static let offModules: [ModuleKind] = ModuleKind.allCases.filter { !core.contains($0) && !tabsStartOn.contains($0) }
+    public static let offFeatures: [ToolFeature] = ToolFeature.allCases.filter { !startsOn.contains($0) }
+
+    /// Small tools that read nothing private: on with their tab, for a fresh install and after
+    /// the update that brings them (the launcher shows how to add items, device batteries show
+    /// what is connected), and the teleprompter, which has no tab and asks for nothing before it
+    /// starts. Everything else starts off.
+    public static let startsOn: Set<ToolFeature> = [.launcher, .deviceBattery, .prompter]
+
+    /// Tabs on for a fresh install and after the update that brings them: All tools reads nothing
+    /// and only starts what is already there, or turns it on with a click.
+    public static let tabsStartOn: Set<ModuleKind> = [.allTools]
 
     /// Every tab and small tool of this version, as saved in `SwitcherSettings.knownTools`.
     public static var known: [String] {
@@ -90,11 +113,16 @@ public enum ToolSwitches {
         "feature.keepAwake", "feature.quickCapture",
     ]
 
-    /// Settings saved by a version that knew only `known`: what came since starts off.
+    /// Settings saved by a version that knew only `known`: what came since starts off, but for
+    /// `startsOn` and `tabsStartOn`.
     public static func switchOffNew(since known: [String], in settings: inout SwitcherSettings) {
         let known = Set(known)
-        for kind in ModuleKind.allCases where !known.contains("module.\(kind.rawValue)") { setModule(kind, on: false, in: &settings) }
-        for feature in ToolFeature.allCases where !known.contains("feature.\(feature.rawValue)") { disable(feature, in: &settings) }
+        for kind in ModuleKind.allCases where !known.contains("module.\(kind.rawValue)") && !tabsStartOn.contains(kind) {
+            setModule(kind, on: false, in: &settings)
+        }
+        for feature in ToolFeature.allCases where !known.contains("feature.\(feature.rawValue)") && !startsOn.contains(feature) {
+            disable(feature, in: &settings)
+        }
     }
 
     public static func isOn(_ item: ToolItem, in settings: SwitcherSettings) -> Bool {

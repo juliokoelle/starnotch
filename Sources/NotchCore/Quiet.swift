@@ -31,8 +31,18 @@ public enum Quiet {
         oneSided ? (notchWidth + ear, -ear / 2) : (notchWidth + 2 * ear, 0)
     }
 
-    /// While watching, only urgent sneaks get through; the rest are counted for the summary.
-    public static func letsThrough(urgent: Bool, watching: Bool) -> Bool { !watching || urgent }
+    /// While watching, only urgent sneaks get through; the rest are counted for the summary. In a
+    /// meeting (`inMeeting`) only what an agent asks (`asks`: an approval, a question) gets through.
+    public static func letsThrough(urgent: Bool, watching: Bool, asks: Bool = false, inMeeting: Bool = false) -> Bool {
+        if inMeeting && !asks { return false }
+        return !watching || urgent
+    }
+
+    /// Quiet during meetings (a setting): the camera or microphone is in use, or a call or meeting
+    /// from the calendar is running (the caller leaves focus blocks out).
+    public static func inMeeting(mediaInUse: Bool, meetings: [DateInterval], now: Date) -> Bool {
+        mediaInUse || meetings.contains { $0.start <= now && now < $0.end }
+    }
 
     /// "3 updates while you watched".
     public static func summary(_ count: Int) -> String? {

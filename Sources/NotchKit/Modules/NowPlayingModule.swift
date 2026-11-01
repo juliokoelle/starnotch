@@ -9,7 +9,8 @@ import SwiftUI
 /// MediaRemote (`MediaRemoteBridge`: Spotify, Music, Podcasts, VLC, IINA, YouTube or SoundCloud in
 /// a browser), with AppleScript for Spotify and Music as the fallback (`PlayerBridge`).
 /// Two tools sit inside: synced lyrics (one line in the panel, optionally on hover) and a mixer
-/// with each app's volume, in a popover.
+/// with each app's volume, in a popover. Shuffle, repeat and favorite sit beside the transport
+/// where the player has them (Spotify and Music, through AppleScript).
 @MainActor
 @Observable
 final class NowPlayingModule: NotchModule {
@@ -77,6 +78,19 @@ final class NowPlayingModule: NotchModule {
             if mixerOn { if !mock { mixer.start() } } else { showsMixer = false; mixer.stop() }
         }
     }
+    /// Shuffle, repeat and favorite beside the transport (Settings › Tools).
+    var modesOn = true {
+        didSet { if !modesOn { modes = nil } }
+    }
+    /// The player's shuffle, repeat and favorite; nil hides the buttons (a browser, another app,
+    /// Automation declined).
+    private(set) var modes: PlayerModes?
+    /// A click counts up: a reading that started before it doesn't undo it, nor one that comes
+    /// back while the click's own answer is still out.
+    @ObservationIgnored private var modesRound = 0
+    @ObservationIgnored private var togglesOut = 0
+    /// Recordings: each invented track's modes, as clicked.
+    @ObservationIgnored private var mockModes: [String: PlayerModes] = [:]
     /// The current track's synced lyrics, when the tool is on and LRCLIB has them.
     private(set) var lyrics: SyncedLyrics?
     @ObservationIgnored private let lyricsStore = LyricsStore()
@@ -118,6 +132,7 @@ final class NowPlayingModule: NotchModule {
         isPlaying = true
         setPosition(47)
         lyrics = MockCovers.lyrics(for: mockTracks[0].id)
+        mockModes = MockCovers.modes()
         mixer.stop()
         mixer.usePreview()
         clock?.cancel()
@@ -174,6 +189,7 @@ final class NowPlayingModule: NotchModule {
         remoteCover = nil
         track = nil
         isPlaying = false
+        modes = nil
         loadLyrics()
     }
 
@@ -283,6 +299,67 @@ final class NowPlayingModule: NotchModule {
         return (index, text)
     }
 
+    // MARK: Shuffle, repeat, favorite
+
+    /// While the panel shows the track: reads the modes now and every few seconds (they change
+    /// in the player too), until the panel goes or the track changes.
+    func followModes() async {
+        while !Task.isCancelled {
+            await refreshModes()
+            try? await Task.sleep(for: .seconds(4))
+        }
+    }
+
+    private func refreshModes() async {
+        guard modesOn, let track, let source = track.source else {
+            if modes != nil { modes = nil }
+            return
+        }
+        if mock {
+            modes = mockModes[track.id]
+            return
+        }
+        let round = modesRound
+        let answer = await PlayerBridge.modes(source)
+        guard round == modesRound, togglesOut == 0, self.track?.id == track.id else { return }
+        apply(answer, source: source)
+    }
+
+    /// A click on shuffle, repeat or the star: shown at once, flipped in the player, then what
+    /// the player answers (macOS asks for Automation here, on the click, the first time).
+    func toggle(_ control: PlayerModes.Control) {
+        guard let shown = modes, let track, let source = track.source else { return }
+        Haptics.tick()
+        modesRound += 1
+        let next = shown.toggled(control, source: source)
+        withAnimation(Theme.snappy) { modes = next }
+        if mock {
+            mockModes[track.id] = next
+            return
+        }
+        let round = modesRound
+        togglesOut += 1
+        Task { [weak self] in
+            let answer = await PlayerBridge.modes(source, toggle: control, ask: true)
+            guard let self else { return }
+            self.togglesOut -= 1
+            guard round == self.modesRound, self.track?.id == track.id else { return }
+            self.apply(answer, source: source)
+        }
+    }
+
+    private func apply(_ answer: PlayerBridge.ModesAnswer, source: PlayerStatus.Source) {
+        let next: PlayerModes?
+        switch answer {
+        case .modes(let modes): next = modes
+        // Not asked yet: the buttons show off until a click lets macOS ask.
+        case .notAsked: next = modes ?? .unknown(source)
+        case .unavailable: next = nil
+        case .failed: return  // no answer in time: what shows stays
+        }
+        if next != modes { withAnimation(Theme.snappy) { modes = next } }
+    }
+
     // MARK: Controls
 
     func togglePlay() {
@@ -330,6 +407,7 @@ final class NowPlayingModule: NotchModule {
             track = mockTracks[mockIndex]
             setPosition(0)
             isPlaying = true
+            if modesOn { modes = mockModes[mockTracks[mockIndex].id] }
         }
         loadLyrics()
         if let track { onTrackChange?(track) }
@@ -591,10 +669,11 @@ private struct NowPlayingBody: View {
     }
 
     /// Volume, then the mixer (with the Volume per app tool) and the output device as symbols; a
-    /// click on either opens its list (the device's name is in the list and the help tag).
+    /// click on either opens its list (the device's name is in the list and the help tag). Beside
+    /// shuffle and repeat the slider leaves out its speaker symbols, so the row still fits.
     private var outputRow: some View {
         HStack(spacing: 8) {
-            VolumeSlider(output: module.output, width: 64)
+            VolumeSlider(output: module.output, width: module.modes == nil ? 64 : 52, symbols: module.modes == nil)
             if module.mixerOn {
                 MixerButton(open: Binding(get: { module.showsMixer }, set: { module.showsMixer = $0 }))
             }
@@ -633,6 +712,13 @@ private struct NowPlayingBody: View {
                     .id(track.id)
                     .transition(.blurSlide(x: 20 * module.direction))
                     Spacer(minLength: 0)
+                    // The track's favorite belongs with its title (Music only).
+                    if let favorite = module.modes?.favorite {
+                        modeButton(favorite ? "star.fill" : "star", on: favorite, label: "Favorite", height: 20, dot: false) {
+                            module.toggle(.favorite)
+                        }
+                        .transition(.opacity)
+                    }
                     // The main character listens along, a note beside her while it plays.
                     AvatarView(character: module.cast.main, mood: .music, height: 34,
                                colorway: module.cast.colorway, emergeOnAppear: false, musicNote: module.isPlaying)
@@ -651,15 +737,22 @@ private struct NowPlayingBody: View {
                 Scrubber(position: module.position, duration: track.duration) { module.seek(to: $0) }
 
                 HStack(spacing: 4) {
+                    if let modes = module.modes {
+                        modeButton("shuffle", on: modes.shuffle, label: "Shuffle") { module.toggle(.shuffle) }
+                    }
                     control("backward.fill", size: 13, label: "Previous") { module.previous() }
                     control(module.isPlaying ? "pause.fill" : "play.fill", size: 18,
                             label: module.isPlaying ? "Pause" : "Play") { module.togglePlay() }
                         .contentTransition(.symbolEffect(.replace))
                     control("forward.fill", size: 13, label: "Next") { module.next() }
+                    if let modes = module.modes {
+                        modeButton(modes.repeatMode == .one ? "repeat.1" : "repeat", on: modes.repeatMode != .off,
+                                   label: modes.repeatMode == .one ? "Repeat one" : "Repeat") { module.toggle(.repeatMode) }
+                    }
                     Spacer(minLength: 8)
                     outputRow
                 }
-                .padding(.leading, -7)
+                .padding(.leading, module.modes == nil ? -7 : -5)
             }
             .frame(maxHeight: Self.cover)
         }
@@ -668,6 +761,8 @@ private struct NowPlayingBody: View {
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(Theme.open, value: track.id)
+        // Shuffle, repeat and favorite are read only while this card shows.
+        .task(id: "\(track.id)|\(module.modesOn)") { await module.followModes() }
     }
 
     /// Sized for the compact panel (150 high): the cover fills it with an even margin.
@@ -684,6 +779,32 @@ private struct NowPlayingBody: View {
         }
         .buttonStyle(PressScale())
         .accessibilityLabel(label)
+    }
+
+    /// Shuffle, repeat or the star: quiet when off, in the accent when on. Shuffle and repeat
+    /// get a dot under them too (the star fills), so the state doesn't rest on colour alone.
+    private func modeButton(_ symbol: String, on: Bool, label: String, height: CGFloat = 32, dot: Bool = true,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(on ? Theme.accent : Theme.textSecondary)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 24, height: height)
+                .overlay(alignment: .bottom) {
+                    if dot {
+                        Circle().fill(Theme.accent).frame(width: 3, height: 3)
+                            .opacity(on ? 1 : 0)
+                            .offset(y: -3)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .animation(Theme.snappy, value: on)
+        .help(Localization.string(label))
+        .accessibilityLabel(Localization.string(label))
+        .accessibilityValue(on ? Localization.string("On") : Localization.string("Off"))
     }
 }
 
@@ -857,6 +978,72 @@ enum PlayerBridge {
     }
 }
 
+extension PlayerBridge {
+    /// What the player said about shuffle, repeat and favorite.
+    enum ModesAnswer: Sendable {
+        case modes(PlayerModes)
+        /// macOS hasn't asked yet whether the app may control the player.
+        case notAsked
+        /// Automation declined, or the player gone or stopped: the buttons hide.
+        case unavailable
+        /// No answer in time.
+        case failed
+    }
+
+    /// Reads shuffle, repeat and favorite (with `toggle`, flips one first) in a separate
+    /// `osascript`, off the main thread, so the island never waits on the player. Without `ask`
+    /// nothing is sent unless Automation is already allowed: macOS's dialog only comes from a click.
+    static func modes(_ source: PlayerStatus.Source, toggle: PlayerModes.Control? = nil, ask: Bool = false) async -> ModesAnswer {
+        guard let id = bundleIDs[source] else { return .unavailable }
+        let script = PlayerModes.script(for: source, toggle: toggle)
+        return await Task.detached(priority: .userInitiated) {
+            readModes(script, bundleID: id, source: source, ask: ask)
+        }.value
+    }
+
+    nonisolated private static func readModes(_ script: String, bundleID: String, source: PlayerStatus.Source,
+                                              ask: Bool) -> ModesAnswer {
+        switch automation(bundleID) {
+        case .unavailable: return .unavailable
+        case .notAsked where !ask: return .notAsked
+        default: break
+        }
+        // A click may wait for macOS's dialog; a reading gives up quickly.
+        guard let reply = osascript(script, timeout: ask ? 60 : 3) else {
+            return automation(bundleID) == .allowed ? .failed : .unavailable
+        }
+        return PlayerModes.parse(reply, source: source).map(ModesAnswer.modes) ?? .unavailable
+    }
+
+    /// Asked without a dialog.
+    nonisolated private static func automation(_ bundleID: String) -> PlayerModes.Access {
+        let descriptor = NSAppleEventDescriptor(bundleIdentifier: bundleID)
+        return withExtendedLifetime(descriptor) {
+            guard let target = descriptor.aeDesc else { return .unavailable }
+            return PlayerModes.access(AEDeterminePermissionToAutomateTarget(target, typeWildCard, typeWildCard, false))
+        }
+    }
+
+    /// The script's output; nil when it failed or took longer than `timeout` seconds.
+    nonisolated private static func osascript(_ source: String, timeout: Double) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", source]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
+        guard (try? process.run()) != nil else { return nil }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        return String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+    }
+}
+
 /// The most vivid color of a cover (saturation × brightness), for the glow and equalizer.
 enum DominantColor {
     static func of(_ image: NSImage) -> Color {
@@ -909,6 +1096,11 @@ enum MockCovers {
                "Glass harbour, open wide"]
         let start: Double = id == "t1" ? 40 : 2
         return SyncedLyrics(lines: (0..<48).map { .init(time: start + Double($0) * 4, text: lines[$0 % lines.count]) })
+    }
+
+    /// The invented tracks' shuffle, repeat and favorite: Spotify has no favorite, Music all three.
+    static func modes() -> [String: PlayerModes] {
+        ["t1": PlayerModes(shuffle: true, repeatMode: .off), "t2": PlayerModes(shuffle: true, repeatMode: .all, favorite: true)]
     }
 
     static func placeholder() -> NSImage { draw(base: (0x3A3A44, 0x1C1C22), accent: 0x8A8A96, seed: 2) }

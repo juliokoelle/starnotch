@@ -54,9 +54,9 @@ public actor OpencodeProvider: AgentProvider, HookSessionSource {
             return AgentSession(
                 id: "\(Self.id):\(row.id)", project: ProjectPaths.projectName(ofCwd: row.directory),
                 title: row.title, cwd: row.directory, isBusy: false, since: row.updated,
-                subagents: subs.prefix(5).map { AgentSubagent(id: "\(Self.id):\($0.id)", name: $0.title ?? "Subagent",
+                subagents: subs.prefix(AgentSubagent.listed).map { AgentSubagent(id: "\(Self.id):\($0.id)", name: $0.title ?? "Subagent",
                                                               agentType: Self.id, status: .done, modified: $0.updated) },
-                earlierSubagents: max(0, subs.count - 5), started: row.created, provider: Self.id)
+                earlierSubagents: max(0, subs.count - AgentSubagent.listed), started: row.created, provider: Self.id)
         }
     }
 }

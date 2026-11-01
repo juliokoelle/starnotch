@@ -14,10 +14,17 @@ final class AppState {
             if settings != oldValue && persists { store.save(settings) }
             if settings.localAPIEnabled != oldValue.localAPIEnabled { onLocalAPIToggle?(settings.localAPIEnabled) }
             if settings.disabledModules != oldValue.disabledModules || settings.disabledFeatures != oldValue.disabledFeatures
-                || settings.remindersInToday != oldValue.remindersInToday {
+                || settings.remindersInToday != oldValue.remindersInToday
+                || settings.musicModes != oldValue.musicModes || settings.cameraCheck != oldValue.cameraCheck
+                || settings.timeToLeave != oldValue.timeToLeave || settings.travelMode != oldValue.travelMode
+                || settings.shelfActions != oldValue.shelfActions || settings.shelfKeeps != oldValue.shelfKeeps {
                 onModulesChanged?()
             }
-            if settings.islandDisplay != oldValue.islandDisplay { onDisplayChanged?() }
+            if settings.islandDisplay != oldValue.islandDisplay || settings.islandWidthScale != oldValue.islandWidthScale
+                || settings.islandHeightScale != oldValue.islandHeightScale || settings.islandOutline != oldValue.islandOutline {
+                onDisplayChanged?()
+            }
+            if settings.levelHUD != oldValue.levelHUD || settings.meetingQuiet != oldValue.meetingQuiet { onQuietChanged?() }
             if settings.eyeStyle != oldValue.eyeStyle { GazeCenter.shared.style = settings.eyeStyle }
             if settings.earsMode != oldValue.earsMode || settings.detailedEars != oldValue.detailedEars
                 || settings.taraAlways != oldValue.taraAlways {
@@ -34,6 +41,8 @@ final class AppState {
     @ObservationIgnored var onLocalAPIToggle: ((Bool) -> Void)?
     @ObservationIgnored var onModulesChanged: (() -> Void)?
     @ObservationIgnored var onDisplayChanged: (() -> Void)?
+    /// The volume bar or quiet during meetings switched.
+    @ObservationIgnored var onQuietChanged: (() -> Void)?
     @ObservationIgnored var onEarsModeChanged: ((EarsMode) -> Void)?
     @ObservationIgnored var onBrainChanged: (() -> Void)?
     /// Tara's privacy switches changed; gets the ones from before.

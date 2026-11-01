@@ -73,6 +73,23 @@ extension CalendarModule: PaletteProvider {
     }
 }
 
+extension AgendaModule: PaletteProvider {
+    /// Check camera before today's next call: the calendar opens on it with the mirrored preview
+    /// beside Join.
+    func paletteItems(_ context: PaletteContext) -> [PaletteItem] {
+        guard cameraCheckOn, let call = nextCall else { return [] }
+        let soon = call.start.timeIntervalSince(now) < 15 * 60
+        return [PaletteItem(
+            id: "camera-check", title: Localization.string("Check camera"),
+            subtitle: "\(call.title) · \(TimeText.clock(call.start))", symbol: "web.camera", kind: .action,
+            keywords: ["camera", "webcam", "mirror", "video", "meeting", "call"], priority: soon ? 0.6 : 0.1,
+            perform: { [weak self] in
+                context.show(.calendar)
+                self?.checkCameraBeforeNextCall()
+            })]
+    }
+}
+
 extension ToolsModule: PaletteProvider {
     /// The switched-on tools: start or stop the timer, clipboard items (↵ copy, ⌘↵ show), shelf
     /// files (↵ open, ⌘↵ in Finder).
@@ -118,6 +135,22 @@ extension ToolsModule: PaletteProvider {
                     secondaryTitle: "Show in Finder",
                     perform: { NSWorkspace.shared.open(url) },
                     secondary: { [weak self] in self?.reveal(url) }))
+            }
+        }
+        if tabs.contains(.launcher) {
+            // The launcher's shortcuts (↵ runs) and apps (↵ opens); ⌘↵ shows the launcher.
+            for item in launcherItems() {
+                let app = item.kind == .app
+                items.append(PaletteItem(
+                    id: "launch:\(item.id)", title: item.name, subtitle: Localization.string(app ? "App" : "Shortcut"),
+                    symbol: app ? "app" : "square.2.layers.3d", kind: .action,
+                    keywords: app ? ["app", "open", "launch"] : ["shortcut", "run"],
+                    secondaryTitle: "Show in notch",
+                    perform: { [weak self] in self?.launch(item) },
+                    secondary: { [weak self] in
+                        self?.tab = .launcher
+                        context.show(.tools)
+                    }))
             }
         }
         return items

@@ -94,10 +94,12 @@ final class TodayModule: NotchModule {
 
     private func load() {
         feed = provider.today(now: R5Clock.now())
-        tasks = feed.now.map(Item.init)
+        // A reminder waiting for its undo to run out is gone already.
+        let hidden = pendingDelete?.id
+        tasks = feed.now.map(Item.init).filter { $0.id != hidden }
         followUps = feed.followUps.map(Item.init)
         confirmations = feed.confirmations.map(Item.init)
-        later = feed.later.map(Item.init)
+        later = feed.later.map(Item.init).filter { $0.id != hidden }
     }
 
     /// Asks the connector again when the panel opens.
@@ -158,8 +160,9 @@ final class TodayModule: NotchModule {
         item.kind == .task && completer?.canComplete(item.id) == true
     }
 
-    /// Why `item` wasn't ticked off, while that note shows.
+    /// Why `item` wasn't ticked off (or deleted), while that note shows.
     func failureText(_ item: Item) -> LocalizedStringKey? {
+        if deleteFailedID == item.id { return "Couldn't delete in Reminders" }
         guard let failure, failure.id == item.id else { return nil }
         if failure.result == .changed { return "Changed elsewhere, not ticked off" }
         return item.id.hasPrefix("reminder-") ? "Couldn't save in Reminders" : "Couldn't write to the file"
@@ -190,6 +193,126 @@ final class TodayModule: NotchModule {
                 try? await Task.sleep(for: .seconds(4))
                 if self.failure?.id == id { withAnimation(Theme.snappy) { self.failure = nil } }
             }
+        }
+    }
+
+    // MARK: Adding and deleting reminders
+
+    private var editor: (any ReminderEditing)? { provider as? any ReminderEditing }
+    /// Settings › Tools: the "+" and deleting in Today (on by default).
+    @ObservationIgnored var editsAllowed: () -> Bool = { true }
+    /// A reminder was saved (the app shows Reminders in Today if they weren't yet).
+    @ObservationIgnored var onReminderAdded: (() -> Void)?
+    /// The reminder being typed after the "+"; nil while there is none.
+    private(set) var reminderDraft: ReminderDraft?
+    private(set) var savingReminder = false
+    /// Why the last one wasn't saved, under the field.
+    private(set) var reminderError: String?
+    /// Deleted with a short undo: gone from the list at once, from Reminders when the undo runs out.
+    private(set) var pendingDelete: Item?
+    @ObservationIgnored private var deleteTask: Task<Void, Never>?
+    private var deleteFailedID: String?
+
+    var canAddReminders: Bool { editor != nil && editsAllowed() }
+
+    func canDelete(_ item: Item) -> Bool {
+        item.kind == .task && editsAllowed() && editor?.canDelete(item.id) == true
+    }
+
+    func startReminder() {
+        guard canAddReminders else { return }
+        Haptics.tick()
+        withAnimation(Theme.snappy) {
+            reminderDraft = ReminderDraft()
+            reminderError = nil
+        }
+    }
+
+    func cancelReminder(feel: Bool = true) {
+        guard reminderDraft != nil else { return }
+        if feel { Haptics.tick() }
+        withAnimation(Theme.snappy) {
+            reminderDraft = nil
+            reminderError = nil
+        }
+    }
+
+    func updateReminder(text: String) {
+        reminderDraft?.update(text: text, now: R5Clock.now(), calendar: .current)
+        if reminderError != nil { reminderError = nil }
+    }
+
+    /// The day chip: no date, today, tomorrow, next week.
+    func cycleReminderDay() {
+        Haptics.tick()
+        withAnimation(Theme.snappy) { reminderDraft?.cycleDay(now: R5Clock.now(), calendar: .current) }
+    }
+
+    /// ↵: saved in Reminders' default list off the main thread; the field closes once it's there.
+    func saveReminder() {
+        guard let draft = reminderDraft, draft.canSave, !savingReminder, let editor else { return }
+        savingReminder = true
+        Haptics.confirm()
+        let title = draft.title, due = draft.due(calendar: .current)
+        Task { [weak self] in
+            let error = await editor.addReminder(title: title, due: due)
+            guard let self else { return }
+            self.savingReminder = false
+            if let error {
+                withAnimation(Theme.snappy) { self.reminderError = error }
+                return
+            }
+            withAnimation(Theme.snappy) {
+                self.reminderDraft = nil
+                self.load()
+            }
+            self.onReminderAdded?()
+        }
+    }
+
+    /// Gone at once with an undo for five seconds; only then is it deleted in Reminders. Another
+    /// delete meanwhile lets the first one go right away.
+    func delete(_ item: Item) {
+        guard canDelete(item) else { return }
+        Haptics.tick()
+        commitDelete()
+        withAnimation(Theme.snappy) {
+            pendingDelete = item
+            if detail?.id == item.id { detail = nil }
+            load()
+        }
+        deleteTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.commitDelete()
+        }
+    }
+
+    func undoDelete() {
+        guard pendingDelete != nil else { return }
+        deleteTask?.cancel()
+        Haptics.tick()
+        withAnimation(Theme.snappy) {
+            pendingDelete = nil
+            load()
+        }
+    }
+
+    private func commitDelete() {
+        guard let item = pendingDelete, let editor else { return }
+        deleteTask?.cancel()
+        pendingDelete = nil
+        let id = item.id
+        Task { [weak self] in
+            let deleted = await Task.detached(priority: .userInitiated) { editor.delete(id) }.value
+            guard let self else { return }
+            withAnimation(Theme.snappy) {
+                if !deleted { self.deleteFailedID = id }
+                self.load()
+            }
+            guard !deleted else { return }
+            try? await Task.sleep(for: .seconds(4))
+            if self.deleteFailedID == id { withAnimation(Theme.snappy) { self.deleteFailedID = nil } }
         }
     }
 

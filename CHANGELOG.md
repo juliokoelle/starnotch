@@ -2,6 +2,49 @@
 
 What changed in Starnotch, newest first: one section per day an update landed, grouped by theme. Each feature keeps the name the app uses. Smaller fixes are in the commit history.
 
+## 1 November 2026
+
+### Shelf and time to leave
+- **New:** File actions on the shelf: Open With, Share, AirDrop, Zip and Copy to on a file's … button and on right-click. Zips and copies are new files beside the original or in the folder you pick; nothing is moved or replaced.
+- **New:** The shelf survives a restart: it points at the same files again after the app or the Mac restarts. Nothing is copied; a file that's gone drops off. On by default, in Settings › Tools.
+- **New:** Time to leave: for today's events with a place, the event's card says when to leave and how long the way takes, and a line in the notch says "Leave now" at the moment to go, once per event. Calendar's own travel time comes first; else Apple Maps works it out from where you are (by car, transit or on foot, in Settings). macOS asks for your location only when you click in the card.
+
+### Notch
+- **New:** Volume in the notch: a slim bar under the notch when you change the volume or mute (Settings › Notch, off by default). macOS still shows its own volume display; brightness isn't shown because macOS gives apps no way to read it.
+- **New:** Quiet during meetings: while the camera or microphone is in use or a calendar meeting runs, no sounds and no lines except your agents' approvals and questions, then one line for what waited (on by default).
+- **New:** Island on all displays: every display shows the island, and it opens on the one the pointer is on. Island width and height (90–120 %) and an optional outline in Settings › Notch.
+
+### All tools
+- **New:** All tools: the last tab shows every tool and function as a tile, grouped by area, with its shortcut (⌃⌥N, ⌃⌥T, ⌃⌥K, ⌃⌥A, ⌃⌥V, ⌃⌥J, ⌃⌥W, ⌃⌥I). A click starts or opens it: the teleprompter, quick capture, Ask Tara, the palette, the agents inbox, the clipboard, timer or shelf, a new event or reminder, keep awake, Watch mode, Settings. ↑↓ pick a tile, the arrows walk the grid, ↵ opens.
+- **New:** Tools that are off show dimmed with Turn on, which switches them on like Settings › Tools (macOS asks only then, where the tool asks). Settings › Tools › Switched-off tools in All tools hides them. On for everyone, and always the last tab.
+
+### Teleprompter
+- **New:** Teleprompter: your script in a band under the notch, close to the camera, so your eyes stay near the lens. It follows your voice as you read, with Apple's recognition on this Mac (nothing is recorded, no audio leaves the Mac), in German or English after the script. Paste a script, drop a .txt or .md file on it, or pick a recent one; it goes on where you stopped. Space pauses, ↑↓ or scrolling move a line, esc closes. Start it from ⌃⌥K or the menu bar.
+- **New:** Constant speed instead of following, in words a minute, for when listening isn't possible; the band switches to it by itself and says why. Text size and 3 to 5 lines in the band; [square brackets] in a script are stage directions you don't have to say. Like the rest of the island, the band stays out of screen sharing: your audience never sees the script.
+
+### Music
+- **New:** Shuffle, repeat and favorite beside the controls in Now Playing, showing the player's own state: Music has all three (repeat goes off, all, one; the star is Music's Favorite), Spotify shuffle and repeat. The first click lets macOS ask whether Starnotch may control the player. Settings › Tools › Shuffle, repeat and like in Now playing.
+
+### Calendar and Today
+- **New:** Check camera beside Join: a mirrored live preview of your camera in the meeting's card. Nothing is recorded; closing it, Join, esc or leaving the card turns the camera off at once. Also in ⌃⌥K.
+- **New:** Today's + adds a reminder (day and time can be typed: "tomorrow 15:00"), the calendar's + adds an event beside the day ("Lunch with Ada 13:00 1h"); ↵ saves, esc cancels. A reminder's bin deletes it with five seconds to undo. macOS asks for access on the first save.
+
+### Tools
+- **New:** Launcher: your Apple Shortcuts and apps as a grid in the Tools tab; a click runs a shortcut or opens the app. Pick them in Settings › Shortcuts and apps. Also on ⌃⌥K.
+- **New:** Finished downloads: a line with the file's name when a download in Downloads finishes; a click offers Open, Show in Finder and Add to shelf. Only names and sizes are looked at. Off until you switch it on.
+- **New:** Apple Notes in Tools › Notepad: your 20 newest notes; a click opens one in Notes. Note captures can also go into an Apple Notes folder. Off until you switch it on; macOS asks whether Starnotch may control Notes.
+
+### System
+- **New:** Device batteries: Magic Mouse, Keyboard and Trackpad, AirPods and other Bluetooth devices with their level in the System tab, and one line when one falls below 15 %.
+
+## 31 October 2026
+
+### Agents
+- **New:** Claude Code's questions with options are answered in the notch: one to four questions, one at a time, with what each option means, several picks where Claude allows them, and a field for an answer of your own. 1–9 pick, ↵ goes on and sends, esc or Answer in terminal hands the question back to Claude's own window, and so does a minute without an answer. While the session's own window is in front, the question goes there right away. The Claude Code plugin updates itself at launch; restart running sessions once.
+- **New:** Instead… beside Deny: tell Claude Code, Codex, Cursor or Copilot CLI what to do instead, sent with the deny.
+- **Improved:** When Codex asks a question in Plan mode, its session says so ("Codex asks: …" with the options) and waits for you in the inbox, instead of looking busy; a click opens the session to answer. Codex doesn't let another app answer for it.
+- **Improved:** "+N earlier" under a session's subagents opens the older ones in place, each with its detail card; a session lists its last twelve subagents instead of five.
+
 ## 30 October 2026
 
 ### Tara

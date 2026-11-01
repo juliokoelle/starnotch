@@ -12,6 +12,7 @@ enum ModuleSymbols {
         case .system: "gauge.with.dots.needle.50percent"
         case .meeting: "person.2.wave.2"
         case .tools: "doc.on.clipboard"
+        case .allTools: "square.grid.3x3"
         }
     }
 }

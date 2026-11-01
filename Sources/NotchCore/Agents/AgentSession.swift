@@ -81,6 +81,9 @@ public struct AgentSession: Equatable, Sendable, Identifiable {
 
 /// A subagent of a session (Claude Code's Task agents, Codex's spawned threads).
 public struct AgentSubagent: Equatable, Sendable, Identifiable {
+    /// How many of a session's subagents are listed (newest first); older ones are only counted.
+    public static let listed = 12
+
     public var id: String
     /// The parent's description of it ("Push reminders").
     public var name: String

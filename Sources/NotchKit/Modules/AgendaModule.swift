@@ -33,12 +33,30 @@ final class AgendaModule: NotchModule {
     private(set) var span = Span.day
     /// The week's or month's events.
     private(set) var rangeEvents: [CalEvent] = []
+    /// Check camera beside Join (Settings › Tools); off, the button and the palette item go.
+    var cameraCheckOn = true {
+        didSet { if !cameraCheckOn { closeCamera() } }
+    }
+    /// Which meeting's card shows the camera check; the camera runs exactly while its preview does.
+    private(set) var camera = CameraCheck() {
+        didSet {
+            guard camera.cameraOn != oldValue.cameraOn else { return }
+            if camera.cameraOn { mirror.start() } else { mirror.stop() }
+        }
+    }
+    let mirror = CameraMirror()
+    /// Time to leave for today's events with a place (set by the app; Settings › Tools).
+    var leave: LeaveTimes?
+    /// Held while macOS asks for the camera, so the island is still open for the answer.
+    @ObservationIgnored private var askLock: Int?
 
     init(variant: Variant, people: (any PeopleProvider)?, source: CalendarModule? = nil) {
         self.variant = variant
         self.people = people
         self.source = source
         mockEvents = source == nil ? AgendaSamples.day(R5Clock.now()) : []
+        // The made-up day gets a made-up camera: previews never ask for or show the real one.
+        mirror.simulated = source == nil
     }
 
     /// Who is in the meeting and what is open with them.
@@ -142,11 +160,12 @@ final class AgendaModule: NotchModule {
             ?? mockEvents.filter { $0.start >= first && $0.start < end }
     }
 
-    /// Shows another day; 0 goes back to today.
+    /// Shows another day; 0 goes back to today. An event being typed goes along to that day.
     func showDay(_ offset: Int) {
         guard offset != dayOffset else { return }
         Haptics.tick()
         withAnimation(Theme.snappy) {
+            eventDraft?.shift(days: offset - dayOffset, calendar: .current)
             otherDay = offset == 0 ? [] : (source?.meetings(dayOffset: offset).map(CalEvent.init) ?? [])
             dayOffset = offset
             selectedID = nil
@@ -193,8 +212,9 @@ final class AgendaModule: NotchModule {
         }
     }
 
-    /// The agenda's detail side shows (a meeting with prep is next, or the user picked one).
-    var showsDetail: Bool { variant == .b && selected != nil }
+    /// The agenda's detail side shows (a meeting with prep is next, the user picked one, or a new
+    /// event is being typed).
+    var showsDetail: Bool { variant == .b && (selected != nil || eventDraft != nil) }
 
     /// Every event's lane on the day band (overlaps stack), by id.
     var lanes: [String: Int] {
@@ -243,6 +263,8 @@ final class AgendaModule: NotchModule {
     func open(_ event: CalEvent) {
         if let link = event.link {
             Haptics.confirm()
+            // The call takes the camera over: the check ends with Join.
+            closeCamera()
             NSWorkspace.shared.open(link.url)
         } else if let url = noteURL(for: event) {
             NSWorkspace.shared.open(url)
@@ -252,6 +274,185 @@ final class AgendaModule: NotchModule {
     func openNote(for event: CalEvent) {
         if let url = noteURL(for: event) {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    // MARK: Check camera
+
+    /// Today's call under way or next (a meeting with a call link): what a camera check is for.
+    var nextCall: CalEvent? {
+        let now = now
+        return todayEvents.first { $0.kind == .meeting && $0.link != nil && $0.end > now }
+    }
+
+    /// Check camera on a meeting's card: the mirrored preview, macOS's dialog the first time,
+    /// or, with access off, a note and System Settings › Privacy & Security › Camera.
+    func checkCamera(_ event: CalEvent) {
+        Haptics.tick()
+        toggleCamera(event)
+    }
+
+    /// The command palette: the calendar on today's next call with its camera check open.
+    func checkCameraBeforeNextCall() {
+        guard let call = nextCall else { return }
+        DailyStore.shared.cardShown = false
+        withAnimation(Theme.snappy) {
+            selectedID = call.id
+            detailDismissed = false
+        }
+        if camera.meetingID != call.id { toggleCamera(call) }
+    }
+
+    func closeCamera() {
+        releaseAskLock()
+        guard camera.meetingID != nil || camera.asking != nil else { return }
+        withAnimation(Theme.snappy) { camera.close() }
+    }
+
+    /// A meeting's card left (another one picked, another day, the tab or the panel closed).
+    func cardLeft(_ event: CalEvent) {
+        guard camera.meetingID == event.id || camera.asking == event.id else { return }
+        if camera.asking == event.id { releaseAskLock() }
+        camera.left(event.id)
+    }
+
+    private func toggleCamera(_ event: CalEvent) {
+        // macOS's dialog is up already: another click asks nothing new.
+        guard camera.asking != event.id else { return }
+        let step = withAnimation(Theme.snappy) { camera.click(event.id, access: mirror.access) }
+        switch step {
+        case .ask:
+            releaseAskLock()
+            askLock = IslandLock.shared.acquire("camera access")
+            mirror.requestAccess { [weak self] granted in
+                guard let self else { return }
+                self.releaseAskLock()
+                withAnimation(Theme.snappy) { self.camera.answered(event.id, granted: granted) }
+            }
+        case .openSettings:
+            PrivacyPane.open("Privacy_Camera")
+        case .show, .close:
+            break
+        }
+    }
+
+    /// Previews: the note for camera access that is off, on today's next call (System Settings
+    /// stays closed).
+    func usePreviewCameraNote() {
+        guard let call = nextCall else { return }
+        selectedID = call.id
+        detailDismissed = false
+        _ = camera.click(call.id, access: .denied)
+    }
+
+    private func releaseAskLock() {
+        guard let held = askLock else { return }
+        askLock = nil
+        IslandLock.shared.release(held)
+    }
+
+    // MARK: Adding an event
+
+    /// Settings › Tools: the "+" in the header (on by default).
+    @ObservationIgnored var editsAllowed: () -> Bool = { true }
+    /// The event being typed after the "+"; nil while there is none.
+    private(set) var eventDraft: EventDraft?
+    private(set) var savingEvent = false
+    /// Why the last one wasn't added, under the field.
+    private(set) var eventError: String?
+
+    var canAddEvents: Bool { variant == .b && editsAllowed() }
+
+    /// Where a new event goes: the default calendar (the made-up "Work" in previews).
+    var newEventCalendar: (title: String, color: Color)? {
+        source.map { $0.defaultCalendar } ?? (CalendarSource.work.rawValue, CalendarSource.work.color)
+    }
+
+    /// The form takes the detail side of the day; from the week or the month it opens the day.
+    func startEvent() {
+        guard canAddEvents else { return }
+        Haptics.tick()
+        withAnimation(Theme.snappy) {
+            if span != .day {
+                span = .day
+                rangeEvents = []
+            }
+            eventDraft = EventDraft(day: shownDate, now: now, calendar: .current)
+            eventError = nil
+        }
+    }
+
+    func cancelEvent(feel: Bool = true) {
+        guard eventDraft != nil else { return }
+        if feel { Haptics.tick() }
+        withAnimation(Theme.snappy) {
+            eventDraft = nil
+            eventError = nil
+        }
+    }
+
+    func updateEvent(text: String) {
+        eventDraft?.update(text: text, now: now, calendar: .current)
+        if eventError != nil { eventError = nil }
+        followDraft()
+    }
+
+    func shiftEvent(days: Int) {
+        Haptics.tick()
+        withAnimation(Theme.snappy) { eventDraft?.shift(days: days, calendar: .current) }
+        followDraft()
+    }
+
+    func shiftEvent(minutes: Int) {
+        Haptics.tick()
+        withAnimation(Theme.snappy) { eventDraft?.shift(minutes: minutes, calendar: .current) }
+    }
+
+    func nextEventLength() {
+        Haptics.tick()
+        withAnimation(Theme.snappy) { eventDraft?.nextLength() }
+    }
+
+    /// The day on show follows the event's day, so its neighbours are in view.
+    private func followDraft() {
+        guard let start = eventDraft?.start else { return }
+        let calendar = Calendar.current
+        let offset = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: start)).day ?? 0
+        guard offset != dayOffset else { return }
+        withAnimation(Theme.snappy) {
+            otherDay = offset == 0 ? [] : (source?.meetings(dayOffset: offset).map(CalEvent.init) ?? [])
+            dayOffset = offset
+            selectedID = nil
+        }
+    }
+
+    /// ↵: added to the default calendar off the main thread (macOS asks on the first save); the
+    /// form closes once it's there. Previews and the test mode add it to the made-up day only.
+    func saveEvent() {
+        guard let draft = eventDraft, draft.canSave, !savingEvent else { return }
+        savingEvent = true
+        Haptics.confirm()
+        let title = draft.title, start = draft.start, minutes = draft.minutes
+        Task { [weak self] in
+            guard let self else { return }
+            var error: String?
+            if let source = self.source {
+                error = await CalendarWriter.add(title: title, start: start, minutes: minutes)
+                if error == nil { source.reload() }
+            } else {
+                self.mockEvents.append(CalEvent(id: "added-\(self.mockEvents.count)", title: title, start: start, end: draft.end,
+                                                calendar: .work, kind: .focus))
+                self.mockEvents.sort { $0.start < $1.start }
+            }
+            self.savingEvent = false
+            if let error {
+                withAnimation(Theme.snappy) { self.eventError = error }
+                return
+            }
+            withAnimation(Theme.snappy) {
+                self.eventDraft = nil
+                if self.dayOffset != 0 { self.otherDay = self.source?.meetings(dayOffset: self.dayOffset).map(CalEvent.init) ?? [] }
+            }
         }
     }
 
@@ -267,9 +468,18 @@ final class AgendaModule: NotchModule {
         return next.start.timeIntervalSince(now) <= 5 * 60 && next.end > now
     }
 
-    var holdsOpen: Bool { selectedID != nil }
+    /// A picked event, or a form on show (here or in Today), keeps the panel open.
+    var holdsOpen: Bool {
+        let daily = DailyStore.shared
+        return selectedID != nil || (daily.cardShown ? daily.today?.reminderDraft != nil : eventDraft != nil)
+    }
 
     func handleBack() -> Bool {
+        // Esc closes the camera check first, back to the briefing.
+        if camera.meetingID != nil {
+            closeCamera()
+            return true
+        }
         // Today is where the tab opens: Esc there closes the panel.
         guard !DailyStore.shared.cardShown, showsDetail else { return false }
         withAnimation(Theme.snappy) {
@@ -284,6 +494,10 @@ final class AgendaModule: NotchModule {
             // Today first; a meeting within the quarter hour keeps the calendar and its briefing.
             DailyStore.shared.cardShown = DailyStore.shared.opensOnToday && ambientPriority == 0
         } else {
+            closeCamera()
+            eventDraft = nil
+            eventError = nil
+            DailyStore.shared.today?.cancelReminder(feel: false)
             selectedID = nil
             detailDismissed = false
             dayOffset = 0
@@ -391,6 +605,15 @@ final class AgendaModule: NotchModule {
     }
 
     func handleKey(_ press: KeyPress) -> Bool {
+        // A form has the keyboard: ↵ saves, esc cancels, and nothing else walks days or tabs meanwhile.
+        if DailyStore.shared.cardShown, let today = DailyStore.shared.today, today.reminderDraft != nil {
+            if press.key == .escape { today.cancelReminder() } else if press.key == .return { today.saveReminder() }
+            return true
+        }
+        if !DailyStore.shared.cardShown, eventDraft != nil {
+            if press.key == .escape { cancelEvent() } else if press.key == .return { saveEvent() }
+            return true
+        }
         switch press.key {
         case .upArrow, .downArrow:
             return step(press.key == .downArrow ? 1 : -1)
@@ -782,7 +1005,10 @@ private struct AgendaBodyB: View {
                     }
                     .frame(width: module.showsDetail ? 256 : nil)
 
-                    if let event = module.selected {
+                    if module.eventDraft != nil {
+                        EventComposer(module: module)
+                            .transition(.blurSlide(x: 10))
+                    } else if let event = module.selected {
                         Briefing(module: module, event: event, now: now)
                             .id(event.id)
                             .transition(.blurSlide(x: 10))
@@ -800,6 +1026,8 @@ private struct AgendaBodyB: View {
                     .transition(.blurSlide(y: -8))
             }
         }
+        // Covered by the day card, the camera check is out of sight: it stops.
+        .onChange(of: DailyStore.shared.cardShown) { _, shown in if shown { module.closeCamera() } }
         .onAppear { module.source?.requestAccessIfNeeded() }
     }
 
@@ -1025,6 +1253,9 @@ private struct DayHeader: View {
             if let source = module.source {
                 arrow("arrow.up.forward.app", help: "Open Calendar") { source.openCalendarApp() }
             }
+            if module.canAddEvents, module.eventDraft == nil {
+                arrow("plus", help: "New event") { module.startEvent() }
+            }
         }
     }
 
@@ -1245,13 +1476,141 @@ private struct AgendaList: View {
     }
 }
 
-/// The selected meeting as a briefing: who, what is open with them, and the one action.
+/// The calendar's "+": the title (a day, a time and a length in it count, "Lunch tomorrow 13:00
+/// 1h"), the day, the time and the length as chips, and the calendar it goes to. ↵ adds it, esc
+/// cancels; macOS asks for calendar access on the first save if it never asked.
+private struct EventComposer: View {
+    let module: AgendaModule
+    @FocusState private var focused: Bool
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        let draft = module.eventDraft ?? EventDraft(day: module.shownDate, now: module.now, calendar: .current)
+        NotchCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 6) {
+                    Text("New event").font(Theme.font(11.5, .semibold)).foregroundStyle(Theme.accent)
+                    Spacer(minLength: 6)
+                    if let calendar = module.newEventCalendar {
+                        Circle().fill(calendar.color).frame(width: 6, height: 6)
+                        Text(verbatim: calendar.title).font(Theme.font(11.5)).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    }
+                }
+                TextField("Lunch with Ada 13:00", text: Binding(get: { module.eventDraft?.text ?? "" }, set: { module.updateEvent(text: $0) }))
+                    .textFieldStyle(.plain)
+                    .font(Theme.font(14.5, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .focused($focused)
+                    .onSubmit { module.saveEvent() }
+                    .simultaneousGesture(TapGesture().onEnded { NotchPanel.takeKeyboard() })
+                    .padding(.horizontal, 10)
+                    .frame(height: 32)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                HStack(spacing: 6) {
+                    stepper(dayLabel(draft.start), help: "The day") { module.shiftEvent(days: $0) }
+                    stepper(Text(verbatim: "\(TimeText.clock(draft.start))–\(TimeText.clock(draft.end))"), help: "The start, in quarter hours") {
+                        module.shiftEvent(minutes: 15 * $0)
+                    }
+                    Button { module.nextEventLength() } label: {
+                        Text(verbatim: DayGaps.duration(Double(draft.minutes)))
+                            .font(Theme.font(11.5, .medium).monospacedDigit())
+                            .foregroundStyle(Theme.textBody)
+                            .padding(.horizontal, 9)
+                            .frame(height: 24)
+                            .background(Color.white.opacity(0.07), in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(PressScale())
+                    .help("How long: 15 min to 2 h. Or type it: 30 min, 1h")
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    if let error = module.eventError {
+                        Text(LocalizedStringKey(error)).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                        if let source = module.source, CalendarModule.currentAccess() == .denied {
+                            Button("Open Privacy Settings") { Haptics.tick(); source.openPrivacySettings() }
+                                .buttonStyle(PressScale())
+                                .foregroundStyle(Theme.accent)
+                        }
+                    } else {
+                        Text("↵ add  esc").foregroundStyle(Theme.textTertiary)
+                    }
+                    Spacer(minLength: 6)
+                    Button { module.saveEvent() } label: {
+                        Text("Add").font(Theme.font(12, .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .frame(height: 24)
+                            .background(Theme.accent.opacity(draft.canSave ? 1 : 0.35), in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(PressScale())
+                    .disabled(!draft.canSave || module.savingEvent)
+                    .help("Add to the calendar (↵)")
+                }
+                .font(Theme.font(11))
+            }
+        }
+        .onAppear {
+            NotchPanel.takeKeyboard()
+            focused = true
+        }
+    }
+
+    /// "Today", "Tomorrow", "Fri 6 Nov".
+    private func dayLabel(_ date: Date) -> Text {
+        let calendar = Calendar.current
+        let offset = calendar.dateComponents([.day], from: calendar.startOfDay(for: module.now), to: calendar.startOfDay(for: date)).day
+        switch offset {
+        case 0: return Text("Today")
+        case 1: return Text("Tomorrow")
+        default: return Text(verbatim: date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).locale(locale)))
+        }
+    }
+
+    /// A value with arrows on both sides; `step` gets -1 or 1.
+    private func stepper(_ label: Text, help: LocalizedStringKey, step: @escaping (Int) -> Void) -> some View {
+        HStack(spacing: 0) {
+            arrow("chevron.left") { step(-1) }
+            label.font(Theme.font(11.5, .medium).monospacedDigit()).foregroundStyle(Theme.textBody).lineLimit(1).fixedSize()
+            arrow("chevron.right") { step(1) }
+        }
+        .frame(height: 24)
+        .background(Color.white.opacity(0.07), in: Capsule())
+        .help(help)
+    }
+
+    private func arrow(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 22, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+    }
+}
+
+/// The selected meeting as a briefing: who, what is open with them, and the one action. Check
+/// camera turns the card into the camera's mirrored picture until it's closed or the card goes.
 private struct Briefing: View {
     let module: AgendaModule
     let event: CalEvent
     let now: Date
 
     var body: some View {
+        // One container, so switching to the camera and back isn't the card leaving.
+        ZStack {
+            if module.camera.meetingID == event.id, module.camera.card == .preview, let link = event.link {
+                CameraCheckCard(module: module, event: event, link: link, now: now)
+                    .transition(.blurSlide(scale: 0.97))
+            } else {
+                briefing
+            }
+        }
+        .onDisappear { module.cardLeft(event) }
+    }
+
+    private var briefing: some View {
         NotchCard(padding: 12) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top) {
@@ -1275,30 +1634,176 @@ private struct Briefing: View {
                         .font(Theme.font(12))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
+                        if let leave = module.leave, leave.enabled, module.isToday {
+                            LeaveLine(leave: leave, event: event, now: now)
+                        }
                     }
                     Spacer(minLength: 8)
                     // Join stays in reach at the top; the prep below scrolls in the fixed panel.
                     if let link = event.link, event.end > now {
-                        JoinPill(link: link) { module.open(event) }
+                        HStack(spacing: 6) {
+                            if module.cameraCheckOn { CameraCheckButton(module: module, event: event) }
+                            JoinPill(link: link) { module.open(event) }
+                        }
                     } else {
                         Circle().fill(event.calendar.color).frame(width: 7, height: 7).padding(.top, 6)
                             .help(event.calendar.rawValue)
                     }
                 }
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1).padding(.vertical, 10)
-                ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        PrepList(module: module, event: event, avatarSize: 30, maxPeople: 3, maxItems: 4, noteLines: 2)
-                        if module.hasNote(for: event) {
-                            QuietLink(title: "Open note") { module.openNote(for: event) }
+                if module.camera.meetingID == event.id, module.camera.card == .accessOff {
+                    CameraAccessNote()
+                        .transition(.blurSlide(y: 4))
+                } else {
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            PrepList(module: module, event: event, avatarSize: 30, maxPeople: 3, maxItems: 4, noteLines: 2)
+                            if module.hasNote(for: event) {
+                                QuietLink(title: "Open note") { module.openNote(for: event) }
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .scrollIndicators(.never)
+                    .scrollEdgeFade()
                 }
-                .scrollIndicators(.never)
-                .scrollEdgeFade()
             }
         }
+    }
+}
+
+/// Time to leave in the event's card: when to go and how long the way takes, "Leave now" once
+/// it's time; with the location never asked, the click that asks for it. Nothing once it started.
+private struct LeaveLine: View {
+    let leave: LeaveTimes
+    let event: CalEvent
+    let now: Date
+
+    var body: some View {
+        if event.start > now, let estimate = leave.estimates[event.id] {
+            let due = TimeToLeave.isDue(start: event.start, travel: estimate.travel, now: now)
+            let leaveAt = TimeText.clock(TimeToLeave.leaveAt(start: event.start, travel: estimate.travel))
+            HStack(spacing: 5) {
+                Image(systemName: estimate.fromCalendar ? "calendar.badge.clock" : estimate.mode.symbol)
+                    .font(.system(size: 10.5, weight: .semibold))
+                Text(due ? Localization.string("Leave now") : String(format: Localization.string("Leave at %@"), leaveAt))
+                    .font(Theme.font(12, .semibold))
+                    .contentTransition(.numericText())
+                Text(verbatim: "· \(TimeToLeave.duration(estimate.travel))")
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .font(Theme.font(12))
+            .foregroundStyle(due ? Theme.accent : Theme.textBody)
+            .lineLimit(1)
+            .padding(.top, 2)
+            .help(estimate.fromCalendar ? "The travel time set in Calendar" : "Worked out by Apple Maps from where you are")
+        } else if event.start > now, leave.offersLocation(for: event.id) {
+            QuietLink(title: Localization.string("Time to leave: use my location"), symbol: "location") { leave.useMyLocation() }
+                .padding(.top, 2)
+                .help("macOS asks once; Apple Maps then works out the way from where you are")
+        }
+    }
+}
+
+/// Check camera beside Join: a quiet square; the picture opens in the card.
+private struct CameraCheckButton: View {
+    let module: AgendaModule
+    let event: CalEvent
+
+    var body: some View {
+        let off = module.mirror.access == .denied
+        Button { module.checkCamera(event) } label: {
+            Image(systemName: off ? "video.slash" : "web.camera")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(off ? Theme.textSecondary : Theme.textBody)
+                .frame(width: 30, height: 26)
+                .background(Color.white.opacity(module.camera.meetingID == event.id ? 0.14 : 0.08),
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .help(off ? "Camera access is off. Click to open System Settings." : "Check camera: a mirrored preview, nothing is recorded")
+        .accessibilityLabel("Check camera")
+    }
+}
+
+/// The camera check in place of the briefing: the mirrored live picture fills the card, the
+/// meeting on top with the close button, Join right beside the picture.
+private struct CameraCheckCard: View {
+    let module: AgendaModule
+    let event: CalEvent
+    let link: MeetingLink
+    let now: Date
+
+    var body: some View {
+        CameraPreview(mirror: module.mirror)
+            .overlay {
+                VStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.title).font(Theme.font(14, .semibold)).foregroundStyle(.white)
+                            Text(R5Clock.countdown(start: event.start, end: event.end, now: now))
+                                .font(Theme.font(11.5).monospacedDigit()).foregroundStyle(.white.opacity(0.75))
+                        }
+                        .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Button {
+                            Haptics.tick()
+                            module.closeCamera()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 24, height: 24)
+                                .background(Color.black.opacity(0.45), in: Circle())
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(PressScale())
+                        .help("Close the camera")
+                        .accessibilityLabel("Close the camera")
+                    }
+                    Spacer(minLength: 0)
+                    HStack(alignment: .center, spacing: 8) {
+                        Label("Only you see this. Nothing is recorded.", systemImage: "lock.fill")
+                            .font(Theme.font(11, .medium))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                        Spacer(minLength: 6)
+                        JoinPill(link: link) { module.open(event) }
+                    }
+                }
+                .padding(10)
+                .background {
+                    // Scrims keep the words readable on any picture.
+                    VStack(spacing: 0) {
+                        LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom).frame(height: 56)
+                        Spacer(minLength: 0)
+                        LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .top, endPoint: .bottom).frame(height: 56)
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+/// Camera access is off: what to switch on, and where (System Settings opened with the click).
+private struct CameraAccessNote: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Camera access is off", systemImage: "video.slash")
+                .font(Theme.font(12.5, .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Text("Turn \(Brand.displayName) on in System Settings › Privacy & Security › Camera, then check again.")
+                .font(Theme.font(12))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            QuietLink(title: Localization.string("Open System Settings")) {
+                Haptics.tick()
+                PrivacyPane.open("Privacy_Camera")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -29,9 +29,16 @@ final class NotesStore {
         }
     }
     private(set) var notes: [Note] = []
-    /// The Notepad shows "Tara's notes" (quick captures) instead of the user's own notes; set
-    /// from outside too, by the capture confirmation's Notepad button.
-    var showsTara = false
+    enum Section { case mine, tara, apple }
+    /// What the Notepad shows: the user's own notes, "Tara's notes" (quick captures) or Apple Notes
+    /// (when switched on in Settings).
+    var section = Section.mine
+    /// "Tara's notes" instead of the user's own; set from outside too, by the capture
+    /// confirmation's Notepad button.
+    var showsTara: Bool {
+        get { section == .tara }
+        set { section = newValue ? .tara : .mine }
+    }
     /// The open note; nil is a new one not saved yet.
     private(set) var selected: URL?
     /// The open note's text; saved shortly after each change.
@@ -279,27 +286,36 @@ final class NotesStore {
 
 /// The notes in the Tools tab: the list on the left, the open note on the right.
 /// The Notepad: the user's own notes, and beside them in a second tab what Tara keeps from
-/// quick capture (⌃⌥N), so the two aren't mistaken for each other.
+/// quick capture (⌃⌥N), so the two aren't mistaken for each other; a third tab lists Apple Notes
+/// while they are switched on.
 struct NotesCard: View {
     @Bindable var store: NotesStore
+    var apple: AppleNotesStore = .shared
     @FocusState private var focused: Bool
 
     var body: some View {
+        let appleOn = apple.enabled()
+        let section = store.section == .apple && !appleOn ? .mine : store.section
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 2) {
-                tab("My notes", selected: !store.showsTara) { store.showsTara = false }
-                tab("Tara's notes", selected: store.showsTara) { store.showsTara = true }
+                tab("My notes", selected: section == .mine) { store.section = .mine }
+                tab("Tara's notes", selected: section == .tara) { store.section = .tara }
+                if appleOn { tab("Apple Notes", selected: section == .apple) { store.section = .apple } }
             }
             .padding(2)
             .background(Color.white.opacity(0.05), in: Capsule())
-            if store.showsTara {
+            switch section {
+            case .tara:
                 TaraNotesCard()
                     .transition(.blurSlide(x: 10))
-            } else {
+            case .apple:
+                AppleNotesCard(store: apple)
+                    .transition(.blurSlide(x: 10))
+            case .mine:
                 notes
             }
         }
-        .animation(Theme.snappy, value: store.showsTara)
+        .animation(Theme.snappy, value: section)
     }
 
     private func tab(_ title: LocalizedStringKey, selected: Bool, action: @escaping () -> Void) -> some View {

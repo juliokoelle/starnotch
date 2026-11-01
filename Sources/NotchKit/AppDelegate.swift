@@ -31,14 +31,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var system: SystemModule?
     private var meeting: MeetingModule?
     private var tools: ToolsModule?
+    /// The last tab: every tool as a tile (`startAllTools`).
+    private var allTools: AllToolsModule?
+    /// Time to leave for today's events with a place (Settings › Tools).
+    private var leave: LeaveTimes?
     /// The Tools module watches the clipboard (not in previews).
     private var toolsLive = false
     private let headphones = HeadphoneBattery()
+    /// Mice, keyboards and headphones in the System tab (Settings › Device batteries).
+    private let deviceBatteries = DeviceBatteryMonitor()
+    /// ~/Downloads, while Finished downloads is on.
+    private var downloads: DownloadsWatcher?
     private var companion: MeetingCompanion?
     /// Tara's welcome after the first onboarding.
     private var welcome: WelcomeTour?
     private let battery = BatteryMonitor()
     private let keepAwake = KeepAwake()
+    /// The output volume, while the volume bar is switched on (Settings › Notch).
+    private let volume = VolumeMonitor()
     private var lidAwake: LidAwakeController?
     private var shell: ShellMonitor?
     private let updater = Updater()
@@ -58,6 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ⌃⌥T went down while the Dashboard was in front: its chat took the press, so the release is its too.
     private var askPressInDashboard = false
     private var askHotKey: HotKey?
+    /// The teleprompter (⌃⌥K › Teleprompter, the menu bar); in the island while its tool is on.
+    private var prompter: Prompter?
     /// Ends a timed pause of Tara's memory.
     private var pauseEnd: Task<Void, Never>?
     /// Time per app, while "Apps you use" is on (never in previews or with sample data).
@@ -98,6 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Reminders fetched (at launch, after access was given) or changed in Reminders: Today
         // shows them without waiting for the panel to open again.
         reminders.onChange = { [weak today] in today?.reload() }
+        // Settings › Tools: the "+" in Today and in the calendar, and deleting a reminder in Today.
+        let edits = { [weak self] in self?.state.settings.addInNotch ?? true }
+        agenda.editsAllowed = edits
+        today?.editsAllowed = edits
         let system = SystemModule()
         system.cast = cast
         self.system = system
@@ -131,8 +147,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let tools = ToolsModule()
         tools.cast = cast
+        // The launcher reads the settings, so what is picked there shows at once.
+        tools.launcherItems = { [weak self] in self?.state.settings.launcher ?? [] }
+        tools.openLauncherSettings = { [weak self] in self?.showSettings(.notch) }
         self.tools = tools
-        allModules = [agents, agenda, music, system, dictation, meeting, tools]
+        let allTools = AllToolsModule()
+        self.allTools = allTools
+        allModules = [agents, agenda, music, system, dictation, meeting, tools, allTools]
         if let today { allModules.insert(today, at: 1) }
         notchModel = NotchModel(modules: shownModules(sample: sample))
         // --preview: mock data for screenshots and recordings; the features themselves are live.
@@ -143,7 +164,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.state.settings.moduleOrder = ModuleOrder.saved(visible: visible, previous: self.state.settings.moduleOrder)
         }
-        notch = NotchController(model: notchModel, display: { [weak self] in self?.state.settings.islandDisplay ?? .automatic })
+        notch = NotchController(model: notchModel, display: { [weak self] in self?.state.settings.islandDisplay ?? .automatic },
+                                scale: { [weak self] in (self?.state.settings.islandWidthScale ?? 1, self?.state.settings.islandHeightScale ?? 1) })
+        notchModel.outline = state.settings.islandOutline
+        // Previews and sample data keep their scripts in memory.
+        prompter = Prompter(library: state.persists ? PrompterLibrary(file: Brand.supportFolder.appending(path: Prompter.scriptsFile)) : nil,
+                            persists: state.persists)
         today?.onOpenCalendar = { [weak self] in
             guard let self else { return }
             Haptics.tick()
@@ -159,10 +185,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !sample { self.daily.remindersShown = self.state.settings.remindersInToday && RemindersSource.authorized }
             withAnimation(Theme.snappy) { self.notchModel.modules = self.shownModules(sample: sample) }
             self.applyTools()
+            self.allTools?.refresh()
         }
-        state.onDisplayChanged = { [weak self] in self?.notch.placeOnScreen() }
+        state.onDisplayChanged = { [weak self] in
+            guard let self else { return }
+            self.notchModel.outline = self.state.settings.islandOutline
+            self.notch.placeOnScreen()
+        }
+        state.onQuietChanged = { [weak self] in self?.applyQuiet() }
         notch.hoverOpenDelay = { [weak self] in self?.state.settings.hoverOpen.seconds }
         notch.reopensLastTab = { [weak self] in self?.state.settings.reopenLastTab ?? true }
+        // Apple Notes (Settings): the Notepad's tab and note captures copied to a folder.
+        AppleNotesStore.shared.enabled = { [weak self] in self?.state.settings.appleNotes ?? false }
+        notch.appleNotesCapture = { [weak self] in
+            guard let settings = self?.state.settings, settings.appleNotes else { return nil }
+            return settings.appleNotesCapture
+        }
         notch.keepsOpen = { [weak self] in
             (self?.state.settings.keepOpenUntilClick ?? false) || self?.notchModel.approvals?.current != nil
         }
@@ -170,10 +208,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchModel.approvals = approvals
         approvals.onShow = { [weak self] in
             guard let self else { return }
-            // Watching: one small line instead of opening over the video; a click opens the card.
-            if self.notchModel.watching {
-                self.notch.sneak(Sneak(visual: .symbol("hand.raised.fill", tint: .waiting), title: "Approval waiting",
-                                       duration: 4), key: "approval", urgent: true)
+            // Watching or in a meeting: one small line instead of opening over the video or the
+            // call (and taking the keys); a click opens the card. Open already, the panel shows it.
+            if self.notchModel.watching || self.notchModel.meetingQuiet && self.notchModel.interaction != .expanded {
+                self.notch.sneak(Sneak(visual: .symbol("hand.raised.fill", tint: .waiting), title: Localization.string("Approval waiting"),
+                                       duration: 4), key: "approval", urgent: true, asks: true)
             } else {
                 self.notch.showApproval()
             }
@@ -185,6 +224,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.notch.collapse()
         }
         approvals.onChange = { [weak agents] requests in agents?.setPendingApprovals(requests) }
+        // A question while the session's own window (terminal, editor, the Claude app) is in
+        // front: asked there at once instead of in the notch.
+        approvals.isSessionInFront = { [weak agents] request in
+            guard let id = request.agentID, let agent = agents?.snapshot.agents.first(where: { $0.id == id }),
+                  let pid = agent.pid, let host = AgentsModule.hostApp(of: pid) else { return false }
+            return host.processIdentifier == NSWorkspace.shared.frontmostApplication?.processIdentifier
+        }
         // Strand agents: status hooks of Cursor, Copilot CLI, Gemini CLI and opencode arrive on the approvals socket.
         approvals.onHookEvent = { [weak agents] data in agents?.ingestHook(data) }
         agents.onLimitAlert = { [weak self] tool, window, used, pace in
@@ -229,6 +275,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     detail: meeting.link.map { "Join \($0.provider.rawValue) · ⌃⌥J" },
                                     duration: 3, url: meeting.link?.url),
                               key: "meeting.\(meeting.id)", urgent: true)
+        }
+        system.onMediaChange = { [weak self] _ in self?.updateMeetingQuiet() }
+        // Time to leave: the leave time in the event's card, and a line when it's time to go.
+        let leave = LeaveTimes()
+        self.leave = leave
+        agenda.leave = leave
+        leave.persists = state.persists
+        leave.onLeave = { [weak self, weak leave] event, estimate in
+            self?.notch.sneak(Sneak(visual: .symbol(estimate.fromCalendar ? "calendar.badge.clock" : estimate.mode.symbol, tint: .waiting),
+                                    title: String(format: Localization.string("Leave now for %@"), event.title),
+                                    detail: TimeToLeave.duration(estimate.travel),
+                                    duration: 6, url: leave?.mapsURL(for: event)),
+                              key: "leave.\(event.id)", urgent: true) ?? false
+        }
+        // One reload, two listeners: quiet during meetings looks at the clock, time to leave at the events.
+        calendar.onReload = { [weak self, weak leave] events in
+            self?.updateMeetingQuiet()
+            if !sample { leave?.update(events) }
         }
         calendar.start()
         meeting.nextEvent = { [weak calendar] in calendar?.next.map { ($0.title, $0.attendees) } }
@@ -352,6 +416,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.keepingAwake = { [weak self] in self?.keepAwake.isOn ?? false }
         statusItem.onToggleKeepAwake = { [weak self] in self?.keepAwake.toggle() }
         statusItem.onOpenSetup = { [weak self] in self?.showSetup(at: .agents) }
+        statusItem.prompterOpen = { [weak self] in self?.notchModel.prompter?.isOpen ?? false }
+        statusItem.onTogglePrompter = { [weak self] in self?.notch.togglePrompter() }
         statusItem.updater = updater
         hotKey = HotKey.controlOptionSpace { [weak self] in self?.notch.toggleFromKeyboard() }
         joinHotKey = HotKey.controlOptionJ { [weak self] in self?.joinNextMeeting() }
@@ -378,6 +444,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.watching = { [weak self] in self?.watchMode.isOn ?? false }
         statusItem.onToggleWatch = { [weak self] in self?.watchMode.toggle() }
         watchMode.start()
+        volume.onChange = { [weak self] reading in self?.notch.showLevel(reading) }
+        applyQuiet()
         state.onLocalAPIToggle = { [weak self] on in self?.setLocalAPI(on) }
         if options.preview == nil { setLocalAPI(state.settings.localAPIEnabled) }
 
@@ -434,6 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         startDaily(tools: tools, today: today, sample: sample)
+        startAllTools(sample: sample)
         // MARK: Command palette and agents inbox (strand cmdk)
         // ⌃⌥K (and ⌘K while open) searches every module that is a `PaletteProvider`; ⌃⌥A works
         // through prompts, questions, finished turns and failed loops, with its count in the ear.
@@ -502,6 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if name == "memory-paused" { state.settings.privacy.pause(.untilResumed, now: Date()) }
             previewDirector = PreviewDirector(notch: notch, agents: agents, music: music)
             previewDirector?.system = system
+            previewDirector?.state = state
             previewDirector?.run(name)
         } else if options.sampleData {
             previewDirector = PreviewDirector(notch: notch, agents: agents, music: music)
@@ -538,6 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        prompter?.close()  // keeps the place reached
         lidAwake?.quit()
         approvals?.stop()
         meeting?.shutdown()
@@ -624,6 +695,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               key: "dark-mode")
         }
         startLidAwake(system)
+        // Device batteries: started and stopped with their switch (applyTools); one line when
+        // one runs low.
+        deviceBatteries.onChange = { [weak system] devices in withAnimation(Theme.snappy) { system?.devices = devices } }
+        deviceBatteries.onLow = { [weak self] device in
+            self?.notch.sneak(Sneak(visual: .symbol("battery.25percent", tint: .waiting), title: device.name,
+                                    detail: "\(device.lowest ?? 0) %", duration: 3.6),
+                              key: "device-battery.\(device.key)")
+        }
+        system.onRefreshDevices = { [weak self] in self?.deviceBatteries.refreshIfStale() }
         let shell = ShellMonitor(folder: setup.paths.shellActivity)
         shell.onChange = { [weak system] running in system?.longCommands = running }
         shell.onFinished = { [weak self] done in
@@ -711,15 +791,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         headphones.start()
         tools.onCountdownDone = { [weak self] length in
-            NSSound(named: "Glass")?.play()
+            // Quiet during a meeting: no sound (the line waits for the summary too).
+            if self?.notchModel.meetingQuiet != true { NSSound(named: "Glass")?.play() }
             self?.notch.sneak(Sneak(visual: .symbol("hourglass", tint: .waiting), title: "Time's up",
                                     detail: "\(Int(length / 60)) min timer", duration: 4),
                               key: "countdown", urgent: true)
         }
     }
 
+    /// The volume bar and quiet during meetings, as switched in Settings. Previews and sample data
+    /// never listen to the Mac's volume.
+    private func applyQuiet() {
+        let live = options.preview == nil && !options.sampleData
+        if state.settings.levelHUD && live { volume.start() } else { volume.stop() }
+        updateMeetingQuiet()
+    }
+
+    /// Quiet during meetings (a setting): the camera or microphone in use, or a call or meeting
+    /// from the calendar running now. Previews set it themselves.
+    private func updateMeetingQuiet() {
+        guard options.preview == nil, let calendar else { return }
+        let inMeeting = Quiet.inMeeting(mediaInUse: system?.media.inUse ?? false, meetings: calendar.attentionToday, now: Date())
+        notch.setMeetingQuiet(state.settings.meetingQuiet && inMeeting)
+    }
+
     /// The tools switched on in Settings › Tools, applied to what sits outside the tabs: the plus
-    /// button and its shortcuts, the clipboard shortcut and watcher, the shelf, keep awake.
+    /// button and its shortcuts, the clipboard shortcut and watcher, the shelf, keep awake, the
+    /// device batteries and the Downloads watcher.
     private func applyTools() {
         let settings = state.settings
         // Previews and sample data show every tool.
@@ -735,23 +833,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agentsInboxHotKey = agentsShown ? agentsInboxHotKey ?? HotKey.controlOptionA { [weak self] in self?.notch.toggleInbox() } : nil
         // end of strand cmdk
         applyAskTara(isOn(.askTara))
+        // Off while reading: the band closes (listening stops) before the tool goes.
+        if !isOn(.prompter) { notch.closePrompter() }
+        notchModel.prompter = isOn(.prompter) ? prompter : nil
 
         let awake = isOn(.keepAwake)
         system?.offersKeepAwake = awake
         if !awake { keepAwake.set(false) }
 
         // Media strand: Music itself (its helper and clock stop when off), synced lyrics, the lyric
-        // line on hover and volume per app, inside Music.
+        // line on hover, volume per app and shuffle, repeat and favorite, inside Music.
         if let music = allModules.lazy.compactMap({ $0 as? NowPlayingModule }).first {
             music.musicOn = sample || ModuleAvailability.isShown(.nowPlaying, settings: settings)
             music.lyricsOn = isOn(.lyrics)
             music.lyricsOnHover = isOn(.lyricsOnHover)
             music.mixerOn = isOn(.appVolume) && AppVolumeMixer.isSupported
+            music.modesOn = sample || settings.musicModes
         }
+        // Check camera beside Join in the calendar.
+        allModules.lazy.compactMap { $0 as? AgendaModule }.first?.cameraCheckOn = sample || settings.cameraCheck
+        // Time to leave, while the calendar is on.
+        leave?.mode = settings.travelMode
+        leave?.enabled = sample || settings.timeToLeave && ToolSwitches.isOn(.module(.calendar), in: settings)
 
         guard let tools else { return }
         daily.apply(on: Set(ToolFeature.allCases.filter(isOn)))
-        let tabs: [(ToolsModule.Tab, ToolFeature)] = [(.clipboard, .clipboard), (.timer, .timers), (.shelf, .shelf), (.notes, .notes), (.files, .files)]
+        let tabs: [(ToolsModule.Tab, ToolFeature)] = [(.clipboard, .clipboard), (.timer, .timers), (.shelf, .shelf), (.notes, .notes),
+                                                       (.files, .files), (.launcher, .launcher)]
         let order = settings.toolOrder.compactMap(ToolsModule.Tab.init(rawValue:))
         tools.tabs = ModuleOrder.ordered(tabs.filter { isOn($0.1) }.map(\.0), by: order)
         tools.onReorder = { [weak self] shown in
@@ -761,7 +869,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .map(\.rawValue)
         }
         tools.converts = isOn(.imageConverter)
+        tools.shelfActions = sample || settings.shelfActions
         guard toolsLive else { return }
+        // The shelf kept across restarts (bookmarks, nothing copied); put back the first time.
+        tools.persistsShelf = state.persists
+        tools.keepsShelf = isOn(.shelf) && settings.shelfKeeps
         let clipboard = tools.tabs.contains(.clipboard)
         clipboardHotKey = clipboard ? clipboardHotKey ?? HotKey.controlOptionV { [weak self, weak tools] in
             tools?.tab = .clipboard
@@ -769,6 +881,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } : nil
         // Files dragged onto the notch open the shelf, while there is one.
         notch.onFileDrag = tools.tabs.contains(.shelf) ? { [weak tools] in tools?.tab = .shelf } : nil
+        if isOn(.deviceBattery) { deviceBatteries.start() } else { deviceBatteries.stop() }
+        // Finished downloads: the first listing makes macOS ask for the folder, so the watcher
+        // starts with the switch's click, never by itself at launch the first time.
+        if isOn(.downloads) {
+            if downloads == nil {
+                let watcher = DownloadsWatcher(onFinished: { [weak self] in self?.downloadsFinished($0) },
+                                               onDenied: { [weak self] in self?.downloadsDenied() })
+                watcher.start()
+                downloads = watcher
+            }
+        } else {
+            downloads?.stop()
+            downloads = nil
+        }
+    }
+
+    /// One line per batch, the newest file named; a click opens its card (Open, Show in Finder,
+    /// Add to shelf).
+    private func downloadsFinished(_ files: [URL]) {
+        guard let file = files.last else { return }
+        var link = URLComponents()
+        link.scheme = Brand.urlScheme
+        link.host = "download"
+        link.queryItems = [URLQueryItem(name: "path", value: file.path)]
+        notch.sneak(Sneak(visual: .symbol("arrow.down.circle.fill", tint: .ok),
+                          title: files.count == 1 ? file.lastPathComponent
+                              : String(format: Localization.string("%@ and %@ more"), file.lastPathComponent, "\(files.count - 1)"),
+                          detail: Localization.string("Download finished"), duration: 5, url: link.url),
+                    key: "download")
+    }
+
+    /// macOS said no to the Downloads folder: the switch goes off, and the line's click opens
+    /// the place to allow it.
+    private func downloadsDenied() {
+        ToolSwitches.set(.downloads, on: false, in: &state.settings)
+        notch.sneak(Sneak(visual: .symbol("arrow.down.circle", tint: .waiting), title: Localization.string("No access to Downloads"),
+                          detail: Localization.string("System Settings › Privacy & Security › Files and Folders"), duration: 4.4,
+                          url: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")),
+                    key: "downloads.denied")
     }
 
     /// Onboarding: first launch, "Set up…" in the menu, and "Set up more…" in Settings.
@@ -832,6 +983,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if url.host == "meeting" {
                 showMeetingCard(url)
+                continue
+            }
+            if url.host == "download" {
+                // Only a file in the watched folder: a link from elsewhere opens nothing.
+                if let folder = downloads?.folder,
+                   let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "path" })?.value {
+                    let file = URL(fileURLWithPath: path).standardizedFileURL
+                    if file.deletingLastPathComponent().path == folder.standardizedFileURL.path,
+                       FileManager.default.fileExists(atPath: file.path) {
+                        notch.showDownload(file)
+                    }
+                }
                 continue
             }
             guard url.host == "status", let status = try? StatusPayload.make(url: url) else {
@@ -964,6 +1127,11 @@ extension AppDelegate {
         daily.today = today
         daily.openSettings = { [weak self] in self?.showSettings() }
         daily.remindersShown = sample || (state.settings.remindersInToday && RemindersSource.authorized)
+        // A reminder added with Today's "+": Reminders show in Today from then on.
+        today?.onReminderAdded = { [weak self] in
+            guard let self, !self.daily.remindersShown else { return }
+            self.daily.turnOnReminders?()
+        }
         if !sample {
             daily.turnOnReminders = { [weak self] in
                 // Asked here, on the click, never before; declined earlier: the switch in System Settings.
@@ -1003,6 +1171,118 @@ extension AppDelegate {
                 try? await Task.sleep(for: .milliseconds(900))
                 guard let self else { return }
                 DailyPreview.run(name, store: self.daily, notch: self.notch, tools: tools, agents: self.agents)
+            }
+        }
+    }
+}
+
+// MARK: All tools
+
+extension AppDelegate {
+    /// The last tab: what each tile starts or opens, and how Turn on switches a tool on, as its row
+    /// in Settings › Tools does. Previews and sample data count every tab as there.
+    fileprivate func startAllTools(sample: Bool) {
+        guard let allTools else { return }
+        allTools.settings = { [weak self] in self?.state.settings ?? SwitcherSettings() }
+        allTools.lookUp = { [weak self] kind in
+            guard let self, !sample else { return .ready }
+            return ModuleAvailability.availability(kind, settings: self.state.settings)
+        }
+        allTools.whyMissing = { [weak self] kind in ModuleAvailability.status(kind, settings: self?.state.settings).detail }
+        allTools.missing = {
+            var missing: Set<AllTool> = []
+            missing.insert(.dashboard)
+            // Captures go to a hub: there is no Markdown inbox to open.
+            if CaptureInbox.markdownFile == nil { missing.insert(.captureInbox) }
+            return missing
+        }
+        allTools.isActive = { [weak self] tool in
+            switch tool {
+            case .keepAwake: self?.system?.keepAwake ?? false
+            case .watchMode: self?.watchMode.isOn ?? false
+            default: false
+            }
+        }
+        allTools.open = { [weak self] in self?.openTool($0) }
+        allTools.turnOn = { [weak self] in self?.turnOnTool($0) }
+        allTools.openSettings = { [weak self] in
+            self?.notch.collapse()
+            self?.showSettings(.notch)
+        }
+        allTools.refresh()
+    }
+
+    /// A tile that is on: its tab, its card in a tab, its own island, or the action itself.
+    private func openTool(_ tool: AllTool) {
+        // Every other tab sits left of All tools: its content slides in from that side.
+        notchModel.direction = -1
+        if case .module(let kind)? = tool.item {
+            notch.show(kind)  // Dictation starts listening, as from the wheel
+            return
+        }
+        switch tool {
+        case .agentsInbox: notch.openInbox()
+        case .palette: notch.openPalette()
+        case .quickCapture: notch.openCapture()
+        case .captureInbox:
+            notch.collapse()
+            if let file = CaptureInbox.markdownFile { CaptureInbox.openMarkdown(file) }
+        case .askTara:
+            notch.collapse()
+            notch.paletteSources.askTara?("")
+        case .notepad, .appleNotes, .clipboard, .timer, .shelf, .files, .launcher:
+            let tabs: [AllTool: ToolsModule.Tab] = [.notepad: .notes, .appleNotes: .notes, .clipboard: .clipboard, .timer: .timer,
+                                                    .shelf: .shelf, .files: .files, .launcher: .launcher]
+            if tool == .appleNotes { tools?.notes?.section = .apple }
+            if let tab = tabs[tool] { tools?.tab = tab }
+            notch.show(.tools)
+        case .joinMeeting:
+            joinNextMeeting()  // its line, if there is no call to join, shows once the panel is closed
+            notch.collapse()
+        case .checkCamera:
+            notch.show(.calendar)
+            (notchModel.module(.calendar) as? AgendaModule)?.checkCameraBeforeNextCall()
+        case .addEvent:
+            daily.cardShown = false
+            notch.show(.calendar)
+            (notchModel.module(.calendar) as? AgendaModule)?.startEvent()
+        case .addReminder:
+            // The "+" of the calendar's Today card.
+            notch.show(.calendar)
+            withAnimation(Theme.snappy) { daily.cardShown = true }
+            daily.today?.startReminder()
+        case .prompter: notch.openPrompter()
+        case .downloads:
+            notch.collapse()
+            if let folder = downloads?.folder ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
+                NSWorkspace.shared.open(folder)
+            }
+        case .keepAwake: keepAwake.toggle()
+        case .watchMode: watchMode.toggle()
+        case .dashboard:
+            notch.collapse()
+        case .settings:
+            notch.collapse()
+            showSettings()
+        case .agents, .dictation, .calendar, .today, .meeting, .music, .system:
+            break  // tabs, shown above
+        }
+    }
+
+    /// Turn on: each switch the tool needs, through the gallery's own path, so macOS asks only now
+    /// and only where the tool asks (Today's Reminders, Apple Notes).
+    private func turnOnTool(_ tool: AllTool) {
+        guard let allTools else { return }
+        for need in tool.needs {
+            switch need {
+            case .tool(let item):
+                // Today waiting for Reminders asks again, even with its switch on.
+                let asks = tool.tabs.contains { allTools.availability(of: $0) == .asks }
+                if asks || !ToolSwitches.isOn(item, in: state.settings) { ToolRow.set(item, on: true, state: state) }
+            case .appleNotes:
+                if !state.settings.appleNotes { Task { await AppleNotesSettings.turnOn(state: state) } }
+            case .cameraCheck, .addInNotch:
+                AllTools.set(need, on: true, in: &state.settings)
             }
         }
     }

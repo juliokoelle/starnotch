@@ -63,10 +63,13 @@ import TestSupport
         #expect(loaded.holdDuration == 0.25)
         #expect(loaded.modules == ModuleKind.defaultLayout)
         // Saved before the Tools gallery: every tool the gallery started with stays on, the brain
-        // is the agent's pick. Tools added since (lyrics, volume per app) start off all the same.
+        // is the agent's pick. Tools added since (lyrics, volume per app) start off all the same,
+        // but for those that start on with their tab.
         let stamp = Set(ToolSwitches.knownBeforeStamp)
         #expect(loaded.disabledModules.allSatisfy { !stamp.contains("module.\($0.rawValue)") })
-        #expect(Set(loaded.disabledFeatures) == Set(ToolFeature.allCases.filter { !stamp.contains("feature.\($0.rawValue)") }))
+        #expect(Set(loaded.disabledFeatures) == Set(ToolFeature.allCases.filter {
+            !stamp.contains("feature.\($0.rawValue)") && !ToolSwitches.startsOn.contains($0)
+        }))
         #expect(loaded.disabledFeatures.contains(.lyrics) && loaded.disabledFeatures.contains(.appVolume))
         #expect(loaded.brain == .auto)
     }
@@ -85,6 +88,25 @@ import TestSupport
         settings.detailedEars = true
         isolated.store.save(settings)
         #expect(isolated.store.load().detailedEars)
+    }
+
+    @Test func islandLookAndMeetingQuiet() {
+        // Saved before these settings: the volume bar off, quiet in meetings on, the island as before.
+        let isolated = IsolatedSettings()
+        isolated.writeRaw(#"{"didOnboard":true,"islandDisplay":"pointer"}"#)
+        let old = isolated.store.load()
+        #expect(!old.levelHUD && old.meetingQuiet && !old.islandOutline)
+        #expect(old.islandWidthScale == 1 && old.islandHeightScale == 1)
+        #expect(old.islandDisplay == .pointer)
+        var settings = old
+        settings.levelHUD = true
+        settings.meetingQuiet = false
+        settings.islandDisplay = .all
+        settings.islandWidthScale = 1.2
+        settings.islandHeightScale = 0.9
+        settings.islandOutline = true
+        isolated.store.save(settings)
+        #expect(isolated.store.load() == settings)
     }
 
     @Test func toolsGalleryAndBrainRoundTrip() {
@@ -120,6 +142,39 @@ import TestSupport
         var never = loaded
         never.taraBeside = .never
         #expect(never.earsMode == .never && !never.taraAlways)
+    }
+
+    @Test func musicModesAndCameraCheckStartOn() {
+        // On for a fresh install and for settings saved before the switches existed.
+        #expect(SwitcherSettings().musicModes && SwitcherSettings().cameraCheck)
+        let isolated = IsolatedSettings()
+        isolated.writeRaw(#"{"didOnboard":true}"#)
+        #expect(isolated.store.load().musicModes && isolated.store.load().cameraCheck)
+        var settings = SwitcherSettings()
+        settings.musicModes = false
+        settings.cameraCheck = false
+        isolated.store.save(settings)
+        #expect(!isolated.store.load().musicModes && !isolated.store.load().cameraCheck)
+    }
+
+    @Test func addingInTheNotchIsOnAndAppleNotesOffUntilChosen() {
+        let isolated = IsolatedSettings()
+        var settings = SwitcherSettings()
+        #expect(settings.addInNotch && !settings.appleNotes && settings.appleNotesCapture == nil)
+        settings.addInNotch = false
+        settings.appleNotes = true
+        settings.appleNotesCapture = AppleNotesFolder(id: "x-coredata://F/ICFolder/p7", name: "Inbox", account: "iCloud")
+        isolated.store.save(settings)
+        let loaded = isolated.store.load()
+        #expect(!loaded.addInNotch && loaded.appleNotes && loaded.appleNotesCapture?.label == "iCloud › Inbox")
+        // Saved before these existed: adding stays on, Apple Notes off.
+        isolated.editSaved { json in
+            json.removeValue(forKey: "addInNotch")
+            json.removeValue(forKey: "appleNotes")
+            json.removeValue(forKey: "appleNotesCapture")
+        }
+        let older = isolated.store.load()
+        #expect(older.addInNotch && !older.appleNotes && older.appleNotesCapture == nil)
     }
 
     @Test func corruptDataFallsBackToDefaults() {

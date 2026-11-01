@@ -3,10 +3,11 @@ import EventKit
 import NotchCore
 
 /// Apple Reminders as a Today source (optional, Settings › Modules): open reminders, those due
-/// today or overdue in Today's list, the rest (later or without a date) below it. Asked for access only when the user switches it on. Cached; EventKit's change
+/// today or overdue in Today's list, the rest (later or without a date) below it. Asked for access only when the user switches it on
+/// or saves a first reminder with Today's "+"; a reminder is deleted from Today after a short undo. Cached; EventKit's change
 /// notification refreshes it, so `today(now:)` stays instant, and `onChange` tells Today when the
 /// list came out different. The store is used on one queue.
-final class RemindersSource: NotchConnector, TodayCompleting, @unchecked Sendable {
+final class RemindersSource: NotchConnector, TodayCompleting, ReminderEditing, @unchecked Sendable {
     static let id = "reminders"
     static let displayName = "Reminders"
 
@@ -122,7 +123,58 @@ final class RemindersSource: NotchConnector, TodayCompleting, @unchecked Sendabl
         return result
     }
 
+    // MARK: Adding and deleting
+
+    func addReminder(title: String, due: DateComponents?) async -> String? {
+        // Asked on the first save, never before.
+        if EKEventStore.authorizationStatus(for: .reminder) == .notDetermined {
+            guard (try? await store.requestFullAccessToReminders()) == true else { return "Reminders access not allowed" }
+        }
+        guard Self.authorized else { return "Reminders access is off" }
+        return await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                let reminder = EKReminder(eventStore: store)
+                reminder.title = title
+                reminder.calendar = store.defaultCalendarForNewReminders()
+                guard reminder.calendar != nil else { continuation.resume(returning: "No list to add to"); return }
+                if let due {
+                    reminder.dueDateComponents = due
+                    // A time is when Reminders reminds, as when it's set there.
+                    if due.hour != nil, let date = Calendar.current.date(from: due) { reminder.addAlarm(EKAlarm(absoluteDate: date)) }
+                }
+                do {
+                    try store.save(reminder, commit: true)
+                    continuation.resume(returning: nil)
+                } catch {
+                    continuation.resume(returning: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func canDelete(_ id: String) -> Bool { id.hasPrefix(Self.prefix) && Self.authorized }
+
+    func delete(_ id: String) -> Bool {
+        guard canDelete(id) else { return false }
+        let deleted: Bool = queue.sync {
+            guard let reminder = store.calendarItem(withIdentifier: String(id.dropFirst(Self.prefix.count))) as? EKReminder else { return false }
+            do { try store.remove(reminder, commit: true) } catch { return false }
+            return true
+        }
+        if deleted { lock.withLock { cached.removeAll { $0.id == id } } }
+        return deleted
+    }
+
     private static let prefix = "reminder-"
+}
+
+/// Today's list takes a new reminder and lets one go: Apple Reminders, or the sample in memory.
+protocol ReminderEditing: AnyObject, Sendable {
+    /// nil once it's saved, else why not. Asks macOS for access first if it never asked.
+    func addReminder(title: String, due: DateComponents?) async -> String?
+    func canDelete(_ id: String) -> Bool
+    /// Removes it for good; false when that didn't work.
+    func delete(_ id: String) -> Bool
 }
 
 /// Writes one event from quick capture.

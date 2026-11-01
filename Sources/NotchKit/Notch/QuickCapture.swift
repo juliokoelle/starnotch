@@ -40,6 +40,8 @@ final class QuickCapture {
     let inboxFile = CaptureInbox.markdownFile
     /// The text named a day and a time and the user added it to the calendar: when.
     var eventAdded: String?
+    /// The note's copy in Apple Notes, once it's made: its id.
+    var appleNote: String?
 
     /// Start of an event the text describes ("Call Ada tomorrow at 15:00").
     var eventStart: Date? { parse.eventStart(calendar: .current) }
@@ -84,6 +86,8 @@ struct CaptureView: View {
     /// The confirmation's buttons: the Notepad on "Tara's notes", the Markdown inbox.
     var onShowNotes: () -> Void = {}
     var onOpenInbox: () -> Void = {}
+    /// The copy in Apple Notes, when the note went there too.
+    var onOpenAppleNote: () -> Void = {}
     @FocusState private var focused: Bool
     @Namespace private var chips
 
@@ -281,7 +285,12 @@ struct CaptureView: View {
                         SentButton(symbol: "doc.text", title: LocalizedStringKey(file.lastPathComponent),
                                    help: "Open \(file.path)", action: onOpenInbox)
                     }
+                    if capture.appleNote != nil {
+                        AppleNoteButton(action: onOpenAppleNote)
+                            .transition(.blurSlide(x: 8))
+                    }
                 }
+                .animation(Theme.snappy, value: capture.appleNote)
             }
             if let cast {
                 NoddingAvatar(character: cast.main, colorway: cast.colorway)
@@ -361,6 +370,30 @@ private struct SentButton: View {
             try? await Task.sleep(for: .milliseconds(200))
             withAnimation(.spring(duration: 0.3)) { bump = false }
         }
+    }
+}
+
+/// The note's copy in Apple Notes: Notes' own icon (small, beside the other two), a click shows it.
+private struct AppleNoteButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if let icon = PlayerBridge.icon(forApp: AppleNotesStore.bundleID) {
+                    Image(nsImage: icon).resizable().interpolation(.high)
+                } else {
+                    Image(systemName: "note.text").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
+                }
+            }
+            .frame(width: 18, height: 18)
+            .padding(.horizontal, 6)
+            .frame(height: 26)
+            .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .help("Show it in Apple Notes")
     }
 }
 

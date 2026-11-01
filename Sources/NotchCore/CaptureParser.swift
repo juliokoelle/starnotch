@@ -21,6 +21,8 @@ public struct CaptureParse: Equatable, Sendable {
     public var hour: Int?
     public var minute: Int?
     public var people: [Person] = []
+    /// No day was named: a time alone made it today or tomorrow.
+    public var dayIsImplied = false
 
     public init(day: Date? = nil, hour: Int? = nil, minute: Int? = nil, people: [Person] = []) {
         self.day = day
@@ -113,6 +115,7 @@ public enum CaptureParser {
             // A time alone means today, or tomorrow when it has passed.
             let at = calendar.date(bySettingHour: result.hour!, minute: result.minute ?? 0, second: 0, of: today)!
             result.day = at > now ? today : add(1)
+            result.dayIsImplied = true
         }
 
         result.people = match(people: people, in: text)

@@ -12,6 +12,8 @@ public enum ModuleKind: String, Codable, CaseIterable, Sendable {
     case meeting
     /// Clipboard history, focus timer, file shelf.
     case tools
+    /// Every tool as a tile, with its shortcut: starts it, or turns it on. Always the last tab.
+    case allTools
 
     public var title: String {
         switch self {
@@ -23,6 +25,7 @@ public enum ModuleKind: String, Codable, CaseIterable, Sendable {
         case .system: "System"
         case .meeting: "Meeting"
         case .tools: "Tools"
+        case .allTools: "All tools"
         }
     }
 
@@ -40,10 +43,15 @@ public enum SlotItem: Equatable, Sendable {
 
 /// The user's tab order (Settings and the island's tab strip share it).
 public enum ModuleOrder {
+    /// The tab that stays last whatever the saved order says: All tools, the overview after the
+    /// tabs. It can't be dragged, and no tab is dragged past it.
+    public static let pinnedLast = ModuleKind.allTools
+
     /// `kinds` in `order`'s sequence (first mention wins); kinds `order` doesn't name follow in
-    /// their own sequence.
+    /// their own sequence. `pinnedLast` comes last.
     public static func sorted(_ kinds: [ModuleKind], by order: [ModuleKind]) -> [ModuleKind] {
-        ordered(kinds, by: order)
+        let sorted = ordered(kinds, by: order)
+        return sorted.filter { $0 != pinnedLast } + sorted.filter { $0 == pinnedLast }
     }
 
     /// The same for any tabs, e.g. the small tools'.

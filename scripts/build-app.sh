@@ -122,15 +122,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
             <key>CFBundleURLSchemes</key><array><string>$URL_SCHEME</string></array>
         </dict>
     </array>
-    <key>NSAppleEventsUsageDescription</key><string>Shows what Spotify or Music is playing in the notch and lets you pause or skip, and brings an agent's own Terminal or iTerm2 tab to the front when you click it, and switches dark mode when you ask for it.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Shows what Spotify or Music is playing in the notch and lets you pause or skip, brings an agent's own Terminal or iTerm2 tab to the front when you click it, switches dark mode when you ask for it, and, when you switch Apple Notes on, lists your newest notes from Notes and adds your quick capture notes there.</string>
     <key>NSCalendarsFullAccessUsageDescription</key><string>Shows your next meeting in the notch with a countdown and a Join button.</string>
-    <key>NSCalendarsWriteOnlyAccessUsageDescription</key><string>Adds the event you type in quick capture to your calendar.</string>
+    <key>NSCalendarsWriteOnlyAccessUsageDescription</key><string>Adds the event you type in quick capture or after the calendar's + to your calendar.</string>
     <key>NSAudioCaptureUsageDescription</key><string>Volume per app turns one app down or up by playing its sound again at the level you set. The sound stays on this Mac and is never recorded.</string>
-    <key>NSMicrophoneUsageDescription</key><string>The meeting agent transcribes your meeting from the microphone while you have started it in the notch, and Tara listens while you hold ⌃⌥T or her mic button to ask her something.</string>
-    <key>NSSpeechRecognitionUsageDescription</key><string>Turns what you say to Tara into text, on this Mac when your language allows it, while you hold ⌃⌥T or her mic button.</string>
-    <key>NSLocationUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on. Approximate is enough.</string>
-    <key>NSLocationWhenInUseUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on. Approximate is enough.</string>
-    <key>NSRemindersFullAccessUsageDescription</key><string>Shows your reminders due today in Today, when you switch this on.</string>
+    <key>NSCameraUsageDescription</key><string>Check camera shows your camera mirrored in the notch before a meeting, so you can see how you look. Only while the preview shows; nothing is recorded or saved.</string>
+    <key>NSMicrophoneUsageDescription</key><string>The meeting agent transcribes your meeting from the microphone while you have started it in the notch, Tara listens while you hold ⌃⌥T or her mic button to ask her something, and the teleprompter listens on this Mac while you read, so the text follows you; it records nothing.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Turns what you say to Tara into text, on this Mac when your language allows it, while you hold ⌃⌥T or her mic button, and lets the teleprompter follow your voice as you read, on this Mac only.</string>
+    <key>NSLocationUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on, and when to leave for today's events that have a place: Apple Maps works out the way there from where you are.</string>
+    <key>NSLocationWhenInUseUsageDescription</key><string>Shows the weather where you are in the notch, when you switch Weather on, and when to leave for today's events that have a place: Apple Maps works out the way there from where you are.</string>
+    <key>NSRemindersFullAccessUsageDescription</key><string>Shows your reminders due today in Today when you switch this on, and adds or deletes a reminder when you do that in the notch.</string>
+    <key>NSDownloadsFolderUsageDescription</key><string>Shows a line in the notch when a download finishes, when you switch Finished downloads on: only the names and sizes of new files are looked at. The Files tab lists the folder when you open it there. Nothing leaves this Mac.</string>
     <key>NSHumanReadableCopyright</key><string>$COPYRIGHT</string>
 $( [[ -n "${SPARKLE_FEED_URL:-}" ]] && printf '    <key>SUFeedURL</key><string>%s</string>\n' "$SPARKLE_FEED_URL" )
 $( [[ -n "${SPARKLE_PUBLIC_KEY:-}" ]] && printf '    <key>SUPublicEDKey</key><string>%s</string>\n' "$SPARKLE_PUBLIC_KEY" )

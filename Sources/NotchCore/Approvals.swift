@@ -4,7 +4,51 @@ import Foundation
 /// A permission request, as a `PermissionRequest` hook receives it on stdin and forwards it to
 /// the notch (see integrations/claude-code/starnotch-approvals). Claude Code and Codex send the
 /// same fields; the hook script adds `starnotch_provider` for tools other than Claude Code.
+/// Claude Code's questions with options (`AskUserQuestion`) come the same way, through a
+/// `PreToolUse` hook, and are answered with the picked options.
 public struct ApprovalRequest: Equatable, Sendable, Identifiable {
+    /// One of Claude Code's `AskUserQuestion` questions: its text, a short header, the options
+    /// (label and what it means), and whether several can be picked.
+    public struct Question: Equatable, Sendable {
+        public struct Option: Equatable, Sendable {
+            public var label: String
+            public var detail: String?
+            public init(label: String, detail: String? = nil) { self.label = label; self.detail = detail }
+        }
+        public var text: String
+        public var header: String?
+        public var options: [Option]
+        public var multiSelect: Bool
+        public init(text: String, header: String? = nil, options: [Option], multiSelect: Bool = false) {
+            self.text = text
+            self.header = header
+            self.options = options
+            self.multiSelect = multiSelect
+        }
+
+        /// Claude Code asks one to four questions with two to four options each; more is cut.
+        static let maxQuestions = 4
+        static let maxOptions = 6
+
+        static func parse(_ value: Any?) -> [Question] {
+            let questions = (value as? [[String: Any]] ?? []).compactMap { item -> Question? in
+                guard let text = (item["question"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+                let options = (item["options"] as? [Any] ?? []).compactMap { option -> Option? in
+                    // An option is {label, description}; a plain string is taken as its label.
+                    if let label = (option as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty { return Option(label: label) }
+                    guard let object = option as? [String: Any],
+                          let label = (object["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty else { return nil }
+                    let detail = (object["description"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return Option(label: label, detail: detail?.isEmpty == false ? detail : nil)
+                }
+                let header = (item["header"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return Question(text: text, header: header?.isEmpty == false ? header : nil,
+                                options: Array(options.prefix(maxOptions)), multiSelect: item["multiSelect"] as? Bool ?? false)
+            }
+            return Array(questions.prefix(maxQuestions))
+        }
+    }
+
     public var id: String
     /// `ClaudeCodeProvider.id` or `CodexProvider.id`: decides the reply format.
     public var provider: String = "claude-code"
@@ -25,9 +69,39 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
     /// Claude Code and Codex), so the session can be found and jumped to.
     public var pid: Int32?
     public var tty: String?
+    /// Claude Code's `AskUserQuestion`: the questions to answer in the notch.
+    public var questions: [Question] = []
+    /// The hook event that asked (`PermissionRequest`, or `PreToolUse` for a question): the
+    /// reply takes that event's shape.
+    public var hookEvent = "PermissionRequest"
+    /// The tool's input as it came (JSON), sent back with the answers: Claude Code wants the
+    /// original questions echoed.
+    public var toolInput: Data?
 
     /// A question that wants an answer rather than yes or no.
-    public var asksForAnswer: Bool { !options.isEmpty || freeText }
+    public var asksForAnswer: Bool { !options.isEmpty || freeText || !questions.isEmpty }
+
+    /// An agent asks something (the MCP server's question, or Claude Code's `AskUserQuestion`)
+    /// rather than wanting permission.
+    public var isQuestion: Bool { provider == Self.mcpProvider || !questions.isEmpty }
+
+    /// Deny can carry what to do instead: the tools whose reply has room for a message.
+    public var takesNote: Bool { !isQuestion && ["claude-code", "codex", "cursor", "copilot"].contains(provider) }
+
+    /// The answers Claude Code takes for `questions`: per question the picked labels in the
+    /// options' order, joined with ", ", and a typed answer (in place of the pick for a single
+    /// choice, added to the picks for several). Questions without either are left out.
+    public func answers(picks: [Int: Set<Int>], typed: [Int: String]) -> [String: String] {
+        var result: [String: String] = [:]
+        for (index, question) in questions.enumerated() {
+            var parts = (picks[index] ?? []).sorted().filter(question.options.indices.contains).map { question.options[$0].label }
+            if let text = typed[index]?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                parts = question.multiSelect ? parts + [text] : [text]
+            }
+            if !parts.isEmpty { result[question.text] = parts.joined(separator: ", ") }
+        }
+        return result
+    }
 
     /// The hook's stdin JSON; nil unless it is a PermissionRequest with a tool name.
     public static func parse(_ data: Data, id: String = UUID().uuidString) -> ApprovalRequest? {
@@ -36,10 +110,18 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
         if object["hook_event_name"] as? String != "PermissionRequest", let normalized = ProviderApprovals.normalize(object) {
             object = normalized
         }
-        guard object["hook_event_name"] as? String == "PermissionRequest",
-              let tool = object["tool_name"] as? String, !tool.isEmpty else { return nil }
+        let event = object["hook_event_name"] as? String
+        guard let tool = object["tool_name"] as? String, !tool.isEmpty,
+              event == "PermissionRequest" || (event == "PreToolUse" && tool == "AskUserQuestion") else { return nil }
         let input = object["tool_input"] as? [String: Any] ?? [:]
-        let (summary, detail) = describe(tool: tool, input: input)
+        let questions = tool == "AskUserQuestion" ? Question.parse(input["questions"]) : []
+        // A question hook with nothing to show: Claude Code asks in its own window.
+        if event == "PreToolUse" && questions.isEmpty { return nil }
+        var (summary, detail) = describe(tool: tool, input: input)
+        if !questions.isEmpty {
+            summary = questions[0].text
+            detail = questions.map(\.text).joined(separator: "\n")
+        }
         var rules: [[String: String]] = []
         for suggestion in object["permission_suggestions"] as? [[String: Any]] ?? [] {
             guard suggestion["type"] as? String == "addRules", suggestion["behavior"] as? String == "allow" else { continue }
@@ -53,6 +135,11 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
         var request = ApprovalRequest(id: id, sessionID: object["session_id"] as? String, cwd: object["cwd"] as? String,
                                       tool: tool, summary: summary, detail: detail, allowRules: rules)
         if let provider = (object["starnotch_provider"] as? String)?.nilIfEmpty { request.provider = provider }
+        request.hookEvent = event ?? "PermissionRequest"
+        if !questions.isEmpty, request.provider == "claude-code" {
+            request.questions = questions
+            request.toolInput = try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys])
+        }
         request.pid = (object["starnotch_pid"] as? NSNumber).map { Int32(clamping: $0.intValue) }.flatMap { $0 > 1 ? $0 : nil }
         request.tty = (object["starnotch_tty"] as? String).flatMap { TerminalJump.isSafe(tty: $0) ? $0 : nil }
         if request.provider == mcpProvider {
@@ -83,7 +170,7 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
 
     /// "Allow for session" adds a rule in Claude Code and answers "always" in opencode; for
     /// Cursor and Copilot CLI the notch keeps it (`SessionAllowances`). Codex can't take one.
-    public var supportsSessionRules: Bool { ["claude-code", "opencode", "cursor", "copilot"].contains(provider) }
+    public var supportsSessionRules: Bool { questions.isEmpty && ["claude-code", "opencode", "cursor", "copilot"].contains(provider) }
 
     /// How long the card waits for a click. Cursor's and Copilot's hooks run before every call,
     /// also those the tool would allow on its own, so they wait less.
@@ -138,6 +225,24 @@ public enum ApprovalDecision: Equatable, Sendable {
     case allowOnce, allowSession, deny
     /// The answer to an agent's question (an option or typed text), for the MCP server only.
     case answer(String)
+    /// Answers to Claude Code's `AskUserQuestion`: question text → the picked label (several
+    /// joined with ", ") or the typed answer.
+    case answers([String: String])
+    /// Deny, with what the agent should do instead.
+    case decline(String)
+
+    /// "Denied from the notch.", or the user's words with it.
+    var denyMessage: String {
+        if case .decline(let note) = self, !note.isEmpty { return "Denied from the notch. The user says: \(note)" }
+        return "Denied from the notch."
+    }
+
+    var isDeny: Bool {
+        switch self {
+        case .deny, .decline: true
+        default: false
+        }
+    }
 
     /// The hook's stdout for the request's tool.
     public func output(for request: ApprovalRequest) -> Data {
@@ -153,8 +258,13 @@ public enum ApprovalDecision: Equatable, Sendable {
 
     /// Claude Code's stdout, exactly as its PermissionRequest decision control documents it.
     func claudeOutput(for request: ApprovalRequest) -> Data {
+        if request.hookEvent == "PreToolUse" { return claudePreToolUse(for: request) }
         var decision: [String: Any]
         switch self {
+        case .answers(let answers):
+            // A question that came as a permission prompt: allowed with the answers in its input.
+            guard let input = Self.answeredInput(request, answers) else { return Data() }
+            decision = ["behavior": "allow", "updatedInput": input]
         case .allowOnce, .answer:
             decision = ["behavior": "allow"]
         case .allowSession:
@@ -169,11 +279,41 @@ public enum ApprovalDecision: Equatable, Sendable {
             decision = ["behavior": "allow",
                         "updatedPermissions": [["type": "addRules", "rules": rules, "behavior": "allow",
                                                 "destination": "session"]]]
-        case .deny:
-            decision = ["behavior": "deny", "message": "Denied from the notch."]
+        case .deny, .decline:
+            decision = ["behavior": "deny", "message": denyMessage]
         }
         let output: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": decision]]
         return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
+    }
+
+    /// The `PreToolUse` reply to `AskUserQuestion`: allow with the original questions and the
+    /// answers (Claude Code's documented way; allow alone isn't enough), or deny. Anything else
+    /// is no reply, and Claude Code asks in its own window.
+    func claudePreToolUse(for request: ApprovalRequest) -> Data {
+        var output: [String: Any] = ["hookEventName": "PreToolUse"]
+        switch self {
+        case .answers(let answers):
+            guard let input = Self.answeredInput(request, answers) else { return Data() }
+            output["permissionDecision"] = "allow"
+            output["updatedInput"] = input
+        case .deny, .decline:
+            output["permissionDecision"] = "deny"
+            output["permissionDecisionReason"] = "The user didn't answer from the notch."
+        default:
+            return Data()
+        }
+        return (try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": output], options: [.sortedKeys])) ?? Data()
+    }
+
+    /// The tool's input as it came, with `answers` for the questions asked (unknown questions
+    /// and empty answers are left out); nil when nothing is answered.
+    static func answeredInput(_ request: ApprovalRequest, _ answers: [String: String]) -> [String: Any]? {
+        guard let data = request.toolInput, var input = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let asked = Set(request.questions.map(\.text))
+        let kept = answers.filter { asked.contains($0.key) }.mapValues { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.value.isEmpty }
+        guard !kept.isEmpty else { return nil }
+        input["answers"] = kept
+        return input
     }
 }
 
@@ -183,7 +323,7 @@ public enum ApprovalFormat {
     /// answer to a question.
     public static func mcp(_ decision: ApprovalDecision) -> Data {
         var output: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PermissionRequest",
-                                                            "decision": ["behavior": decision == .deny ? "deny" : "allow"]]]
+                                                            "decision": ["behavior": decision.isDeny ? "deny" : "allow"]]]
         if case .answer(let text) = decision { output["starnotch_answer"] = text }
         return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
     }
@@ -192,8 +332,8 @@ public enum ApprovalFormat {
     /// `updatedPermissions`, so "for this session" can't be expressed and is sent as a plain allow.
     public static func codex(_ decision: ApprovalDecision) -> Data {
         let body: [String: Any] = switch decision {
-        case .allowOnce, .allowSession, .answer: ["behavior": "allow"]
-        case .deny: ["behavior": "deny", "message": "Denied from the notch."]
+        case .allowOnce, .allowSession, .answer, .answers: ["behavior": "allow"]
+        case .deny, .decline: ["behavior": "deny", "message": decision.denyMessage]
         }
         let output: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": body]]
         return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
@@ -204,9 +344,9 @@ extension ApprovalFormat {
     /// Cursor's `beforeShellExecution`/`beforeMCPExecution` output. No rule for the session.
     public static func cursor(_ decision: ApprovalDecision) -> Data {
         let output: [String: Any] = switch decision {
-        case .allowOnce, .allowSession, .answer: ["permission": "allow"]
-        case .deny: ["permission": "deny", "user_message": "Denied from the notch.",
-                     "agent_message": "The user denied this from the notch."]
+        case .allowOnce, .allowSession, .answer, .answers: ["permission": "allow"]
+        case .deny, .decline: ["permission": "deny", "user_message": decision.denyMessage,
+                                     "agent_message": decision.denyMessage.replacingOccurrences(of: "Denied from the notch.", with: "The user denied this from the notch.")]
         }
         return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
     }
@@ -214,8 +354,8 @@ extension ApprovalFormat {
     /// Copilot CLI's `permissionRequest` output (`behavior`, not preToolUse's `permissionDecision`).
     public static func copilot(_ decision: ApprovalDecision) -> Data {
         let output: [String: Any] = switch decision {
-        case .allowOnce, .allowSession, .answer: ["behavior": "allow"]
-        case .deny: ["behavior": "deny", "message": "Denied from the notch."]
+        case .allowOnce, .allowSession, .answer, .answers: ["behavior": "allow"]
+        case .deny, .decline: ["behavior": "deny", "message": decision.denyMessage]
         }
         return (try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])) ?? Data()
     }
@@ -223,9 +363,9 @@ extension ApprovalFormat {
     /// The reply Starnotch's opencode plugin posts to opencode (`/permission/<id>/reply`).
     public static func opencode(_ decision: ApprovalDecision) -> Data {
         let reply = switch decision {
-        case .allowOnce, .answer: "once"
+        case .allowOnce, .answer, .answers: "once"
         case .allowSession: "always"
-        case .deny: "reject"
+        case .deny, .decline: "reject"
         }
         return Data(#"{"reply":"\#(reply)"}"#.utf8)
     }

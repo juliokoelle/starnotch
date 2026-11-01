@@ -348,16 +348,18 @@ private struct AirPlayPicker: NSViewRepresentable {
 struct VolumeSlider: View {
     let output: AudioOutput
     var width: CGFloat? = 92
+    /// The quiet and loud speakers at its ends.
+    var symbols = true
 
     var body: some View {
         if let volume = output.volume {
             HStack(spacing: 6) {
-                Image(systemName: "speaker.fill").font(.system(size: 9)).foregroundStyle(Theme.textTertiary)
+                if symbols { Image(systemName: "speaker.fill").font(.system(size: 9)).foregroundStyle(Theme.textTertiary) }
                 Slider(value: Binding(get: { volume }, set: { output.setVolume($0) }), in: 0...1)
                     .controlSize(.mini)
                     .tint(Color.white.opacity(0.8))
                     .frame(width: width)
-                Image(systemName: "speaker.wave.3.fill").font(.system(size: 9)).foregroundStyle(Theme.textTertiary)
+                if symbols { Image(systemName: "speaker.wave.3.fill").font(.system(size: 9)).foregroundStyle(Theme.textTertiary) }
             }
             .accessibilityLabel("Volume")
         }

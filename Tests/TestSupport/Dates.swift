@@ -23,6 +23,9 @@ public enum UTC {
 
     public static func seconds(_ date: Date?) -> Double? { date?.timeIntervalSince1970 }
 
+    /// From one `date(_:)` to another.
+    public static func interval(_ start: String, _ end: String) -> DateInterval { DateInterval(start: date(start), end: date(end)) }
+
     /// Tokens per hour for quota tests, keyed by "yyyy-MM-dd HH:mm".
     public static func hourly(_ entries: [(String, Int)]) -> [Date: Int] {
         Dictionary(uniqueKeysWithValues: entries.map { (date($0.0), $0.1) })

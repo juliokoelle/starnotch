@@ -77,4 +77,16 @@ import Testing
         #expect(!zone.contains(CGPoint(x: 755, y: 949)))     // below the notch
         #expect(!zone.contains(CGPoint(x: 600, y: 970)))     // menu bar, far left
     }
+
+    @Test func islandSizeFromSettings() {
+        let notch = CGSize(width: 185, height: 32)
+        let pill = CGSize(width: 200, height: 24)
+        #expect(NotchGeometry.islandSize(notch: notch, hasNotch: true, widthScale: 1, heightScale: 1) == notch)
+        #expect(NotchGeometry.islandSize(notch: notch, hasNotch: true, widthScale: 1.2, heightScale: 1.1) == CGSize(width: 222, height: 35))
+        // Never smaller than the notch itself; the pill on another display takes 90 %.
+        #expect(NotchGeometry.islandSize(notch: notch, hasNotch: true, widthScale: 0.9, heightScale: 0.9) == notch)
+        #expect(NotchGeometry.islandSize(notch: pill, hasNotch: false, widthScale: 0.9, heightScale: 0.9) == CGSize(width: 180, height: 22))
+        // Outside the offered range: clamped to it.
+        #expect(NotchGeometry.islandSize(notch: pill, hasNotch: false, widthScale: 3, heightScale: 0.1) == CGSize(width: 240, height: 22))
+    }
 }

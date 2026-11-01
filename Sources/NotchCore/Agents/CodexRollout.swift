@@ -35,6 +35,16 @@ public struct CodexRollout: Equatable, Sendable {
     public var contextWindow: Int?
     public var totalTokens: Int?
     public var limits: Limits?
+    /// A question Codex asks with `request_user_input` (Plan mode) and waits on, until its answer
+    /// is in the log or the turn ends. Nothing outside Codex can answer it; the notch shows it.
+    public struct Question: Equatable, Sendable {
+        public var text: String
+        public var options: [String]
+        /// How many questions the call asks (Codex asks one to three).
+        public var count: Int
+        var callID: String?
+    }
+    public var question: Question?
     /// Lines with a known shape vs. lines that parse but aren't any known record.
     public var knownLines = 0
     public var unknownLines = 0
@@ -124,12 +134,15 @@ public struct CodexRollout: Equatable, Sendable {
     private mutating func event(_ payload: [String: Any], date: Date?) {
         switch payload["type"] as? String {
         case "task_started":
+            question = nil
             set(.working, at: date)
             if let window = payload["model_context_window"] as? Int { contextWindow = window }
         case "task_complete":
+            question = nil
             set(.done, at: date)
             if let message = (payload["last_agent_message"] as? String)?.nilIfEmpty { lastMessage = Self.short(message, 200) }
         case "turn_aborted":
+            question = nil
             set(.aborted, at: date)
         case "thread_settings_applied":
             if let settings = payload["thread_settings"] as? [String: Any] {
@@ -224,6 +237,19 @@ public struct CodexRollout: Equatable, Sendable {
 
     private mutating func responseItem(_ payload: [String: Any], date: Date?) {
         switch payload["type"] as? String {
+        case "function_call" where Self.isQuestionTool(payload["name"] as? String),
+             "custom_tool_call" where Self.isQuestionTool(payload["name"] as? String):
+            let arguments = payload["arguments"] as? String ?? payload["input"] as? String ?? ""
+            if let object = arguments.data(using: .utf8).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) {
+                let questions = object["questions"] as? [[String: Any]] ?? []
+                if let first = questions.first, let text = (first["question"] as? String)?.nilIfEmpty {
+                    let options = (first["options"] as? [Any] ?? []).compactMap { ($0 as? [String: Any])?["label"] as? String ?? $0 as? String }
+                    question = Question(text: Self.short(text, 160), options: Array(options.prefix(4)), count: questions.count,
+                                        callID: payload["call_id"] as? String)
+                }
+            }
+        case "function_call_output", "custom_tool_call_output":
+            if let id = payload["call_id"] as? String, id == question?.callID { question = nil }
         case "function_call":
             // Older format: the shell tool's arguments carry the command.
             if payload["name"] as? String == "shell", let arguments = payload["arguments"] as? String,
@@ -241,6 +267,13 @@ public struct CodexRollout: Equatable, Sendable {
         default:
             break
         }
+    }
+
+    /// Codex's question tool, also under a namespace ("functions.request_user_input").
+    static func isQuestionTool(_ name: String?) -> Bool {
+        guard let name else { return false }
+        let base = name.split(separator: ".").last.map(String.init) ?? name
+        return base == "request_user_input" || base == "request_user_input_async"
     }
 
     private mutating func push(_ step: SessionStep) {

@@ -18,7 +18,6 @@ public actor ClaudeCodeProvider: AgentProvider {
     /// A session file written to this recently counts as active even without a live process entry.
     static let recentWindow: TimeInterval = 180
     static let tailBytes = 384 * 1024
-    static let subagentsShown = 5
 
     public nonisolated let root: URL
     /// The Claude app's desktop sessions; nil leaves them out.
@@ -102,10 +101,11 @@ public actor ClaudeCodeProvider: AgentProvider {
                 fileTimes[id] = mtime
                 let activity = activity(of: file)
                 let cwd = activity.cwd ?? dir.lastPathComponent
+                let subs = subagents(of: file, now: now)
                 var session = AgentSession(
                     id: id, project: ProjectPaths.projectName(ofCwd: cwd), title: activity.title ?? activity.firstPrompt, cwd: cwd, pid: nil,
                     isBusy: now.timeIntervalSince(mtime) < 45, since: activity.lastDate ?? mtime,
-                    steps: activity.steps, subagents: subagents(of: file, now: now).shown,
+                    steps: activity.steps, subagents: subs.shown, earlierSubagents: subs.earlier,
                     branch: activity.branch,
                     lastMessage: activity.lastMessage,
                     level: activity.effort.flatMap(PerformanceLevel.init(effort:)),
@@ -148,7 +148,7 @@ public actor ClaudeCodeProvider: AgentProvider {
             .filter { $0.pathExtension == "jsonl" }
             .compactMap { file in Self.mtime(file).map { (file, $0) } }
             .sorted { $0.1 > $1.1 }
-        let shown = files.prefix(Self.subagentsShown).map { file, mtime -> AgentSubagent in
+        let shown = files.prefix(AgentSubagent.listed).map { file, mtime -> AgentSubagent in
             let id = file.deletingPathExtension().lastPathComponent
             let meta = subagentMeta(id: id, dir: dir)
             let progress = read(subagent: file)
@@ -158,7 +158,7 @@ public actor ClaudeCodeProvider: AgentProvider {
                 step: status == .running ? progress.steps.last?.text : nil,
                 agentType: meta?.agentType, status: status, modified: mtime, progress: progress)
         }
-        return (Array(shown), max(0, files.count - Self.subagentsShown))
+        return (Array(shown), max(0, files.count - AgentSubagent.listed))
     }
 
     private func subagentMeta(id: String, dir: URL) -> SubagentMeta? {

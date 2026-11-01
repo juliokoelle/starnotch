@@ -41,7 +41,7 @@ final class AgentsInbox {
     /// Everything that needs the user now, unordered.
     private var all: [Item] {
         var items: [Item] = approvals.queue.map { pending in
-            let kind: InboxEntry.Kind = pending.request.provider == ApprovalRequest.mcpProvider ? .question : .approval
+            let kind: InboxEntry.Kind = pending.request.isQuestion ? .question : .approval
             return Item(entry: InboxEntry(id: "approval:\(pending.id)", kind: kind, at: pending.arrived), source: .approval(pending))
         }
         let now = Date()
@@ -208,7 +208,7 @@ struct InboxView: View {
 
     /// A prompt's card: buttons, the options of a question, or options and a field to type.
     static func height(of request: ApprovalRequest) -> CGFloat {
-        request.freeText ? 196 : request.asksForAnswer ? 172 : 150
+        ApprovalCard.height(for: request, inbox: true)
     }
 
     var body: some View {

@@ -66,6 +66,21 @@ public enum NotchGeometry {
         return NotchInfo(rect: rect, hasNotch: false)
     }
 
+    /// The sizes Settings › Notch offers for the island's width and height, as a share of the notch.
+    public static let islandScales: [Double] = [0.9, 1, 1.1, 1.2]
+
+    /// The notch the island is drawn for at the size picked in Settings (90–120 %). On a display
+    /// with a notch it never gets smaller than the notch itself: the open panel's tabs would slide
+    /// under the camera housing. The pill on other displays takes the size as it is.
+    public static func islandSize(notch: CGSize, hasNotch: Bool, widthScale: Double, heightScale: Double) -> CGSize {
+        let range = (islandScales.first ?? 1)...(islandScales.last ?? 1)
+        func scale(_ value: Double) -> CGFloat {
+            let clamped = min(max(value, range.lowerBound), range.upperBound)
+            return CGFloat(hasNotch ? max(1, clamped) : clamped)
+        }
+        return CGSize(width: (notch.width * scale(widthScale)).rounded(), height: (notch.height * scale(heightScale)).rounded())
+    }
+
     /// The zone in which a press starts the hold gesture: the notch plus a small tolerance,
     /// extended upward so the topmost pixel row (y == maxY) is included.
     public static func hotZone(for notch: CGRect) -> CGRect {

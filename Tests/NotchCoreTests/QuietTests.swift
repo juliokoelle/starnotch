@@ -56,3 +56,28 @@ import TestSupport
         #expect(!Quiet.fills(window: Bytes.rect(0, 33, 1512, 949), screen: screen))  // a maximised window below the menu bar
     }
 }
+
+@Suite struct MeetingQuietTests {
+    @Test func onlyWhatAnAgentAsksGetsThroughAMeeting() {
+        #expect(!Quiet.letsThrough(urgent: false, watching: false, inMeeting: true))
+        // A meeting about to start is urgent, but not an agent's question: quiet in a meeting.
+        #expect(!Quiet.letsThrough(urgent: true, watching: false, inMeeting: true))
+        #expect(Quiet.letsThrough(urgent: true, watching: false, asks: true, inMeeting: true))
+        #expect(Quiet.letsThrough(urgent: true, watching: true, asks: true, inMeeting: true))
+        // Out of a meeting the old rules hold, asked or not.
+        #expect(Quiet.letsThrough(urgent: false, watching: false, asks: true))
+        #expect(!Quiet.letsThrough(urgent: false, watching: true, asks: true))
+    }
+
+    @Test func aMeetingIsTheCameraTheMicOrTheCalendar() {
+        let now = UTC.date("2026-11-01 10:15")
+        let standup = UTC.interval("2026-11-01 10:00", "2026-11-01 10:30")
+        let later = UTC.interval("2026-11-01 11:00", "2026-11-01 12:00")
+        #expect(Quiet.inMeeting(mediaInUse: true, meetings: [], now: now))
+        #expect(Quiet.inMeeting(mediaInUse: false, meetings: [later, standup], now: now))
+        #expect(!Quiet.inMeeting(mediaInUse: false, meetings: [later], now: now))
+        // The end is free again; the start counts.
+        #expect(!Quiet.inMeeting(mediaInUse: false, meetings: [standup], now: UTC.date("2026-11-01 10:30")))
+        #expect(Quiet.inMeeting(mediaInUse: false, meetings: [standup], now: UTC.date("2026-11-01 10:00")))
+    }
+}

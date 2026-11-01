@@ -336,13 +336,20 @@ public struct DeviceBattery: Equatable, Sendable {
     public var right: Int?
     public var caseLevel: Int?
     public var main: Int?
+    /// What it is, for its symbol (`DeviceBattery.kind(name:minorType:)`).
+    public var kind: Kind
+    /// The Bluetooth address, lower case with colons: one device seen by two sources is shown once.
+    public var address: String?
 
-    public init(name: String, left: Int? = nil, right: Int? = nil, caseLevel: Int? = nil, main: Int? = nil) {
+    public init(name: String, left: Int? = nil, right: Int? = nil, caseLevel: Int? = nil, main: Int? = nil,
+                kind: Kind = .other, address: String? = nil) {
         self.name = name
         self.left = left
         self.right = right
         self.caseLevel = caseLevel
         self.main = main
+        self.kind = kind
+        self.address = address
     }
 
     /// The lowest earbud or the device's own level, for the icon.
@@ -369,8 +376,14 @@ public struct DeviceBattery: Equatable, Sendable {
     /// The connected device with a battery whose name matches `name` (the audio output's), else
     /// the first connected one with a battery.
     public static func parse(_ data: Data, preferring name: String?) -> DeviceBattery? {
+        let found = connected(data)
+        return found.first { $0.name == name } ?? found.first { sameDevice($0.name, name) } ?? found.first
+    }
+
+    /// Every connected Bluetooth device that reports a battery level.
+    public static func connected(_ data: Data) -> [DeviceBattery] {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let controllers = root["SPBluetoothDataType"] as? [[String: Any]] else { return nil }
+              let controllers = root["SPBluetoothDataType"] as? [[String: Any]] else { return [] }
         func level(_ value: Any?) -> Int? {
             (value as? String).flatMap { Int($0.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)) }
         }
@@ -382,12 +395,14 @@ public struct DeviceBattery: Equatable, Sendable {
                     let battery = DeviceBattery(name: deviceName, left: level(info["device_batteryLevelLeft"]),
                                                 right: level(info["device_batteryLevelRight"]),
                                                 caseLevel: level(info["device_batteryLevelCase"]),
-                                                main: level(info["device_batteryLevelMain"]))
+                                                main: level(info["device_batteryLevelMain"]),
+                                                kind: kind(name: deviceName, minorType: info["device_minorType"] as? String),
+                                                address: normalizedAddress(info["device_address"] as? String))
                     if !battery.line.isEmpty { found.append(battery) }
                 }
             }
         }
-        return found.first { $0.name == name } ?? found.first { sameDevice($0.name, name) } ?? found.first
+        return found
     }
 }
 

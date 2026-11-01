@@ -113,3 +113,119 @@ import TestSupport
         #expect(try #require(ApprovalRequest.parse(Data(claude.utf8))).options.isEmpty)
     }
 }
+
+/// Claude Code's questions with options (`AskUserQuestion`), asked through `PreToolUse` and
+/// answered with the picks, and deny with a note.
+@Suite struct AgentQuestionTests {
+    let ask = #"{"session_id":"s1","cwd":"/x","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which framework?","header":"Framework","options":[{"label":"React","description":"Component library"},{"label":"Vue","description":"Progressive framework"}],"multiSelect":false},{"question":"Which extras?","header":"Extras","options":[{"label":"Tests"},{"label":"Docs"},{"label":"CI"}],"multiSelect":true}]}}"#
+
+    @Test func parsesTheQuestions() throws {
+        let request = try #require(ApprovalRequest.parse(Bytes.data(ask), id: "q"))
+        #expect(request.hookEvent == "PreToolUse")
+        #expect(request.questions.count == 2)
+        #expect(request.questions[0].header == "Framework")
+        #expect(request.questions[0].options.map(\.label) == ["React", "Vue"])
+        #expect(request.questions[0].options[0].detail == "Component library")
+        #expect(request.questions[1].multiSelect)
+        #expect(request.summary == "Which framework?")
+        #expect(request.isQuestion && request.asksForAnswer)
+        // A question is never allowed "for the session", and has no deny note.
+        #expect(!request.supportsSessionRules)
+        #expect(!request.takesNote)
+        // Another tool's PreToolUse, or a question without questions, is no card.
+        #expect(ApprovalRequest.parse(Bytes.data(#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}"#)) == nil)
+        #expect(ApprovalRequest.parse(Bytes.data(#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]}}"#)) == nil)
+    }
+
+    @Test func answersJoinPicksAndTypedText() throws {
+        let request = try #require(ApprovalRequest.parse(Bytes.data(ask), id: "q"))
+        #expect(request.answers(picks: [0: [1], 1: [2, 0]], typed: [:]) == ["Which framework?": "Vue", "Which extras?": "Tests, CI"])
+        // Typed text replaces a single pick and joins several.
+        #expect(request.answers(picks: [0: [0], 1: [1]], typed: [0: " Svelte ", 1: "Lint"]) == ["Which framework?": "Svelte", "Which extras?": "Docs, Lint"])
+        #expect(request.answers(picks: [:], typed: [1: "  "]).isEmpty)
+    }
+
+    @Test func preToolUseReplyEchoesTheQuestionsWithAnswers() throws {
+        let request = try #require(ApprovalRequest.parse(Bytes.data(ask), id: "q"))
+        let data = ApprovalDecision.answers(["Which framework?": "React", "Which extras?": "Tests, Docs"]).output(for: request)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.hasPrefix(#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"#))
+        #expect(text.hasSuffix("}}}"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let output = try #require(object["hookSpecificOutput"] as? [String: Any])
+        let input = try #require(output["updatedInput"] as? [String: Any])
+        #expect((input["answers"] as? [String: String]) == ["Which framework?": "React", "Which extras?": "Tests, Docs"])
+        let questions = try #require(input["questions"] as? [[String: Any]])
+        #expect(questions.count == 2)
+        #expect(questions[0]["header"] as? String == "Framework")
+        // Deny: Claude hears there was no answer. Anything else: no reply, the terminal asks.
+        #expect(String(decoding: ApprovalDecision.deny.output(for: request), as: UTF8.self)
+                == #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The user didn't answer from the notch."}}"#)
+        #expect(ApprovalDecision.allowOnce.output(for: request).isEmpty)
+        // Answers to questions it didn't ask, or none: no reply.
+        #expect(ApprovalDecision.answers(["Other?": "x"]).output(for: request).isEmpty)
+    }
+
+    @Test func aQuestionAsPermissionPromptIsAllowedWithItsAnswers() throws {
+        let permission = ask.replacingOccurrences(of: "PreToolUse", with: "PermissionRequest")
+        let request = try #require(ApprovalRequest.parse(Bytes.data(permission), id: "q"))
+        let text = String(decoding: ApprovalDecision.answers(["Which framework?": "Vue"]).output(for: request), as: UTF8.self)
+        #expect(text.hasPrefix(#"{"hookSpecificOutput":{"decision":{"behavior":"allow","updatedInput":{"#))
+        #expect(text.contains(#""answers":{"Which framework?":"Vue"}"#))
+        #expect(text.hasSuffix(#""hookEventName":"PermissionRequest"}}"#))
+    }
+
+    /// The real hook script against the real socket: the island's answer comes out on stdout,
+    /// and nothing at all when the island has none (Claude Code then asks in its own window).
+    @Test func theHookScriptPassesTheAnswersThrough() throws {
+        let request = try #require(ApprovalRequest.parse(Bytes.data(ask), id: "q"))
+        let answers = ApprovalDecision.answers(["Which framework?": "React", "Which extras?": "Tests"])
+        #expect(Self.runHook(ask, decision: answers) == String(decoding: answers.output(for: request), as: UTF8.self))
+        #expect(Self.runHook(ask, decision: .deny).contains(#""permissionDecision":"deny""#))
+        #expect(Self.runHook(ask, decision: nil).isEmpty)
+    }
+
+    static func runHook(_ json: String, decision: ApprovalDecision?) -> String {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "aq-\(UUID().uuidString.prefix(8))").path
+        let path = dir + "/a.sock"
+        let server = ApprovalServer(path: path, handler: { _, reply in reply(decision) })
+        defer { server.stop(); try? FileManager.default.removeItem(atPath: dir) }
+        guard (try? server.start()) != nil else { return "server failed" }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [SetupSandbox.repo.appending(path: "integrations/claude-code/starnotch-approvals/scripts/ask-notch.sh").path]
+        process.environment = ["STARNOTCH_SOCKET": path, "HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"]
+        let input = Pipe(), output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        guard (try? process.run()) != nil else { return "run failed" }
+        input.fileHandleForWriting.write(Data(json.utf8))
+        try? input.fileHandleForWriting.close()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    @Test func denyCarriesTheNoteWhereTheToolTakesOne() throws {
+        let bash = #"{"session_id":"s1","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build"}}"#
+        let claude = try #require(ApprovalRequest.parse(Bytes.data(bash), id: "r"))
+        #expect(claude.takesNote)
+        let note = ApprovalDecision.decline("Use make clean")
+        #expect(String(decoding: note.output(for: claude), as: UTF8.self)
+                == #"{"hookSpecificOutput":{"decision":{"behavior":"deny","message":"Denied from the notch. The user says: Use make clean"},"hookEventName":"PermissionRequest"}}"#)
+        var codex = claude
+        codex.provider = "codex"
+        #expect(String(decoding: note.output(for: codex), as: UTF8.self).contains("The user says: Use make clean"))
+        var copilot = claude
+        copilot.provider = "copilot"
+        #expect(String(decoding: note.output(for: copilot), as: UTF8.self).contains(#""behavior":"deny""#))
+        var cursor = claude
+        cursor.provider = "cursor"
+        #expect(String(decoding: note.output(for: cursor), as: UTF8.self).contains("The user denied this from the notch. The user says: Use make clean"))
+        // opencode's reply has no room for it: a plain reject, and no "Instead…" offered.
+        var opencode = claude
+        opencode.provider = "opencode"
+        #expect(!opencode.takesNote)
+        #expect(String(decoding: note.output(for: opencode), as: UTF8.self) == #"{"reply":"reject"}"#)
+    }
+}

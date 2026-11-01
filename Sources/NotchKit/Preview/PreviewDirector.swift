@@ -23,8 +23,9 @@ final class PreviewDirector {
                         "battery-sneak", "capture-event", "setup-consent", "setup-done",
                         "music-compact", "music-peek", "ears-crowded", "sizes",
                         "music-agents", "crowded-sneak",
-                        // Media strand: synced lyrics in the panel and on hover, the mixer.
-                        "np-lyrics", "np-peek-lyrics", "np-mixer",
+                        // Media strand: synced lyrics in the panel and on hover, the mixer; shuffle,
+                        // repeat and favorite; Check camera in the meeting's card (from the palette, access off).
+                        "np-lyrics", "np-peek-lyrics", "np-mixer", "np-modes", "camera-check", "camera-check:off",
                         // Strand agents.
                         "agents-more", "approval-cursor", "setup-agents",
                         // Tara's memory: paused, with the switch in the System tab and the badge beside the tabs.
@@ -33,12 +34,31 @@ final class PreviewDirector {
                         // details, the graph settings.
                         "memory-map", "memory-map-search", "memory-map-detail", "memory-map-note", "memory-map-settings",
                         // Plan limits in the agents header: one tool, two, one gone quiet; with the popover.
-                        "limits-one", "limits-two", "limits-stale", "limits-popover", "limits-popover-stale"]
+                        "limits-one", "limits-two", "limits-stale", "limits-popover", "limits-popover-stale",
+                        // The launcher, a finished download's line and card, the devices' batteries.
+                        "launcher", "launcher-empty", "launcher-settings", "download-sneak", "download-card", "devices", "devices-sneak",
+                        // Adding in the notch and Apple Notes (made-up data, nothing written).
+                        "add-reminder", "add-reminder-undo", "add-event", "notes-apple", "capture-notes", "apple-notes-settings",
+                        // The teleprompter: reading along mid-way, at constant speed, in German, choosing a script.
+                        "prompter", "prompter:speed", "prompter:de", "prompter:setup", "prompter:empty",
+                        // All tools: a tile picked at the top, scrolled to the end, only the tools that are on.
+                        "all-tools", "all-tools:end", "all-tools:on",
+                        // The volume bar, quiet during a meeting, the island wider with its outline, a copy
+                        // for a display without a notch.
+                        "level-hud", "level-hud:muted", "meeting-quiet", "meeting-quiet:approval", "meeting-quiet:summary",
+                        "island-outline", "displays-all", "island-settings",
+                        // The shelf's file actions; time to leave in the event's card, at the moment to go, as
+                        // the line on the closed island and before the location was asked; their settings.
+                        "shelf-actions", "leave", "leave-now", "leave-sneak", "leave-ask", "tools-settings"]
 
     let notch: NotchController
     let agents: AgentsModule
     let music: NowPlayingModule
     var system: SystemModule?
+    /// For the scenes that show a part of Settings (in memory only: previews never save).
+    weak var state: AppState?
+    /// A settings window a preview opens beside the island.
+    private var previewWindow: NSWindow?
 
     init(notch: NotchController, agents: AgentsModule, music: NowPlayingModule) {
         self.notch = notch
@@ -267,6 +287,68 @@ final class PreviewDirector {
         }
     }
 
+    /// The volume bar while keys are held (`level-hud`, then muted with `:muted`); quiet during a
+    /// meeting, hovered with its bell, with the one line that gets through (an agent's approval) or
+    /// with what waited once it ends; the island 120 % wide with its outline; and the copy a display
+    /// without a notch shows with "All displays" (a pill lower on this one, the same line as the island);
+    /// `island-settings`: Settings › General whole, in a window taller than the screen (in memory only).
+    private func runIsland(_ name: String) {
+        agents.usePreview(Self.snapshot(agentsActive: false))
+        if name == "island-settings", let state {
+            state.settings.levelHUD = true
+            state.settings.islandDisplay = .all
+            let height: CGFloat = 1900
+            let form = SettingsView(state: state, catalog: AppCatalog(), cast: agents.cast, panes: [.general])
+                .dashboardControls().frame(width: 760, height: height).background(DashboardStyle.background)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: height), styleMask: [.borderless],
+                                  backing: .buffered, defer: false)
+            window.contentView = NSHostingView(rootView: form)
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.isReleasedWhenClosed = false
+            window.setFrame(NSRect(x: 40, y: (NSScreen.main?.frame.maxY ?? 982) - height, width: 760, height: height), display: true)
+            window.orderFrontRegardless()
+            previewWindow = window
+            return
+        }
+        Task {
+            await pause(0.8)
+            switch name {
+            case "level-hud", "level-hud:muted":
+                // Held keys: the bar climbs in place, then stays for the screenshots.
+                let muted = name.hasSuffix(":muted")
+                for step in 0..<90 {
+                    notch.showLevel(LevelReading(device: 1, level: min(0.625, 0.375 + Double(step) * 0.0625), muted: muted && step > 4))
+                    await pause(step < 5 ? 0.2 : 1)
+                }
+            case "meeting-quiet":
+                notch.setMeetingQuiet(true)
+                await pause(0.3)
+                notch.tourPeek()
+            case "meeting-quiet:approval":
+                notch.setMeetingQuiet(true)
+                agents.finishLoop("morning-brief")  // held back
+                await pause(0.3)
+                let json = #"{"starnotch_provider":"cursor","starnotch_event":"beforeShellExecution","starnotch_pid":99999,"conversation_id":"pv-cursor","hook_event_name":"beforeShellExecution","workspace_roots":["/Users/me/projects/atlas"],"command":"npm run migrate -- --env staging","cwd":"/Users/me/projects/atlas"}"#
+                if let request = ApprovalRequest.parse(Data(json.utf8), id: "preview") { notch.model.approvals?.preview(request) }
+            case "meeting-quiet:summary":
+                notch.setMeetingQuiet(true)
+                agents.finishLoop("morning-brief")
+                music.next()
+                await pause(0.5)
+                notch.setMeetingQuiet(false)
+            case "island-outline":
+                notch.model.taraAlways = true
+                state?.settings.islandWidthScale = 1.2
+                state?.settings.islandOutline = true
+            default:
+                notch.previewSatellite()
+                await pause(0.4)
+                notch.sneak(Sneak(visual: .symbol("checkmark.circle", tint: .ok), title: "npm run build", detail: "2 m 14 s", duration: 30),
+                            key: "shell")
+            }
+        }
+    }
+
     /// About 14 s, the panel open: one session changes state every 2 s (and once flips twice within a second).
     private func moodTour() async {
         func session(busy: Bool, since: TimeInterval, step: SessionStep.Kind = .edit) -> AgentSnapshot {
@@ -402,6 +484,74 @@ final class PreviewDirector {
             return
         }
         if name.hasPrefix("pack-sheet") { PackSheet.show(name); return }
+        if name.hasPrefix("level-hud") || name.hasPrefix("meeting-quiet") || name.hasPrefix("island-") || name == "displays-all" {
+            runIsland(name)
+            return
+        }
+        if name.hasPrefix("prompter") {
+            // prompter | prompter:speed | prompter:de | prompter:setup | prompter:empty. Made-up scripts,
+            // the speaker simulated a word at a time (no microphone).
+            agents.usePreview(Self.snapshot(agentsActive: false))
+            let variant = name.split(separator: ":").dropFirst().first.map(String.init) ?? ""
+            let now = Date()
+            let review = PrompterScript(text: """
+                Good morning, everyone. Thanks for making time for the quarterly review.
+
+                Last quarter we shipped the new onboarding flow. Activation grew by 25 percent, and support tickets fell for the third month in a row. [Slide 3]
+
+                Our biggest risk is hiring. We have four open roles and two candidates in the final round. If we can't close them by December, the mobile launch moves into spring.
+
+                So here is what I'm asking for today: approve the budget for two contractors, and give the team one more sprint for the payments integration.
+                """, title: "Quarterly review", now: now.addingTimeInterval(-1800))
+            let customers = PrompterScript(text: """
+                Guten Morgen und herzlich willkommen zum Kundentag. Schön, dass Sie heute alle hier sind.
+
+                Im letzten Jahr haben wir das neue Kundenportal eingeführt. Über zwölftausend Teams nutzen es inzwischen jeden Tag, und die Antwortzeit im Support ist auf unter zwei Stunden gefallen.
+
+                Heute zeigen wir Ihnen, was als Nächstes kommt: Berichte auf Knopfdruck, eine App für unterwegs und mehr Kontrolle über Ihre Daten.
+                """, title: "Kundentag", now: now.addingTimeInterval(-86_400 * 2))
+            let launch = PrompterScript(text: "Welcome to the launch. Today we're showing three things we've been building all year.",
+                                        title: "Launch keynote", now: now.addingTimeInterval(-86_400 * 6))
+            Task {
+                await pause(0.8)
+                guard let prompter = notch.model.prompter else { return }
+                let scripts = variant == "empty" ? [] : [review, customers, launch]
+                switch variant {
+                case "setup", "empty": prompter.preview(scripts: scripts, reading: nil, word: 0)
+                case "de": prompter.preview(scripts: scripts, reading: customers, word: 19)
+                case "speed": prompter.preview(scripts: scripts, reading: review, word: 33, mode: .constant)
+                default: prompter.preview(scripts: scripts, reading: review, word: 24)
+                }
+                notch.openPrompter(keyboard: false)
+                guard variant.isEmpty || variant == "de" else { return }
+                for _ in 0..<6 {
+                    await pause(0.5)
+                    prompter.previewAdvance(1)
+                }
+            }
+            return
+        }
+        if name.hasPrefix("all-tools") {
+            // A few tools on beside the core, keep awake on, the rest to turn on (in memory only).
+            agents.usePreview(Self.snapshot(agentsActive: false))
+            let variant = name.split(separator: ":").dropFirst().first.map(String.init) ?? ""
+            if var settings = state?.settings {
+                for feature in [ToolFeature.clipboard, .timers, .shelf, .notes, .quickCapture, .askTara, .keepAwake] {
+                    ToolSwitches.set(feature, on: true, in: &settings)
+                }
+                ToolSwitches.set(.module(.system), on: true, in: &settings)
+                settings.allToolsShowsOff = variant != "on"
+                state?.settings = settings
+            }
+            system?.keepAwake = true
+            Task {
+                await pause(0.8)
+                notch.expand(.allTools, pinned: true)
+                await pause(0.4)
+                (notch.model.module(.allTools) as? AllToolsModule)?.selected = variant == "end" ? .settings : .palette
+            }
+            return
+        }
         if name == "memory-paused" {
             // Tara's memory paused: the System tab's switch lit, the badge beside the tabs.
             useSystemSample(tight: false)
@@ -524,6 +674,58 @@ final class PreviewDirector {
             }
             return
         }
+        if name.hasPrefix("leave") {
+            // The family dinner at 20:00 gets a place, 18 min by car: at 19:30 the card says when to
+            // go, at 19:43 "Leave now"; the line on the closed island; the card's link while macOS
+            // has never asked for the location. Nothing is looked up.
+            R5Clock.set(hour: 19, minute: name == "leave-now" ? 43 : 30)
+            DailyStore.shared.opensOnToday = false
+            agents.usePreview(Self.snapshot(agentsActive: false))
+            Task {
+                await pause(0.8)
+                guard let agenda = notch.model.module(.calendar) as? AgendaModule, let leave = agenda.leave,
+                      let index = agenda.mockEvents.firstIndex(where: { $0.id == "dinner" }) else { return }
+                agenda.mockEvents[index].location = "Lumen, Harbour Street 12"
+                let dinner = agenda.mockEvents[index]
+                let meeting = CalendarModule.Meeting(id: dinner.id, title: dinner.title, start: dinner.start, end: dinner.end,
+                                                     calendar: dinner.calendar.rawValue, color: dinner.calendar.color, link: nil,
+                                                     location: dinner.location)
+                let estimate = LeaveTimes.Estimate(travel: 18 * 60, fromCalendar: false, mode: .driving, found: Date())
+                leave.usePreview(name == "leave-ask" ? [:] : [dinner.id: estimate], today: [meeting])
+                if name == "leave-sneak" {
+                    _ = leave.onLeave?(meeting, estimate)
+                    return
+                }
+                notch.expand(.calendar, pinned: true)
+                await pause(0.4)
+                withAnimation(Theme.snappy) {
+                    agenda.selectedID = dinner.id
+                    agenda.detailDismissed = false
+                }
+            }
+            return
+        }
+        if name.hasPrefix("camera-check") {
+            // 12:18, the design review with its Meet link at 12:30. camera-check: the palette's
+            // Check camera, as ↵ runs it; :off: camera access off, the note. The picture is drawn:
+            // previews never start the camera.
+            R5Clock.set(hour: 12, minute: 18)
+            DailyStore.shared.opensOnToday = false
+            agents.usePreview(Self.snapshot(agentsActive: false))
+            Task {
+                await pause(0.8)
+                guard let agenda = notch.model.module(.calendar) as? AgendaModule else { return }
+                if name == "camera-check:off" {
+                    notch.expand(.calendar, pinned: true)
+                    await pause(0.4)
+                    withAnimation(Theme.snappy) { agenda.usePreviewCameraNote() }
+                } else {
+                    let context = PaletteContext(show: { [notch] kind in notch.show(kind) })
+                    agenda.paletteItems(context).first { $0.id == "camera-check" }?.perform()
+                }
+            }
+            return
+        }
         if name == "media-compact" || name == "media-peek" {
             agents.usePreview(Self.snapshot(agentsActive: false))
             useSystemSample(tight: false)
@@ -548,6 +750,40 @@ final class PreviewDirector {
                 default:
                     notch.sneak(Sneak(visual: .symbol("bolt.fill", tint: .ok), title: "Charging",
                                       detail: "64 %", duration: 8), key: "battery")
+                }
+            }
+            return
+        }
+        if name.hasPrefix("launcher") || name.hasPrefix("download-") || name.hasPrefix("devices") {
+            // The launcher with made-up shortcuts (one running, one done) or empty; a finished
+            // download's line and its card; the batteries of a mouse, a keyboard running low and
+            // AirPods in the System tab, and the keyboard's line.
+            agents.usePreview(Self.snapshot(agentsActive: false))
+            let tools = notch.model.module(.tools) as? ToolsModule
+            if name.hasPrefix("devices") {
+                useSystemSample(tight: false)
+                system?.battery = BatteryState(percent: 82, charging: true, pluggedIn: true, minutesLeft: 35)
+                system?.devices = [DeviceBattery(name: "Magic Keyboard", main: 12, kind: .keyboard),
+                                   DeviceBattery(name: "Magic Mouse", main: 64, kind: .mouse),
+                                   DeviceBattery(name: "AirPods Pro", left: 80, right: 78, caseLevel: 52, kind: .headphones)]
+            }
+            Task {
+                await pause(0.8)
+                switch name {
+                case "launcher-settings": if let state { LauncherSettingsSection.showPreview(state: state) }
+                case "launcher", "launcher-empty":
+                    tools?.previewLauncher(empty: name == "launcher-empty")
+                    if tools?.openLauncherSettings == nil { tools?.openLauncherSettings = {} }
+                    tools?.tab = .launcher
+                    notch.expand(.tools, pinned: true)
+                case "download-sneak":
+                    notch.sneak(Sneak(visual: .symbol("arrow.down.circle.fill", tint: .ok), title: "Proposal.pdf",
+                                      detail: Localization.string("Download finished"), duration: 30), key: "download")
+                case "download-card": notch.showDownload(URL(fileURLWithPath: "/tmp/Proposal.pdf"))
+                case "devices-sneak":
+                    notch.sneak(Sneak(visual: .symbol("battery.25percent", tint: .waiting), title: "Magic Keyboard",
+                                      detail: "12 %", duration: 30), key: "device-battery")
+                default: notch.expand(.system, pinned: true)
                 }
             }
             return
@@ -623,6 +859,53 @@ final class PreviewDirector {
                     notch.expand(.agents, pinned: true)
                 } else if let request = ApprovalRequest.parse(Data(json.utf8), id: "preview") {
                     notch.model.approvals?.preview(request)
+                }
+            }
+            return
+        }
+        if name == "approval-question" || name == "approval-note" {
+            // Claude Code asking with options (two questions, the second with several picks), or
+            // a permission prompt being denied with a note.
+            agents.cast.previewCharacter = "astra"
+            agents.usePreview(Self.subagentSnapshot())
+            let question = #"{"session_id":"lv-max","cwd":"/Users/me/projects/notes","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which storage should the sync use?","header":"Storage","options":[{"label":"SQLite","description":"One file, simple backups"},{"label":"Postgres","description":"A server, more moving parts"},{"label":"Keep JSON","description":"No migration now"}],"multiSelect":false},{"question":"What should ship with it?","header":"Extras","options":[{"label":"Tests"},{"label":"Docs"},{"label":"Migration script"}],"multiSelect":true}]}}"#
+            let prompt = #"{"session_id":"lv-max","cwd":"/Users/me/projects/notes","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build && npm run build","description":"Clean build"}}"#
+            Task {
+                await pause(0.8)
+                if let request = ApprovalRequest.parse(Data((name == "approval-question" ? question : prompt).utf8), id: "preview") {
+                    notch.model.approvals?.preview(request)
+                    if name == "approval-note" {
+                        await pause(0.5)
+                        notch.model.approvals?.startNote()
+                        notch.model.approvals?.note = "Use make clean, the build folder has the signed app"
+                    }
+                }
+            }
+            return
+        }
+        if name == "subagents-earlier" {
+            // A session whose subagents all finished hours ago: unfolded, with the earlier ones open.
+            agents.cast.previewCharacter = "astra"
+            var snapshot = Self.subagentSnapshot()
+            if snapshot.agents.count > 1 {
+                let old = Date().addingTimeInterval(-3 * 3600)
+                snapshot.agents[1].subagents = snapshot.agents[0].subagents.map { sub in
+                    var sub = sub
+                    sub.status = .done
+                    sub.modified = old
+                    sub.progress.lastDate = old
+                    return sub
+                }
+                snapshot.agents[1].earlierSubagents = 0
+            }
+            agents.usePreview(snapshot)
+            Task {
+                await pause(0.8)
+                notch.expand(.agents, pinned: true)
+                await pause(0.5)
+                if snapshot.agents.count > 1 {
+                    agents.toggleSubagents(of: snapshot.agents[1])
+                    if name == "subagents-earlier" { await pause(0.3); agents.toggleEarlier(of: snapshot.agents[1]) }
                 }
             }
             return
@@ -756,6 +1039,11 @@ final class PreviewDirector {
             await pause(0.4)
             music.next()
         case "np-lyrics": notch.expand(.nowPlaying, pinned: true)
+        case "np-modes":
+            // Music's track: shuffle and repeat beside the transport, its star beside the title.
+            notch.expand(.nowPlaying, pinned: true)
+            await pause(0.4)
+            music.next()
         case "np-mixer":
             notch.expand(.nowPlaying, pinned: true)
             await pause(0.6)
@@ -782,6 +1070,83 @@ final class PreviewDirector {
             await type("Angebot für Ada bis Freitag schicken")
             await pause(0.3)
             notch.sendCapture()
+        // Today's "+" with a reminder typed, a reminder just deleted with its undo, the calendar's
+        // "+", Tools › Notepad › Apple Notes, a note capture copied to Apple Notes, Settings › Apple Notes.
+        case "add-reminder", "add-reminder-undo":
+            notch.expand(.calendar, pinned: true)
+            await pause(0.5)
+            withAnimation(Theme.snappy) { DailyStore.shared.cardShown = true }
+            guard let today = DailyStore.shared.today else { break }
+            await pause(0.4)
+            if name == "add-reminder-undo", let item = today.todos.first(where: today.canDelete) {
+                today.delete(item)
+            } else if name == "add-reminder" {
+                today.startReminder()
+                await pause(0.3)
+                for end in "Call the dentist tomorrow 9:30".indices { today.updateReminder(text: String("Call the dentist tomorrow 9:30"[...end])) }
+            }
+        case "add-event":
+            DailyStore.shared.opensOnToday = false
+            notch.expand(.calendar, pinned: true)
+            await pause(0.5)
+            guard let agenda = notch.model.module(.calendar) as? AgendaModule else { break }
+            agenda.startEvent()
+            await pause(0.3)
+            for end in "Lunch with Ada 13:00 1h".indices { agenda.updateEvent(text: String("Lunch with Ada 13:00 1h"[...end])) }
+        case "notes-apple":
+            AppleNotesStore.shared.usePreview()
+            AppleNotesStore.shared.enabled = { true }
+            guard let tools = notch.model.module(.tools) as? ToolsModule else { break }
+            tools.notes?.section = .apple
+            tools.tab = .notes
+            notch.expand(.tools, pinned: true)
+        case "capture-notes":
+            notch.appleNotesCapture = { .notesDefault }
+            notch.openCapture()
+            await type("Idea: a quiet hour before the offsite", route: .note)
+            await pause(0.3)
+            notch.sendCapture()
+        case "apple-notes-settings":
+            AppleNotesStore.shared.usePreview()
+            AppleNotesStore.shared.enabled = { true }
+            let state = AppState()
+            state.persists = false
+            state.settings.appleNotes = true
+            state.settings.appleNotesCapture = AppleNotesStore.shared.folders.first
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 260), styleMask: [.titled, .closable],
+                                  backing: .buffered, defer: false)
+            window.contentView = NSHostingView(rootView: Form { AppleNotesSettings(state: state) }.formStyle(.grouped).frame(width: 560, height: 260))
+            window.title = "Apple Notes"
+            window.isReleasedWhenClosed = false
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+            previewWindow = window
+        // The shelf with made-up files in a temporary folder: the row under the pointer with its
+        // actions (its … holds Open With, Share, Zip and Copy to), a folder being zipped, the note.
+        case "shelf-actions":
+            guard let tools = notch.model.module(.tools) as? ToolsModule else { break }
+            let folder = FileManager.default.temporaryDirectory.appending(path: "starnotch-shelf-preview", directoryHint: .isDirectory)
+            let files = ["Moodboard.png.zip", "Proposal.pdf", "Site photos", "Moodboard.png"].map { folder.appending(path: $0) }
+            try? FileManager.default.createDirectory(at: files[2], withIntermediateDirectories: true)
+            for file in files where file != files[2] && !FileManager.default.fileExists(atPath: file.path) {
+                FileManager.default.createFile(atPath: file.path, contents: Data())
+            }
+            tools.previewShelf(files, hover: files[1], busy: files[2], note: String(format: Localization.string("Saved %@"), files[0].lastPathComponent))
+            tools.tab = .shelf
+            notch.expand(.tools, pinned: true)
+        // Settings › Tools: time to leave with Travel by, and the shelf's two switches.
+        case "tools-settings":
+            let state = AppState()
+            state.persists = false
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 330), styleMask: [.titled, .closable],
+                                  backing: .buffered, defer: false)
+            window.contentView = NSHostingView(rootView: Form { LeaveSettingsRows(state: state); ShelfSettingsRows(state: state) }
+                .formStyle(.grouped).dashboardControls().frame(width: 560, height: 330))
+            window.title = "Tools"
+            window.isReleasedWhenClosed = false
+            window.center()
+            window.orderFrontRegardless()
+            previewWindow = window
         case "loops-strip": notch.expand(.agents, pinned: true)
         case "loop-detail":
             notch.expand(.agents, pinned: true)

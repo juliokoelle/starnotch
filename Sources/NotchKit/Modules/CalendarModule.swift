@@ -24,6 +24,12 @@ final class CalendarModule: NotchModule {
         var kind: EventKind = .meeting
         /// Names of the other people invited.
         var attendees: [String] = []
+        /// Where it is, when Calendar knows the coordinates (a place picked from its suggestions).
+        var coordinate: GeoPlace? = nil
+        /// The travel time set in Calendar.
+        var travelTime: TimeInterval? = nil
+        /// A meeting room (Exchange, Google): there is no way to go.
+        var isRoom = false
 
         /// Camera only for calls; a pin when there's a place; else the calendar.
         var symbol: String {
@@ -48,6 +54,9 @@ final class CalendarModule: NotchModule {
     @ObservationIgnored var onReminder: ((Meeting) -> Void)?
     /// Today's events were read from the calendar (for Tara's snapshot; never with sample data).
     @ObservationIgnored var onToday: (([Meeting]) -> Void)?
+    /// Read again (every 15 s and on calendar changes): quiet during meetings looks at the clock,
+    /// time to leave at today's events.
+    @ObservationIgnored var onReload: (([Meeting]) -> Void)?
 
     @ObservationIgnored private let mock: Bool
     /// Seconds until the first sample meeting.
@@ -112,7 +121,8 @@ final class CalendarModule: NotchModule {
         }
     }
 
-    private func reload() {
+    /// Reads the calendar again (also right after the notch added an event).
+    func reload() {
         if !mock {
             access = Self.currentAccess()
             if access == .granted {
@@ -130,6 +140,12 @@ final class CalendarModule: NotchModule {
             }
         }
         checkReminder()
+        onReload?(today)
+    }
+
+    /// Calls and meetings running now or later today (no focus blocks), for quiet during meetings.
+    var attentionToday: [DateInterval] {
+        (mock ? upcoming : today).filter { $0.kind.takesAttention && $0.end > $0.start }.map { DateInterval(start: $0.start, end: $0.end) }
     }
 
     /// The timed events of another day: 0 is today, -1 yesterday, 1 tomorrow. Empty without access.
@@ -145,6 +161,12 @@ final class CalendarModule: NotchModule {
     func meetings(from start: Date, to end: Date) -> [Meeting] {
         guard !mock, access == .granted else { return [] }
         return events(from: start, to: end)
+    }
+
+    /// Where a new event goes, for the "+" in the calendar; nil without access.
+    var defaultCalendar: (title: String, color: Color)? {
+        guard !mock, access == .granted, let calendar = store.defaultCalendarForNewEvents else { return nil }
+        return (calendar.title, Color(nsColor: calendar.color ?? .systemBlue))
     }
 
     /// Calendar.app, for the full view of a day.
@@ -171,6 +193,7 @@ final class CalendarModule: NotchModule {
             .map { event in
                 let link = MeetingLink.find(in: [event.url?.absoluteString, event.location, event.notes])
                 let others = event.attendees?.filter { !$0.isCurrentUser } ?? []
+                let spot = event.structuredLocation?.geoLocation?.coordinate
                 return Meeting(
                     id: event.eventIdentifier ?? UUID().uuidString,
                     title: event.title ?? "Event",
@@ -182,9 +205,19 @@ final class CalendarModule: NotchModule {
                     // A link-looking location ("https://meet…") is not a place.
                     location: event.location.flatMap { $0.contains("://") ? nil : $0 },
                     kind: EventKind.classify(hasCallLink: link != nil, otherAttendees: others.count),
-                    attendees: others.compactMap { $0.name }
+                    attendees: others.compactMap { $0.name },
+                    coordinate: spot.map { GeoPlace(name: event.structuredLocation?.title ?? "", latitude: $0.latitude, longitude: $0.longitude) },
+                    travelTime: Self.hidden("travelTime", of: event).map(\.doubleValue).flatMap { $0 > 0 ? $0 : nil },
+                    isRoom: Self.hidden("locationIsAConferenceRoom", of: event)?.boolValue ?? false
                 )
             }
+    }
+
+    /// Calendar's travel time and its meeting-room flag aren't public API: read only when the
+    /// event answers to them, so a macOS without them gives nil instead of an exception.
+    private static func hidden(_ key: String, of event: EKEvent) -> NSNumber? {
+        guard event.responds(to: NSSelectorFromString(key)) else { return nil }
+        return event.value(forKey: key) as? NSNumber
     }
 
     private func loadMock(now: Date = Date()) {

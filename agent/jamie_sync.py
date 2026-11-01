@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as dt
+import errno
 import hashlib
 import json
 import os
@@ -587,8 +588,20 @@ def logout(path: Path | None = None) -> bool:
         return False
 
 
-async def wait_for_callback(port: int = CALLBACK_PORT, timeout: float = 300, name: str = "Jamie"):
-    """Serves one request on 127.0.0.1:<port>/callback and returns the authorization code."""
+class LoginBusy(Exception):
+    """Another browser login (Jamie, Granola or Wispr Flow) holds the callback port: one at a time."""
+
+
+class LoginTimedOut(Exception):
+    """The browser login never came back: a closed tab, or a provider that didn't send the browser back."""
+
+
+async def listen_for_callback(port: int = CALLBACK_PORT, name: str = "Jamie") -> tuple[asyncio.Server, asyncio.Future]:
+    """Takes 127.0.0.1:<port> for the login's one /callback request; returns the server and the future of the
+    authorization code. Jamie, Granola and Wispr Flow registered this one redirect URI (each client is registered with
+    it and kept in its token file), so the port is also the lock: it is taken before the browser opens, and a second
+    login stops here with `login_busy` instead of opening a page whose callback the first one would take. The port is
+    free again as soon as the process ends (the app's Cancel ends it)."""
     from mcp.shared.auth import AuthorizationCodeResult
 
     done: asyncio.Future = asyncio.get_running_loop().create_future()
@@ -608,23 +621,46 @@ async def wait_for_callback(port: int = CALLBACK_PORT, timeout: float = 300, nam
         elif "error" in query and not done.done():
             done.set_exception(RuntimeError(f"{name} login failed: {query['error'][0]}"))
 
-    server = await asyncio.start_server(handle, "127.0.0.1", port)
+    try:
+        server = await asyncio.start_server(handle, "127.0.0.1", port)
+    except OSError as error:
+        if error.errno != errno.EADDRINUSE:
+            raise
+        print(json.dumps({"type": "status", "state": "login_busy"}), flush=True)
+        raise LoginBusy("another browser login is still waiting; finish or cancel it first") from None
+    return server, done
+
+
+async def wait_for_callback(listening: tuple[asyncio.Server, asyncio.Future], timeout: float = 300,
+                            name: str = "Jamie"):
+    """The authorization code from the callback `listen_for_callback` took the port for; `login_timeout` when none
+    comes in time (str(TimeoutError()) is empty, so the app had nothing to show)."""
+    server, done = listening
     async with server:
-        return await asyncio.wait_for(done, timeout)
+        try:
+            return await asyncio.wait_for(done, timeout)
+        except TimeoutError:
+            print(json.dumps({"type": "status", "state": "login_timeout"}), flush=True)
+            raise LoginTimedOut(f"{name} login wasn't finished in the browser") from None
 
 
 class LoginRequired(Exception):
     """Jamie wants a new browser login, and this run may not open one (`--no-login`)."""
 
 
-def login_required(error: BaseException) -> bool:
-    """True when `error`, or one it wraps (the MCP client raises from task groups), is LoginRequired."""
-    if isinstance(error, LoginRequired):
+def wraps(error: BaseException, kind: type[BaseException] | tuple[type[BaseException], ...]) -> bool:
+    """True when `error`, or one it wraps (the MCP client raises from task groups), is a `kind`."""
+    if isinstance(error, kind):
         return True
-    if isinstance(error, BaseExceptionGroup) and any(login_required(e) for e in error.exceptions):
+    if isinstance(error, BaseExceptionGroup) and any(wraps(e, kind) for e in error.exceptions):
         return True
     cause = error.__cause__ or error.__context__
-    return cause is not None and login_required(cause)
+    return cause is not None and wraps(cause, kind)
+
+
+def login_required(error: BaseException) -> bool:
+    """True when `error`, or one it wraps, is LoginRequired."""
+    return wraps(error, LoginRequired)
 
 
 def reason(error: BaseException, name: str = "Jamie") -> str:
@@ -644,10 +680,13 @@ def oauth_provider(url: str, port: int = CALLBACK_PORT, interactive: bool = True
     from mcp.client.auth import OAuthClientProvider
     from mcp.shared.auth import OAuthClientMetadata
 
+    listening: list[tuple[asyncio.Server, asyncio.Future]] = []  # the callback port, taken before the browser opens
+
     async def open_browser(authorization_url: str) -> None:
         if not interactive:
             print(json.dumps({"type": "status", "state": "login_required"}), flush=True)
             raise LoginRequired()
+        listening.append(await listen_for_callback(port, name))
         print(json.dumps({"type": "status", "state": "login", "url": authorization_url}), flush=True)
         webbrowser.open(authorization_url)
 
@@ -663,7 +702,7 @@ def oauth_provider(url: str, port: int = CALLBACK_PORT, interactive: bool = True
         ),
         storage=storage,
         redirect_handler=open_browser,
-        callback_handler=lambda: wait_for_callback(port, name=name),
+        callback_handler=lambda: wait_for_callback(listening.pop(), name=name),
     )
     # The SDK doesn't know when stored tokens run out, so an expired one would get a 401 and a new browser
     # login; with the expiry it uses the refresh token instead.
@@ -742,6 +781,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         if login_required(error):  # its status line went out already
             return 2
+        if wraps(error, (LoginBusy, LoginTimedOut)):  # so did theirs
+            return 1
         print(json.dumps({"type": "error", "message": f"jamie sync: {reason(error)}"}), flush=True)
         return 1
     return 0

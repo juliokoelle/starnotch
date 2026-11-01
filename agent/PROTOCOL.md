@@ -392,7 +392,12 @@ Steps"/"Aufgaben" section (`**Lisa**: …`, `[x] …`, an ISO date as `due`). Ja
 neither section, so most meetings carry none.
 
 `login` appears only when no valid token is stored and it can't be refreshed: the script has opened the browser at
-`url` and waits (up to 5 minutes) for the redirect to `http://127.0.0.1:47791/callback`. Tokens are kept in
+`url` and waits (up to 5 minutes) for the redirect to `http://127.0.0.1:47791/callback`. Jamie, Granola and Wispr
+Flow share that redirect URI (their clients are registered with it), so the port is taken before the browser opens
+and is the lock for one browser login at a time: while another login holds it, the run prints
+`{"type": "status", "state": "login_busy"}` without opening the browser and exits with 1. When no redirect comes within
+the 5 minutes, it prints `{"type": "status", "state": "login_timeout"}` and exits with 1. Neither is followed by an
+`error` line. Ending the process (SIGTERM) frees the port. Tokens are kept in
 `~/Library/Application Support/Starnotch/jamie-oauth.json` (mode 0600) with the time they run out, so an expired
 access token is refreshed without the browser. Each sync first reads the authorization server's metadata (two small
 GETs), so a token that runs out during a long sync is refreshed at Jamie's `/oauth/token` too. Exit code 0 on success, 1 on error.
@@ -413,7 +418,7 @@ synced stay in the memory.
 ## meeting_sources.py
 
 The meeting tools besides Jamie, one `--source` per run, with jamie_sync.py's output: one `synced` line per meeting,
-`warning`, `login`, `login_required` and `error` lines, then the summary line. A meeting that another source already
+`warning`, `login`, `login_required`, `login_busy`, `login_timeout` and `error` lines, then the summary line. A meeting that another source already
 holds is not written: its line has `duplicate_of` (the id that stays) instead of `path`, and the summary counts these
 as `duplicates` (only when there are some).
 

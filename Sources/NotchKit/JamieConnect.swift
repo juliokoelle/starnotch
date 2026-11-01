@@ -97,6 +97,9 @@ final class JamieConnect {
     @ObservationIgnored var enable: () -> Void = {}
 
     static let pausedLine = "Tara's memory is paused or meetings are off, so nothing comes in from Jamie"
+    /// Jamie, Granola and Wispr Flow share the login's callback port, so one browser login runs at a time.
+    static let loginBusyLine = "Another sign-in is still waiting in the browser. Finish or cancel it, then connect again."
+    static let loginTimeoutLine = "The sign-in in the browser didn't come back within 5 minutes. Connect again to retry."
 
     func connect() {
         loginLost = false
@@ -163,6 +166,13 @@ final class JamieConnect {
         process = nil
     }
 
+    /// Stops a connect that waits for the browser login: the sidecar ends, which frees the login
+    /// port for another source.
+    func cancelLogin() {
+        cancel()
+        set(.idle)
+    }
+
     /// Screenshots: a state without running anything.
     func preview(_ phase: Phase) { self.phase = phase }
 
@@ -217,6 +227,10 @@ final class JamieConnect {
         case .status("login_required", _):
             loginLost = true
             set(.failed("Jamie signed you out; connect again to keep your meetings in sync"))
+        case .status("login_busy", _):
+            set(.failed(Self.loginBusyLine))
+        case .status("login_timeout", _):
+            set(.failed(Self.loginTimeoutLine))
         case .synced(let title):
             count += 1
             set(.syncing(count: count, title: title))

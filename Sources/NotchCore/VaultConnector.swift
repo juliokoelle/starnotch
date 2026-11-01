@@ -371,7 +371,7 @@ public final class VaultConnector: NotchConnector, TodayCompleting, @unchecked S
         if let path = dailyPath(for: now), let url = resolve(path), let text = dailyText(url) {
             daily = .init(path: path, headings: DailyNote.headings(text), text: DailyNote.body(text))
         }
-        return VaultSnapshot(updated: now, name: folder.lastPathComponent, today: RunLog.day(now), tasks: Array(ordered.prefix(300)),
+        return VaultSnapshot(updated: now, name: folder.lastPathComponent, folder: folder.path, today: RunLog.day(now), tasks: Array(ordered.prefix(300)),
                              openTasks: tasks.count, dailyNote: daily, recentNotes: Self.recentNotes(in: folder, limit: recent))
     }
 

@@ -77,6 +77,11 @@ import TestSupport
         #expect(parse(#"{"type":"status","state":"login_required"}"#) == .status(state: "login_required", message: nil))
     }
 
+    @Test func aBusyOrAbandonedBrowserLoginIsAStatus() {
+        #expect(parse(#"{"type":"status","state":"login_busy"}"#) == .status(state: "login_busy", message: nil))
+        #expect(parse(#"{"type":"status","state":"login_timeout"}"#) == .status(state: "login_timeout", message: nil))
+    }
+
     @Test func commandsRoundTrip() {
         #expect(MeetingCommand.save(title: "Weekly") == Bytes.data(#"{"cmd":"save","title":"Weekly"}"# + "\n"))
         #expect(MeetingCommand.reload == Bytes.data(#"{"cmd":"reload"}"# + "\n"))

@@ -1226,7 +1226,7 @@ def main(argv: list[str] | None = None) -> int:
     captures = Path(args.captures).expanduser() if args.captures else None
     connectors = Path(args.connectors).expanduser() if args.connectors else None
     usage = Path(args.usage).expanduser() if args.usage else None
-    # Only when the app runs it with the connectors: the vault in config.toml, searched per question.
+    # Only when the app runs it with the connectors: the notes vault (config.toml's or the app's), searched per question.
     vault = vault_index.from_config() if connectors else None
     own = vault_index.own() if connectors else None
     agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage, _gap(args.meeting_gap), vault=vault, own=own)

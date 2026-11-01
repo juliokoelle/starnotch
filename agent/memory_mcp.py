@@ -135,7 +135,7 @@ class Library:
                  now: dt.datetime | None = None, calendar: Path | None = None,
                  vault: vault_index.VaultIndex | None = None):
         self.memory_dir = memory_dir or DEFAULT_DIR
-        self.vault = vault  # the whole notes vault's index; build() sets the one config.toml names
+        self.vault = vault  # the whole notes vault's index; build() sets the one config.toml or the app names
         self.captures_path = captures or quick.QUEUE
         self.connectors_path = connectors or linked.FOLDER
         self.claude_projects = claude_projects or CLAUDE_PROJECTS

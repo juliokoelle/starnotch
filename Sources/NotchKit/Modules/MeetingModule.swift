@@ -65,9 +65,16 @@ final class MeetingModule: NotchModule {
     @ObservationIgnored private var nextID = 0
     /// The line a failed Jamie sync put up, so a sync of its own that works takes it back down.
     @ObservationIgnored private var jamieFailure: String?
+    /// The transcriber's error, kept in the line until the next start: the agent's ready or
+    /// offline line often comes after it and would hide it.
+    @ObservationIgnored private var sourceError: String?
 
     init() {
         jamie.onPhase = { [weak self] phase in self?.jamieChanged(phase) }
+        Task.detached(priority: .utility) { [weak self] in
+            guard Self.shellExportsRecordKey() else { return }
+            await MainActor.run { self?.shellHasRecordKey = true }
+        }
     }
 
     private var directory: URL { Runtime.meetingAgentDir }
@@ -77,6 +84,33 @@ final class MeetingModule: NotchModule {
         if case .running = phase { return true }
         return false
     }
+
+    /// Start records through Reson8, which needs a key (Settings › Tara, ~/.zshrc, or the environment
+    /// the app was started with). Without one Start stays hidden: transcribe.py would end at once.
+    var canRecord: Bool {
+        MeetingAgentSetup.keys()["RESON8_API_KEY"] != nil
+            || ProcessInfo.processInfo.environment["RESON8_API_KEY"]?.isEmpty == false
+            || shellHasRecordKey
+    }
+
+    /// The agent runs through `zsh -lic`, so a key exported in ~/.zshrc works too; the shell is
+    /// asked once at launch, off the main thread.
+    private(set) var shellHasRecordKey = false
+
+    nonisolated private static func shellExportsRecordKey() -> Bool {
+        let shell = Process(), out = Pipe()
+        shell.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        shell.arguments = ["-lic", #"[ -n "$RESON8_API_KEY" ] && print -n starnotch-reson8-key"#]
+        shell.standardInput = FileHandle.nullDevice
+        shell.standardOutput = out
+        shell.standardError = FileHandle.nullDevice
+        guard (try? shell.run()) != nil else { return false }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        shell.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).contains("starnotch-reson8-key")
+    }
+
+    static let noKeyLine = "Live recording needs a Reson8 key in Settings › Tara. Meetings from Jamie, Granola or Wispr Flow still reach Tara after the meeting."
 
     var agentAlive: Bool { agent != nil }
 
@@ -123,6 +157,7 @@ final class MeetingModule: NotchModule {
             utterances = 0
             focused = nil
         }
+        sourceError = nil
         // Demo: the recorded meeting through Reson8 when there's a key, else the same meeting as text.
         let command = demo
             ? #"if [[ -n "$RESON8_API_KEY" && -f demo/live.wav ]]; then exec uv run python transcribe.py --file demo/live.wav --language de; else exec uv run python demo/play.py --commands; fi"#
@@ -201,7 +236,8 @@ final class MeetingModule: NotchModule {
         if jamie.automatic, phase.isRunning { return }
         switch phase {
         case .idle:
-            break
+            // Cancelled or disconnected: no Jamie line stays behind.
+            if message?.hasPrefix("Jamie: ") == true { message = nil }
         case .connecting:
             message = "Jamie: connecting…"
         case .login:
@@ -283,6 +319,7 @@ final class MeetingModule: NotchModule {
             utterances += 1
             withAnimation(Theme.snappy) { caption = speaker.isEmpty ? text : "\(speaker): \(text)" }
         case .error(let text):
+            sourceError = text
             message = text
         default:
             break
@@ -297,7 +334,7 @@ final class MeetingModule: NotchModule {
     private func agentLine(_ line: Data) {
         switch MeetingLine.parse(line) {
         case .ready(let meetings, let model):
-            message = "\(meetings) meeting\(meetings == 1 ? "" : "s") in memory · " + (model ?? "rules only, no Claude")
+            message = sourceError ?? "\(meetings) meeting\(meetings == 1 ? "" : "s") in memory · " + (model ?? "rules only, no Claude")
         case .card(let card):
             nextID += 1
             let entry = Entry(id: nextID, card: card, time: Date())
@@ -311,7 +348,7 @@ final class MeetingModule: NotchModule {
                     set(.idle)
                 }
             } else if state == "offline" {
-                message = text ?? "Tara's model isn't reachable; running on rules"
+                message = sourceError ?? text ?? "Tara's model isn't reachable; running on rules"
             } else if state == "not_saved" {
                 // Meetings switched off (or paused before anything was heard): nothing went into the
                 // memory. The agent keeps what it heard, so Save works once meetings are back on;
@@ -450,6 +487,7 @@ private struct MeetingBody: View {
         switch module.phase {
         case .running: "Listening. Contradictions, questions worth asking and new commitments appear here as they come up."
         case .stopped, .saving: "Nothing came up in this meeting."
+        case .idle where !module.canRecord: Localization.string(MeetingModule.noKeyLine)
         case .idle: "Start listens through the microphone; Demo replays a recorded meeting. The agent compares what's said with earlier meetings and shows contradictions, questions and commitments here, in full."
         }
     }
@@ -481,7 +519,9 @@ private struct MeetingBody: View {
                 }
                 JamieButton(module: module)
                 MeetingButton(title: "Demo", symbol: "play", help: "Replay the recorded demo meeting, no microphone") { module.start(demo: true) }
-                MeetingButton(title: "Start", symbol: "mic.fill", prominent: true, help: "Listen through the microphone") { module.start(demo: false) }
+                if module.canRecord {
+                    MeetingButton(title: "Start", symbol: "mic.fill", prominent: true, help: "Listen through the microphone") { module.start(demo: false) }
+                }
             case .running:
                 MeetingButton(title: "Stop", symbol: "stop.fill", prominent: true, help: "End listening") { module.stop() }
             case .stopped(let demo):
@@ -491,7 +531,9 @@ private struct MeetingBody: View {
                 }
                 JamieButton(module: module)
                 MeetingButton(title: "Close", symbol: "xmark", help: demo ? "End the demo" : "End without saving") { module.close() }
-                MeetingButton(title: "Start", symbol: "mic.fill", help: "A new meeting through the microphone") { module.start(demo: false) }
+                if module.canRecord {
+                    MeetingButton(title: "Start", symbol: "mic.fill", help: "A new meeting through the microphone") { module.start(demo: false) }
+                }
             case .saving:
                 ProgressView().controlSize(.small)
             }

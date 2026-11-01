@@ -298,6 +298,23 @@ import TestSupport
         #expect(json?["open_tasks"] as? Int == 3)
         #expect((json?["daily_note"] as? [String: Any])?["headings"] as? [String] == ["Plan", "Log"])
         #expect((json?["recent_notes"] as? [Any])?.count == 3)
+        #expect(json?["folder"] as? String == root.path)
+    }
+
+    @Test func theSnapshotCarriesAFolderPickedInSettings() throws {
+        // The agent's index and wiki find the vault through the snapshot when config.toml names none.
+        let root = try Self.folder(["Tasks.md": "- [ ] one\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "app.starnotch.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(root.path, forKey: VaultConnector.Key.folder)
+        let snapshotURL = root.appending(path: "out/vault.json")
+        let vault = VaultConnector(config: ConfigSection(values: [:]), defaults: defaults, snapshotURL: snapshotURL)
+        #expect(vault.writeSnapshot())
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: snapshotURL)) as? [String: Any]
+        #expect(json?["folder"] as? String == root.path)
+        #expect(json?["name"] as? String == root.lastPathComponent)
     }
 
     @Test func nothingDueShowsTheWeekInstead() throws {

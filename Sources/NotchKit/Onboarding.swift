@@ -1003,6 +1003,7 @@ struct JamieRow: View {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Button("Open again") { jamie.openLogin() }
+                Button("Cancel") { jamie.cancelLogin() }
             }
         case (_, .failed):
             Button("Try again") { jamie.connect() }

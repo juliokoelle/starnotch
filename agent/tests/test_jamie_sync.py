@@ -415,6 +415,103 @@ async def test_no_login_never_opens_the_browser(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "login_required"}
 
 
+def free_port() -> int:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+async def test_the_login_takes_the_callback_port_before_the_browser_opens(monkeypatch, capsys):
+    import asyncio
+
+    opened = []
+    monkeypatch.setattr(jamie_sync.webbrowser, "open", opened.append)
+    port = free_port()
+    provider = jamie_sync.oauth_provider("https://jamie.example/mcp", port=port)
+    await provider.context.redirect_handler("https://jamie.example/authorize?x=1")
+    assert opened == ["https://jamie.example/authorize?x=1"]
+    assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "login",
+                                                   "url": "https://jamie.example/authorize?x=1"}
+
+    # A second login (Granola, Wispr Flow) while this one waits: it says so and never opens its page.
+    second = jamie_sync.oauth_provider("https://granola.example/mcp", port=port, name="Granola")
+    with pytest.raises(jamie_sync.LoginBusy):
+        await second.context.redirect_handler("https://granola.example/authorize?x=2")
+    assert opened == ["https://jamie.example/authorize?x=1"]
+    assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "login_busy"}
+
+    # The browser comes back to the first one.
+    async def browser():
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET /callback?code=c1&state=s1 HTTP/1.1\r\n\r\n")
+        await writer.drain()
+        await reader.read()
+        writer.close()
+
+    result, _ = await asyncio.gather(provider.context.callback_handler(), browser())
+    assert (result.code, result.state) == ("c1", "s1")
+    # Done: the port is free for the next login.
+    server, _ = await jamie_sync.listen_for_callback(port)
+    server.close()
+
+
+async def test_a_login_that_never_comes_back_says_so(capsys):
+    listening = await jamie_sync.listen_for_callback(free_port())
+    with pytest.raises(jamie_sync.LoginTimedOut) as raised:
+        await jamie_sync.wait_for_callback(listening, timeout=0.05, name="Granola")
+    assert str(raised.value) == "Granola login wasn't finished in the browser"  # never empty, as TimeoutError's is
+    assert json.loads(capsys.readouterr().out) == {"type": "status", "state": "login_timeout"}
+
+
+def test_ending_the_process_frees_the_port_for_another_login(tmp_path):
+    """The app's Cancel ends the waiting process (SIGTERM to its group): the next login gets the port."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    port = free_port()
+    code = ("import asyncio, sys, jamie_sync\n"
+            "async def main():\n"
+            f"    await jamie_sync.listen_for_callback({port})\n"
+            "    print('listening', flush=True)\n"
+            "    await asyncio.sleep(60)\n"
+            "asyncio.run(main())\n")
+    waiting = subprocess.Popen([sys.executable, "-c", code], cwd=Path(jamie_sync.__file__).parent,
+                               stdout=subprocess.PIPE, text=True)
+    try:
+        assert waiting.stdout.readline().strip() == "listening"
+
+        async def taken():
+            with pytest.raises(jamie_sync.LoginBusy):
+                await jamie_sync.listen_for_callback(port)
+
+        import asyncio
+        asyncio.run(taken())
+        waiting.terminate()
+        waiting.wait(timeout=10)
+
+        async def free():
+            server, _ = await jamie_sync.listen_for_callback(port)
+            server.close()
+
+        asyncio.run(free())
+    finally:
+        waiting.kill()
+
+
+def test_a_busy_or_abandoned_login_ends_without_an_error_line(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(jamie_sync, "TOKEN_FILE", tmp_path / "jamie-oauth.json")
+    for stopped in (jamie_sync.LoginBusy("busy"), jamie_sync.LoginTimedOut("Jamie login wasn't finished")):
+        async def wrapped(*args, error=stopped, **kwargs):  # the MCP client raises from its task groups
+            raise ExceptionGroup("task group", [error])
+
+        monkeypatch.setattr(jamie_sync, "connect_and_run", wrapped)
+        assert jamie_sync.main(["--memory", str(tmp_path / "memory")]) == 1
+        assert capsys.readouterr().out == ""  # its status line went out before; nothing talks over it
+
+
 def test_an_expired_login_ends_quietly_with_its_own_exit_code(tmp_path, monkeypatch, capsys):
     token = tmp_path / "jamie-oauth.json"
     token.write_text(json.dumps({"tokens": {"access_token": "a", "token_type": "Bearer"}}))

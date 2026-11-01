@@ -478,6 +478,8 @@
 "%@ · %lld new meetings" = "%@ · %lld neue Meetings";
 "Sync now" = "Jetzt abgleichen";
 "Jamie signed you out; connect again to keep your meetings in sync" = "Jamie hat dich abgemeldet; verbinde dich erneut, damit deine Meetings abgeglichen bleiben";
+"Another sign-in is still waiting in the browser. Finish or cancel it, then connect again." = "Eine andere Anmeldung wartet noch im Browser. Schließ sie ab oder brich sie ab, dann verbinde erneut.";
+"The sign-in in the browser didn't come back within 5 minutes. Connect again to retry." = "Die Anmeldung im Browser kam nicht innerhalb von 5 Minuten zurück. Verbinde erneut, um es noch einmal zu versuchen.";
 "Tara's usage" = "Taras Verbrauch";
 "What Tara's calls would cost at API prices. On a Claude plan they count against your plan's limits instead of costing money; with an API key this is what you pay. A + means some calls used a model without a known price." = "Was Taras Aufrufe zu API-Preisen kosten würden. Mit einem Claude-Abo zählen sie gegen die Limits deines Abos und kosten kein Geld; mit einem API-Schlüssel zahlst du genau das. Ein + heißt: Einige Aufrufe liefen über ein Modell ohne bekannten Preis.";
 "Last 7 days" = "Letzte 7 Tage";
@@ -991,6 +993,7 @@
 "Your notes are off in Tara's memory." = "Deine Notizen sind in Taras Gedächtnis ausgeschaltet.";
 
 "%@ feeds Tara" = "%@ speist Tara";
+"Live recording needs a Reson8 key in Settings › Tara. Meetings from Jamie, Granola or Wispr Flow still reach Tara after the meeting." = "Eigene Aufnahme braucht einen Reson8-Schlüssel unter Einstellungen › Tara. Meetings aus Jamie, Granola oder Wispr Flow kommen nach dem Meeting trotzdem bei Tara an.";
 "%lld meetings" = "%lld Meetings";
 "synced %@" = "abgeglichen %@";
 "API key" = "API-Schlüssel";

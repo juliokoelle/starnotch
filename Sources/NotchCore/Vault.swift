@@ -546,6 +546,9 @@ public struct VaultSnapshot: Codable, Equatable, Sendable {
     public var updated: Date
     /// The vault's folder name.
     public var name: String
+    /// The vault's folder on disk (config.toml's, else the one picked in the app): the agent's
+    /// full-text index and wiki read it from here when config.toml names none.
+    public var folder: String?
     /// `YYYY-MM-DD` on this Mac's clock when written.
     public var today: String
     /// Open tasks: dated ones first by due date, then the rest in file order.
@@ -555,6 +558,6 @@ public struct VaultSnapshot: Codable, Equatable, Sendable {
     public var recentNotes: [Note]
 
     enum CodingKeys: String, CodingKey {
-        case version, updated, name, today, tasks, dailyNote = "daily_note", openTasks = "open_tasks", recentNotes = "recent_notes"
+        case version, updated, name, folder, today, tasks, dailyNote = "daily_note", openTasks = "open_tasks", recentNotes = "recent_notes"
     }
 }

@@ -16,7 +16,8 @@ final class AppleNotesStore {
     nonisolated static let bundleID = "com.apple.Notes"
 
     enum Access: Equatable { case unknown, allowed, denied }
-    enum Failure: Error, Equatable { case notAllowed, unavailable, timedOut, failed }
+    /// `folderGone`: the folder picked for captures isn't in Notes any more.
+    enum Failure: Error, Equatable { case notAllowed, unavailable, timedOut, failed, folderGone }
 
     /// Settings › Apple Notes is on (set by the app).
     @ObservationIgnored var enabled: () -> Bool = { false }
@@ -111,15 +112,17 @@ final class AppleNotesStore {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
-    /// A capture as a new note in `folder` (Notes' default for `notesDefault`): its id, nil when it
-    /// couldn't be made. Only ever adds a note; the list reads it with the next refresh.
-    func create(text: String, in folder: AppleNotesFolder) async -> String? {
-        guard !preview else { return "preview" }
+    /// A capture as a new note in `folder` (Notes' default for `notesDefault`): its id, or why it
+    /// couldn't be made. A folder that is gone gets nothing, no other folder takes the note. Only
+    /// ever adds a note; the list reads it with the next refresh.
+    func create(text: String, in folder: AppleNotesFolder) async -> Result<String, Failure> {
+        guard !preview else { return .success("preview") }
         let arguments = [folder.id, AppleNotesFormat.body(for: text)].map(AppleNotesScript.argument)
-        guard case .success(let output) = await Self.run(AppleNotesScript.create, arguments: arguments) else { return nil }
+        let result = await Self.run(AppleNotesScript.create, arguments: arguments)
+        guard case .success(let output) = result else { return result }
         lastRead = nil
         let id = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return id.isEmpty ? nil : id
+        return id.isEmpty ? .failure(.failed) : .success(id)
     }
 
     // MARK: Permission
@@ -197,6 +200,7 @@ final class AppleNotesStore {
             case -1743: return .failure(.notAllowed)
             case -600, -609: return .failure(.unavailable)
             case -1712: return .failure(.timedOut)
+            case AppleNotesScript.folderGone: return .failure(.folderGone)
             default: return .failure(.failed)
             }
         }

@@ -65,11 +65,13 @@ final class Prompter {
     @ObservationIgnored private var lastMove = Date()
     @ObservationIgnored private var updatesSinceMove = 0
     @ObservationIgnored private var scrollRest: CGFloat = 0
+    /// Counts the scripts coming in: a dropped file still being read gives way to a newer one.
+    @ObservationIgnored private var loads = 0
 
     static let settingsKey = "prompterSettings"
     static let scriptsFile = "prompter-scripts.json"
     /// Files larger than this aren't read: a script, not a book.
-    static let maxFileSize = 1_000_000
+    nonisolated static let maxFileSize = 1_000_000
     static let fileTypes: Set<String> = ["txt", "text", "md", "markdown"]
 
     /// `library` nil keeps the recent scripts in memory (previews, sample data).
@@ -95,6 +97,7 @@ final class Prompter {
 
     /// Ends the session: listening stops, the place is kept for next time.
     func close() {
+        loads += 1
         stopMoving()
         listener.stop()
         keepPlace()
@@ -120,6 +123,7 @@ final class Prompter {
 
     /// Reads `script` from where it stopped last time (from the start when it was read to the end).
     func read(_ script: PrompterScript) {
+        loads += 1
         stopMoving()
         listener.stop()
         var script = script
@@ -177,25 +181,39 @@ final class Prompter {
     }
 
     /// A file dropped on the band (or on the notch): a .txt or .md file, read and never changed.
+    /// It is read off the main actor, since a file on a slow share or still in iCloud can take a
+    /// while; a paste, another drop or a recent script picked meanwhile wins, and closing drops it.
     func drop(_ url: URL) {
         dropTargeted = false
         guard Self.fileTypes.contains(url.pathExtension.lowercased()) else {
             notice = Localization.string("Drop a .txt or .md file")
             return
         }
+        loads += 1
+        let load = loads
+        Task { [weak self] in
+            let file = await Task.detached(priority: .userInitiated) { Self.readFile(url) }.value
+            guard let self, load == self.loads else { return }
+            switch file {
+            case .tooLong: self.notice = Localization.string("That file is too long for the teleprompter")
+            case .unreadable: self.notice = Localization.string("Couldn't read that file")
+            case .text(let text):
+                Haptics.confirm()
+                self.load(text, title: url.deletingPathExtension().lastPathComponent)
+            }
+        }
+    }
+
+    private enum FileRead: Sendable { case text(String), tooLong, unreadable }
+
+    /// The file's script (Markdown as plain text), its size checked first.
+    private nonisolated static func readFile(_ url: URL) -> FileRead {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-        guard size <= Self.maxFileSize else {
-            notice = Localization.string("That file is too long for the teleprompter")
-            return
-        }
+        guard size <= maxFileSize else { return .tooLong }
         guard let raw = (try? String(contentsOf: url, encoding: .utf8)) ?? (try? String(contentsOf: url, encoding: .windowsCP1252)),
-              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            notice = Localization.string("Couldn't read that file")
-            return
-        }
-        Haptics.confirm()
+              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .unreadable }
         let markdown = ["md", "markdown"].contains(url.pathExtension.lowercased())
-        load(markdown ? PrompterText.plain(markdown: raw) : raw, title: url.deletingPathExtension().lastPathComponent)
+        return .text(markdown ? PrompterText.plain(markdown: raw) : raw)
     }
 
     private func load(_ string: String, title: String?) {

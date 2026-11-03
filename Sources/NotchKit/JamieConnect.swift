@@ -51,6 +51,8 @@ final class JamieConnect {
     /// Previews and sample data: a connect plays the phases without running anything.
     @ObservationIgnored var simulated = false { didSet { checkBlocker() } }
     @ObservationIgnored private var process: MeetingProcess?
+    /// Counts the runs: the late lines and exit of a cancelled run change nothing once another has started.
+    @ObservationIgnored private var generation = 0
     @ObservationIgnored private var count = 0
     @ObservationIgnored private var schedule = JamieSyncSchedule(connected: false, launched: Date())
     /// Jamie asked for a new login during a sync of its own: no more until the user connects again.
@@ -149,6 +151,14 @@ final class JamieConnect {
         run("exec uv run python jamie_sync.py --no-login --limit 10", automatic: true)
     }
 
+    /// Tara's switches let meetings in again (a pause ended or was resumed, meetings back on): a sync
+    /// they held back no longer says so, and its backoff goes. Nothing else changes the phase.
+    func privacyChanged() {
+        guard phase == .failed(Localization.string(Self.pausedLine)), privacy().records(.meetings, at: Date()) else { return }
+        schedule.released()
+        set(.idle)
+    }
+
     /// Forgets the Jamie login on this Mac (as `jamie_sync.py --logout`); the meetings stay in the memory.
     func disconnect() {
         cancel()
@@ -193,10 +203,12 @@ final class JamieConnect {
         self.automatic = automatic
         wroteMeetings = false
         set(.connecting)
+        generation += 1
+        let current = generation
         process = MeetingProcess(command: command, directory: directory, log: log, onLine: { [weak self] line in
-            Task { @MainActor in self?.handle(line) }
+            Task { @MainActor in if self?.generation == current { self?.handle(line) } }
         }, onExit: { [weak self] in
-            Task { @MainActor in self?.ended() }
+            Task { @MainActor in if self?.generation == current { self?.ended() } }
         })
         // A key, not a sentence: the row looks it up in the app's language.
         if process == nil { set(.failed("Couldn't start the Jamie sync")) }

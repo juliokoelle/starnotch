@@ -77,7 +77,11 @@ import TestSupport
         let isolated = IsolatedSettings()
         isolated.writeRaw(#"{"didOnboard":true}"#)
         let older = isolated.store.load()
-        #expect(older.timeToLeave && older.travelMode == .driving && older.shelfActions && older.shelfKeeps)
+        // Saved before Time to leave: it stays off until switched on.
+        #expect(!older.timeToLeave && older.travelMode == .driving && older.shelfActions && older.shelfKeeps)
+        // A new install's saves keep it on.
+        isolated.store.save(settings)
+        #expect(isolated.store.load().timeToLeave)
         var changed = settings
         changed.timeToLeave = false
         changed.travelMode = .transit

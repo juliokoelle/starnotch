@@ -28,4 +28,11 @@ public struct SneakQueue<Item: Sendable>: Sendable {
     public mutating func pop() -> Entry? {
         entries.isEmpty ? nil : entries.removeFirst()
     }
+
+    /// Takes out the waiting entries `held` holds back (quiet came on after they queued), in order.
+    public mutating func removeAll(where held: (Item) -> Bool) -> [Entry] {
+        let removed = entries.filter { held($0.item) }
+        entries.removeAll { held($0.item) }
+        return removed
+    }
 }

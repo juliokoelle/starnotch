@@ -192,3 +192,12 @@ public enum MeetingCommand {
         return data
     }
 }
+
+/// Whether the login shell hands a Reson8 key to the agent it starts. The script prints `marker`
+/// only when a child process sees a non-empty `RESON8_API_KEY` in its environment: a key set in
+/// ~/.zshrc without `export` stays in the shell, and Python wouldn't get it. The key itself is
+/// never printed.
+public enum RecordKeyProbe {
+    public static let marker = "starnotch-reson8-key"
+    public static let script = #"[ -n "$(printenv RESON8_API_KEY)" ] && print -n "# + marker
+}

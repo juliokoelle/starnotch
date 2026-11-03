@@ -407,6 +407,19 @@
 "%@ is done" = "%@ ist fertig";
 "%@ failed" = "%@ fehlgeschlagen";
 "%@ asks" = "%@ fragt";
+"%@ wants to %@" = "%@ möchte %@";
+"run" = "ausführen";
+"edit" = "bearbeiten";
+"write" = "schreiben";
+"read" = "lesen";
+"open" = "öffnen";
+"search the web for" = "im Web suchen nach";
+"use %@ on" = "%@ verwenden für";
+"Allow once" = "Einmal erlauben";
+"Allow for session" = "Für die Sitzung erlauben";
+"Deny" = "Ablehnen";
+"Yes" = "Ja";
+"No" = "Nein";
 "%@ waits" = "%@ wartet";
 "No note" = "Keine Notiz";
 "Open session" = "Sitzung öffnen";
@@ -502,6 +515,7 @@
 "Answers are simpler than with Claude, and live meetings run on simple rules." = "Die Antworten sind einfacher als mit Claude, und laufende Meetings nutzen einfache Regeln.";
 "Unavailable" = "Nicht verfügbar";
 "Needs Apple Intelligence on this Mac." = "Braucht Apple Intelligence auf diesem Mac.";
+"Needs the Codex app on this Mac." = "Braucht die Codex-App auf diesem Mac.";
 "Tara's model isn't reachable, so simple rules answered" = "Taras Modell ist nicht erreichbar, deshalb haben einfache Regeln geantwortet";
 "Registered again from the app's copy. Restart running sessions." = "Erneut aus der Kopie der App registriert. Laufende Sitzungen neu starten.";
 "Installed again. Restart running sessions." = "Erneut installiert. Laufende Sitzungen neu starten.";
@@ -551,7 +565,7 @@
 "Only needed when the system-wide source can't be read. The commands go to the player on this Mac." = "Nur nötig, wenn die systemweite Quelle nicht lesbar ist. Die Befehle gehen an den Player auf diesem Mac.";
 "Copied into Tara's memory on this Mac. With Claude as her brain, that memory goes to Anthropic when she answers or writes meeting cards." = "Auf diesem Mac in Taras Gedächtnis kopiert. Mit Claude als Gehirn geht dieses Gedächtnis an Anthropic, wenn sie antwortet oder Meeting-Karten schreibt.";
 "The model behind Tara's answers and meeting cards. You can change it any time." = "Das Modell hinter Taras Antworten und Meeting-Karten. Du kannst es jederzeit ändern.";
-"Apple Intelligence and simple rules stay on this Mac; with Claude, the text goes to Anthropic." = "Apple Intelligence und einfache Regeln bleiben auf diesem Mac; mit Claude geht der Text an Anthropic.";
+"Apple Intelligence and simple rules stay on this Mac; with Claude or ChatGPT, the text goes to Anthropic or OpenAI." = "Apple Intelligence und einfache Regeln bleiben auf diesem Mac; mit Claude oder ChatGPT geht der Text an Anthropic oder OpenAI.";
 "Your notes stay in their folder. With Claude as Tara's brain, your tasks and today's note go to Anthropic when you ask her something." = "Deine Notizen bleiben in ihrem Ordner. Mit Claude als Taras Gehirn gehen deine Aufgaben und die heutige Notiz an Anthropic, wenn du sie etwas fragst.";
 "Found on this Mac" = "Auf diesem Mac gefunden";
 "What gets set up" = "Was eingerichtet wird";
@@ -1209,6 +1223,7 @@
 "New Note" = "Neue Notiz";
 "Locked" = "Geschützt";
 "Show it in Apple Notes" = "In Apple Notizen zeigen";
+"Its Apple Notes folder is gone" = "Der Ordner in Apple Notizen ist weg";
 "Teleprompter" = "Teleprompter";
 "Your script under the notch, near the camera; it follows your voice, on ⌃⌥K" = "Dein Skript unter der Notch, nah an der Kamera; es folgt deiner Stimme, über ⌃⌥K";
 "Read a script under the notch" = "Ein Skript unter der Notch lesen";

@@ -59,10 +59,23 @@ import Testing
         #expect(read.contains("song repeat as string"))
         #expect(!read.contains("set shuffle"))
         #expect(PlayerModes.script(for: .music, toggle: .shuffle).contains("set shuffle enabled to not shuffle enabled"))
-        #expect(PlayerModes.script(for: .music, toggle: .favorite).contains("set «class pLov» of current track"))
+        #expect(PlayerModes.script(for: .music, toggle: .favorite, track: ("Song A", "Band")).contains("set «class pLov» of t to not"))
         #expect(PlayerModes.script(for: .spotify, toggle: .repeatMode).contains("set repeating to not repeating"))
         // Spotify can't favorite through AppleScript: the script only reads.
         #expect(PlayerModes.script(for: .spotify, toggle: .favorite) == PlayerModes.script(for: .spotify))
+    }
+
+    @Test func theStarOnlyChangesTheSongItWasFor() {
+        // The song is checked before anything changes; another one playing by then stays as it is.
+        let star = PlayerModes.script(for: .music, toggle: .favorite, track: ("Song A", "Band"))
+        #expect(star.contains("set t to current track"))
+        #expect(star.contains("if name of t is \"Song A\" and artist of t is \"Band\" then set «class pLov» of t to not («class pLov» of t)"))
+        #expect(!star.contains("of current track to"))
+        // Without the song, the click changes nothing; the script only reads.
+        #expect(PlayerModes.script(for: .music, toggle: .favorite) == PlayerModes.script(for: .music))
+        // Quotes and backslashes in a title stay inside its string.
+        let odd = PlayerModes.script(for: .music, toggle: .favorite, track: (#"Say "Hi" \" & (do shell script "x") & ""#, "AC/DC"))
+        #expect(odd.contains(#"if name of t is "Say \"Hi\" \\\" & (do shell script \"x\") & \"" and artist of t is "AC/DC" then"#))
     }
 
     @Test func automationAccess() {

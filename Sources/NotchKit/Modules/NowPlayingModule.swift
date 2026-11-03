@@ -340,7 +340,7 @@ final class NowPlayingModule: NotchModule {
         let round = modesRound
         togglesOut += 1
         Task { [weak self] in
-            let answer = await PlayerBridge.modes(source, toggle: control, ask: true)
+            let answer = await PlayerBridge.modes(source, toggle: control, ask: true, track: (track.title, track.artist))
             guard let self else { return }
             self.togglesOut -= 1
             guard round == self.modesRound, self.track?.id == track.id else { return }
@@ -993,9 +993,11 @@ extension PlayerBridge {
     /// Reads shuffle, repeat and favorite (with `toggle`, flips one first) in a separate
     /// `osascript`, off the main thread, so the island never waits on the player. Without `ask`
     /// nothing is sent unless Automation is already allowed: macOS's dialog only comes from a click.
-    static func modes(_ source: PlayerStatus.Source, toggle: PlayerModes.Control? = nil, ask: Bool = false) async -> ModesAnswer {
+    /// `track` is the song a click was for; the favorite flips only while it still plays.
+    static func modes(_ source: PlayerStatus.Source, toggle: PlayerModes.Control? = nil, ask: Bool = false,
+                      track: (title: String, artist: String)? = nil) async -> ModesAnswer {
         guard let id = bundleIDs[source] else { return .unavailable }
-        let script = PlayerModes.script(for: source, toggle: toggle)
+        let script = PlayerModes.script(for: source, toggle: toggle, track: track)
         return await Task.detached(priority: .userInitiated) {
             readModes(script, bundleID: id, source: source, ask: ask)
         }.value

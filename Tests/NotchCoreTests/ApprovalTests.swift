@@ -18,6 +18,20 @@ import TestSupport
         #expect(edit?.summary == "/a/b.swift")
     }
 
+    @Test func returnInTheInboxNeverAllowsWhileANoteOrAnAnswerIsUnderWay() throws {
+        var request = try #require(ApprovalRequest.parse(Bytes.data(bash), id: "r"))
+        #expect(request.takesNote)
+        #expect(request.inboxReturn(noting: false) == .primary)
+        // "Instead…" open: ↵ sends the deny with the note, not Allow.
+        #expect(request.inboxReturn(noting: true) == .sendNote)
+        var question = request
+        question.questions = [.init(text: "Which one?", options: [.init(label: "A"), .init(label: "B")])]
+        #expect(question.inboxReturn(noting: false) == .nextQuestion)
+        request.provider = ApprovalRequest.mcpProvider
+        request.freeText = true
+        #expect(request.inboxReturn(noting: false) == .field)
+    }
+
     @Test func decisionsMatchTheDocumentedJSON() throws {
         let request = try #require(ApprovalRequest.parse(Bytes.data(bash), id: "r"))
         #expect(String(decoding: ApprovalDecision.allowOnce.output(for: request), as: UTF8.self)

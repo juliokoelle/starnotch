@@ -649,8 +649,18 @@ final class NotchController {
 
     // MARK: Sneak peek
 
-    private var sneaks = SneakQueue<Sneak>()
+    /// A waiting line and how it was let through: quiet is asked again when it's its turn.
+    private struct Queued: Sendable {
+        var sneak: Sneak
+        var urgent: Bool
+        var asks: Bool
+        var counts: Bool
+    }
+
+    private var sneaks = SneakQueue<Queued>()
     private var sneakTask: Task<Void, Never>?
+    /// The line on show is an agent's approval or question: it stays when a meeting starts.
+    private var shownAsks = false
 
     /// Shows one line on the closed island for a moment. Events queue up; one with the same
     /// key replaces a waiting one. While the panel or the hover peek is open, the line waits.
@@ -671,16 +681,22 @@ final class NotchController {
             if counts { heldWhileQuiet += 1 }
             return false
         }
-        sneaks.push(sneak, key: key)
+        sneaks.push(Queued(sneak: sneak, urgent: urgent, asks: asks, counts: counts), key: key)
         showNextSneak()
         return true
     }
 
     private func showNextSneak() {
-        guard sneakTask == nil, model.interaction == .rest, let next = sneaks.pop() else { return }
-        withAnimation(Theme.open) { model.sneak = next.item }
+        guard sneakTask == nil, model.interaction == .rest else { return }
+        // Quiet came on after these queued: they wait for the summary instead.
+        let held = sneaks.removeAll { !Quiet.letsThrough(urgent: $0.urgent, watching: model.watching, asks: $0.asks,
+                                                         inMeeting: model.meetingQuiet) }
+        heldWhileQuiet += held.filter(\.item.counts).count
+        guard let next = sneaks.pop() else { return }
+        shownAsks = next.item.asks
+        withAnimation(Theme.open) { model.sneak = next.item.sneak }
         sneakTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(next.item.duration))
+            try? await Task.sleep(for: .seconds(next.item.sneak.duration))
             guard let self else { return }
             if self.model.interaction == .rest {
                 withAnimation(Theme.close) { self.model.sneak = nil }
@@ -714,6 +730,10 @@ final class NotchController {
         model.meetingQuiet = on
         if on {
             if !model.watching { heldWhileQuiet = 0 }
+            // A line on show goes, unless an agent is asking.
+            if model.interaction != .expanded, model.sneak != nil, !shownAsks {
+                withAnimation(.easeInOut(duration: 0.2)) { model.sneak = nil }
+            }
         } else if !model.watching, heldWhileQuiet > 0 {
             let count = heldWhileQuiet
             heldWhileQuiet = 0
@@ -796,8 +816,11 @@ final class NotchController {
         if capture.route == .note, let folder = appleNotesCapture() {
             let text = capture.text, preview = model.previewFeatures
             Task {
-                let id = preview ? "preview" : await AppleNotesStore.shared.create(text: text, in: folder)
-                withAnimation(Theme.snappy) { capture.appleNote = id }
+                let made = preview ? .success("preview") : await AppleNotesStore.shared.create(text: text, in: folder)
+                withAnimation(Theme.snappy) {
+                    capture.appleNote = try? made.get()
+                    capture.appleNoteFolderGone = made == .failure(.folderGone)
+                }
             }
         }
         Task { [weak self] in
@@ -1145,6 +1168,11 @@ final class NotchController {
             case 53:
                 // Nothing in front (all clear, or all skipped): esc closes.
                 guard inbox.current != nil else { collapse(); return true }
+                // "Instead…" open: back to the buttons.
+                if case .approval(let pending)? = inbox.current?.source, inbox.approvals.notingID == pending.id {
+                    inbox.approvals.cancelNote()
+                    return true
+                }
                 inbox.skip()
                 if inbox.current == nil { inboxEmptied() }
                 return true
@@ -1153,8 +1181,14 @@ final class NotchController {
                     inboxKey(primary: false)
                     return true
                 }
-                // A question with a field takes ↵ itself (send).
-                if case .approval(let pending)? = inbox.current?.source, pending.request.freeText { return false }
+                if case .approval(let pending)? = inbox.current?.source {
+                    switch pending.request.inboxReturn(noting: inbox.approvals.notingID == pending.id) {
+                    case .field: return false  // a question with a field takes ↵ itself (send)
+                    case .sendNote: inbox.approvals.sendNote(); return true
+                    case .nextQuestion: inbox.approvals.next(pending.id); return true
+                    case .primary: break
+                    }
+                }
                 inboxKey(primary: true)
                 return true
             default:

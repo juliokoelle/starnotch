@@ -410,6 +410,7 @@ private struct ReminderComposer: View {
                     .font(Theme.font(12.5))
                     .foregroundStyle(Theme.textPrimary)
                     .focused($focused)
+                    .disabled(module.savingReminder)
                     .onSubmit { module.saveReminder() }
                     .simultaneousGesture(TapGesture().onEnded { NotchPanel.takeKeyboard() })
                 Button {

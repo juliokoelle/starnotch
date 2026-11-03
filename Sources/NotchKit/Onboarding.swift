@@ -78,6 +78,9 @@ final class Onboarding {
     /// Claude Code is on this Mac: the subscription can do Tara's thinking.
     var claudeFound: Bool { setup.paths.claudeBinary != nil }
 
+    /// The Codex app is on this Mac: a ChatGPT plan can do it instead.
+    var codexFound: Bool { setup.paths.codexBinary != nil }
+
     /// The notes folder picker, one for the whole window.
     var notes: VaultSetup {
         if let notesSetup { return notesSetup }
@@ -344,7 +347,7 @@ struct OnboardingView: View {
         case .brain:
             Page(model: model, step: step, symbol: "brain", title: "How Tara thinks",
                  why: "The model behind Tara's answers and meeting cards. You can change it any time.",
-                 stays: "Apple Intelligence and simple rules stay on this Mac; with Claude, the text goes to Anthropic.") {
+                 stays: "Apple Intelligence and simple rules stay on this Mac; with Claude or ChatGPT, the text goes to Anthropic or OpenAI.") {
                 BrainStep(model: model)
             }
         case .memory:
@@ -869,7 +872,7 @@ private struct BrainStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CardList(items: [TaraBrain.claudeCode, .api, .apple, .rules]) { brain in
+            CardList(items: [TaraBrain.claudeCode, .codex, .api, .apple, .rules]) { brain in
                 BrainRow(model: model, brain: brain)
             }
             Text(model.state.settings.brain == .auto
@@ -1052,6 +1055,7 @@ private struct BrainRow: View {
         let selected = model.state.settings.brain == brain
         // Apple Intelligence stays open while it's off or downloading: the user can still switch it on.
         let blocked = brain == .claudeCode && !model.claudeFound
+            || brain == .codex && !model.codexFound
             || brain == .apple && (apple == .notSupported || apple == .unknown)
         VStack(alignment: .leading, spacing: 8) {
             Button {
@@ -1077,6 +1081,7 @@ private struct BrainRow: View {
                         }
                         Text(LocalizedStringKey(!blocked ? BrainInfo.line(brain)
                                                 : brain == .apple ? "Needs Apple Intelligence on this Mac."
+                                                : brain == .codex ? "Needs the Codex app on this Mac."
                                                 : "Needs Claude Code on this Mac."))
                             .font(.system(size: 14)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

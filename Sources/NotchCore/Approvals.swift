@@ -88,6 +88,15 @@ public struct ApprovalRequest: Equatable, Sendable, Identifiable {
     /// Deny can carry what to do instead: the tools whose reply has room for a message.
     public var takesNote: Bool { !isQuestion && ["claude-code", "codex", "cursor", "copilot"].contains(provider) }
 
+    /// What ↵ does on this card in the agents inbox, whose key monitor sees it before the card's
+    /// fields: the same as the card's own ↵, never Allow while a note or an answer is under way.
+    public func inboxReturn(noting: Bool) -> InboxReturn {
+        if !questions.isEmpty { return .nextQuestion }
+        if noting { return .sendNote }
+        if freeText { return .field }
+        return .primary
+    }
+
     /// The answers Claude Code takes for `questions`: per question the picked labels in the
     /// options' order, joined with ", ", and a typed answer (in place of the pick for a single
     /// choice, added to the picks for several). Questions without either are left out.
@@ -221,6 +230,18 @@ extension ApprovalRequest {
 }
 
 /// What the user clicked in the notch.
+/// ↵ on a prompt in the agents inbox.
+public enum InboxReturn: Equatable, Sendable {
+    /// The answer field takes it (it sends what's typed).
+    case field
+    /// "Instead…" is open: the deny goes with the note.
+    case sendNote
+    /// Claude Code's questions: the next one, or send.
+    case nextQuestion
+    /// The inbox's own ↵: allow once, nothing for a question with answers to pick.
+    case primary
+}
+
 public enum ApprovalDecision: Equatable, Sendable {
     case allowOnce, allowSession, deny
     /// The answer to an agent's question (an option or typed text), for the MCP server only.

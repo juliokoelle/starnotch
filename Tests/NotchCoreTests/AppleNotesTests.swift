@@ -72,6 +72,17 @@ import TestSupport
         #expect(AppleNotesFormat.errorNumber(in: "0:12: syntax error") == nil)
     }
 
+    @Test func aGoneFolderIsAnErrorNeverTheDefaultFolder() {
+        // Notes' default folder only for the default choice: a note for "On My Mac" never lands in iCloud.
+        let lines = AppleNotesScript.create.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        #expect(lines.filter { $0.contains("default folder") } == ["set target to default folder of default account"])
+        let fallback = lines.firstIndex(of: "set target to default folder of default account")
+        #expect(fallback.map { lines[$0 - 1] } == "if folderID is \"\" then")
+        #expect(lines.contains("if not (exists folder id folderID) then error \"The folder for captures is no longer in Notes.\" number 1001"))
+        #expect(AppleNotesFormat.errorNumber(in: "6:54: execution error: The folder for captures is no longer in Notes. (1001)\n")
+                == AppleNotesScript.folderGone)
+    }
+
     @Test func scriptsOnlyReadOrAdd() {
         // Copy semantics: no script deletes, moves or empties anything in Notes.
         for source in [AppleNotesScript.list, AppleNotesScript.contents, AppleNotesScript.folders, AppleNotesScript.create, AppleNotesScript.show] {

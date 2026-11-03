@@ -42,6 +42,8 @@ final class QuickCapture {
     var eventAdded: String?
     /// The note's copy in Apple Notes, once it's made: its id.
     var appleNote: String?
+    /// The Apple Notes folder picked in Settings is gone: no copy, the note is only in the inbox.
+    var appleNoteFolderGone = false
 
     /// Start of an event the text describes ("Call Ada tomorrow at 15:00").
     var eventStart: Date? { parse.eventStart(calendar: .current) }
@@ -314,6 +316,7 @@ extension CaptureView {
     /// Says where it is: "Kept on this Mac" told nobody where to find it again.
     var sentDetail: String {
         if let when = capture.eventAdded { return when }
+        if capture.appleNoteFolderGone { return Localization.string("Its Apple Notes folder is gone") }
         let kind = capture.route.rawValue.lowercased()
         // Connector inbox: no buttons, the text itself.
         if capture.outcome == .delivered, capture.inboxFile == nil { return "\(kind) · \(capture.text)" }

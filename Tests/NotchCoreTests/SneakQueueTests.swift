@@ -19,6 +19,14 @@ import Testing
         #expect(queue.entries.map(\.item) == ["build 90 %", "other"])
     }
 
+    @Test func quietTakesOutWhatItHoldsBackAndKeepsTheRestInOrder() {
+        var queue = SneakQueue<String>()
+        for item in ["download", "approval", "music", "question"] { queue.push(item, key: item) }
+        let held = queue.removeAll { !["approval", "question"].contains($0) }
+        #expect(held.map(\.item) == ["download", "music"])
+        #expect(queue.entries.map(\.item) == ["approval", "question"])
+    }
+
     @Test func capacityDropsOldest() {
         var queue = SneakQueue<Int>(capacity: 2)
         for i in 1...4 { queue.push(i, key: "\(i)") }

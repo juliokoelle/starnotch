@@ -32,7 +32,11 @@ final class LeaveTimes {
     var mode = TravelMode.driving {
         didSet {
             guard mode != oldValue else { return }
-            // Apple Maps' answers were for the other way of travelling.
+            // Apple Maps' answers were for the other way of travelling, also the one on its way:
+            // it's dropped and a fresh lookup starts.
+            lookup?.cancel()
+            lookup = nil
+            generation += 1
             estimates = estimates.filter { $0.value.fromCalendar }
             failed = [:]
             update(today)
@@ -49,7 +53,8 @@ final class LeaveTimes {
     /// When a lookup found no place or no route, by event id.
     @ObservationIgnored private var failed: [String: Date] = [:]
     @ObservationIgnored private var lookup: Task<Void, Never>?
-    /// Counts lookups: one that ends after `forget` doesn't clear a newer one.
+    /// Counts lookups: one that ends after `forget` or a new mode keeps no answer and doesn't
+    /// clear a newer one.
     @ObservationIgnored private var generation = 0
     /// Closer than the weather's fix: a few kilometres off is minutes off.
     @ObservationIgnored private lazy var locator = Locator(accuracy: kCLLocationAccuracyHundredMeters)
@@ -116,6 +121,7 @@ final class LeaveTimes {
     // MARK: Due
 
     private func checkDue(now: Date) {
+        guard enabled else { return }
         let day = MorningLine.day(now)
         for event in today {
             guard let estimate = estimates[event.id], TimeToLeave.isDue(start: event.start, travel: estimate.travel, now: now),
@@ -145,21 +151,24 @@ final class LeaveTimes {
         generation += 1
         let mine = generation
         lookup = Task { [weak self] in
-            await self?.lookUp(wanted, mode: mode)
+            await self?.lookUp(wanted, mode: mode, generation: mine)
             if self?.generation == mine { self?.lookup = nil }
         }
     }
 
     /// One location fix, then each event's place and route in turn. A failed refresh keeps the
-    /// last answer; a route that's too short or too long drops it.
-    private func lookUp(_ events: [CalendarModule.Meeting], mode: TravelMode) async {
+    /// last answer; a route that's too short or too long drops it. Off, another mode or a newer
+    /// lookup while waiting: the answer is old and the lookup stops.
+    private func lookUp(_ events: [CalendarModule.Meeting], mode: TravelMode, generation mine: Int) async {
         guard let here = await locator.locate(ask: false) else {
-            for event in events { failed[event.id] = Date() }
+            if isCurrent(mine, mode: mode) { for event in events { failed[event.id] = Date() } }
             return
         }
         for event in events {
-            guard enabled, self.mode == mode else { return }
-            guard let travel = await route(to: event, from: here, mode: mode) else {
+            guard isCurrent(mine, mode: mode) else { return }
+            let travel = await route(to: event, from: here, mode: mode)
+            guard isCurrent(mine, mode: mode) else { return }
+            guard let travel else {
                 failed[event.id] = Date()
                 continue
             }
@@ -176,8 +185,13 @@ final class LeaveTimes {
         checkDue(now: Date())
     }
 
+    private func isCurrent(_ mine: Int, mode: TravelMode) -> Bool {
+        generation == mine && enabled && self.mode == mode
+    }
+
     private func route(to event: CalendarModule.Meeting, from here: CLLocation, mode: TravelMode) async -> TimeInterval? {
-        guard let destination = await place(of: event, near: here) else { return nil }
+        // Stopped while the place was searched: no request for the way.
+        guard let destination = await place(of: event, near: here), !Task.isCancelled else { return nil }
         let request = MKDirections.Request()
         request.source = Self.item(at: here.coordinate)
         request.destination = destination

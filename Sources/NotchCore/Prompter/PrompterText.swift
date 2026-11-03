@@ -164,6 +164,8 @@ public enum PrompterWords {
 
             func accepts(_ number: Number) -> Bool {
                 guard let last else { return true }
+                // Too large for an Int: the word starts a new number.
+                guard adding(number) != nil else { return false }
                 switch number.kind {
                 case .unit: return [.tens, .hundred, .scale].contains(last) && (last != .tens || current % 10 == 0)
                 case .teen, .tens: return last == .hundred || last == .scale
@@ -175,15 +177,24 @@ public enum PrompterWords {
 
             mutating func add(_ number: Number, word: Int) {
                 if last == nil { self.word = word }
-                switch number.kind {
-                case .unit, .teen, .tens, .whole: current += number.value
-                case .hundred: current = max(1, current) * 100
-                case .scale:
-                    total += max(1, current) * number.value
-                    current = 0
-                    scale = number.value
-                }
+                // `accepts` checked it fits; a new run starts far below the limit.
+                guard let next = adding(number) else { return }
+                (total, current) = next
+                if number.kind == .scale { scale = number.value }
                 last = number.kind
+            }
+
+            /// The thousands and millions and the part below them with `number` added; nil when
+            /// either, or their sum, doesn't fit in an Int.
+            func adding(_ number: Number) -> (total: Int, current: Int)? {
+                let next: (total: Int, current: Int)?
+                switch number.kind {
+                case .unit, .teen, .tens, .whole: next = current.plus(number.value).map { (total, $0) }
+                case .hundred: next = max(1, current).times(100).map { (total, $0) }
+                case .scale: next = max(1, current).times(number.value).flatMap { total.plus($0) }.map { ($0, 0) }
+                }
+                guard let next, next.total.plus(next.current) != nil else { return nil }
+                return next
             }
         }
 
@@ -261,6 +272,19 @@ public enum PrompterWords {
 
 private extension Character {
     var isASCIIDigit: Bool { isASCII && isNumber }
+}
+
+private extension Int {
+    /// The sum or product, nil when it overflows.
+    func plus(_ other: Int) -> Int? {
+        let (result, overflow) = addingReportingOverflow(other)
+        return overflow ? nil : result
+    }
+
+    func times(_ other: Int) -> Int? {
+        let (result, overflow) = multipliedReportingOverflow(by: other)
+        return overflow ? nil : result
+    }
 }
 
 /// A script split for reading: the words as written (shown in the band) and their match keys (to

@@ -219,8 +219,9 @@ final class TodayModule: NotchModule {
         item.kind == .task && editsAllowed() && editor?.canDelete(item.id) == true
     }
 
+    /// Not while one is being saved.
     func startReminder() {
-        guard canAddReminders else { return }
+        guard canAddReminders, !savingReminder else { return }
         Haptics.tick()
         withAnimation(Theme.snappy) {
             reminderDraft = ReminderDraft()
@@ -237,13 +238,16 @@ final class TodayModule: NotchModule {
         }
     }
 
+    /// While it saves the field stays as it is: what's saved is what was on screen.
     func updateReminder(text: String) {
+        guard !savingReminder else { return }
         reminderDraft?.update(text: text, now: R5Clock.now(), calendar: .current)
         if reminderError != nil { reminderError = nil }
     }
 
     /// The day chip: no date, today, tomorrow, next week.
     func cycleReminderDay() {
+        guard !savingReminder else { return }
         Haptics.tick()
         withAnimation(Theme.snappy) { reminderDraft?.cycleDay(now: R5Clock.now(), calendar: .current) }
     }

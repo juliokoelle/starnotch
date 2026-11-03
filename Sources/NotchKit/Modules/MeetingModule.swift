@@ -100,14 +100,14 @@ final class MeetingModule: NotchModule {
     nonisolated private static func shellExportsRecordKey() -> Bool {
         let shell = Process(), out = Pipe()
         shell.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        shell.arguments = ["-lic", #"[ -n "$RESON8_API_KEY" ] && print -n starnotch-reson8-key"#]
+        shell.arguments = ["-lic", RecordKeyProbe.script]
         shell.standardInput = FileHandle.nullDevice
         shell.standardOutput = out
         shell.standardError = FileHandle.nullDevice
         guard (try? shell.run()) != nil else { return false }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         shell.waitUntilExit()
-        return String(decoding: data, as: UTF8.self).contains("starnotch-reson8-key")
+        return String(decoding: data, as: UTF8.self).contains(RecordKeyProbe.marker)
     }
 
     static let noKeyLine = "Live recording needs a Reson8 key in Settings › Tara. Meetings from Jamie, Granola or Wispr Flow still reach Tara after the meeting."
@@ -236,8 +236,9 @@ final class MeetingModule: NotchModule {
         if jamie.automatic, phase.isRunning { return }
         switch phase {
         case .idle:
-            // Cancelled or disconnected: no Jamie line stays behind.
-            if message?.hasPrefix("Jamie: ") == true { message = nil }
+            // Cancelled, disconnected, or no longer held back by Tara's switches: no Jamie line stays behind.
+            if message?.hasPrefix("Jamie: ") == true || (jamieFailure != nil && message == jamieFailure) { message = nil }
+            jamieFailure = nil
         case .connecting:
             message = "Jamie: connecting…"
         case .login:

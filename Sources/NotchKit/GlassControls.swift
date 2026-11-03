@@ -228,3 +228,22 @@ private struct TaraSwitch: View {
         .contentShape(Capsule())
     }
 }
+
+/// The Dashboard's button: a calm capsule, the accent for the one main action. The hit area is
+/// at least 44 pt high.
+struct DashboardButton: View {
+    let title: LocalizedStringKey
+    var symbol: String?
+    var prominent = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .semibold)) }
+                Text(title).font(.system(size: 13, weight: .medium))
+            }
+        }
+        .buttonStyle(DashboardCapsuleStyle(prominent: prominent))
+    }
+}

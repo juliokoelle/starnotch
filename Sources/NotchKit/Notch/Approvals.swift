@@ -440,7 +440,7 @@ struct ApprovalCard: View {
         case "WebFetch": "open"
         case "WebSearch": "search the web for"
         case "apply_patch": "edit"
-        default: "use \(pending.request.tool) on"
+        default: String(format: Localization.string("use %@ on"), pending.request.tool)
         }
     }
 
@@ -463,7 +463,8 @@ struct ApprovalCard: View {
     var body: some View {
         let request = pending.request
         let title = agent?.displayTitle ?? request.cwd.map { ($0 as NSString).lastPathComponent } ?? "A session"
-        let headline = isAskForm ? "\(title) asks" : isQuestion ? "\(request.tool) asks" : "\(title) wants to \(verb)"
+        let headline = isAskForm || isQuestion ? String(format: Localization.string("%@ asks"), isAskForm ? title : request.tool)
+            : String(format: Localization.string("%@ wants to %@"), title, Localization.string(verb))
         NotchCard(padding: 14) {
             HStack(alignment: .top, spacing: 14) {
                 if let agent, let agents {
@@ -554,7 +555,7 @@ struct ApprovalCard: View {
     private func button(_ title: String, key: String, style: Style, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Text(title).font(Theme.font(12.5, .semibold))
+                Text(LocalizedStringKey(title)).font(Theme.font(12.5, .semibold))
                 if !key.isEmpty { Text(key).font(Theme.font(10.5, .medium)).opacity(0.6) }
             }
             .foregroundStyle(style == .primary ? Color.white : style == .secondary ? Theme.accent : Theme.textSecondary)

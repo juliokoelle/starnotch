@@ -1406,6 +1406,8 @@ extension AppDelegate {
         if new.records(.meetings, at: now), !old.records(.meetings, at: before) {
             lastCalendarSnapshot = nil
             writeCalendarSnapshot(calendar.today)
+            // The meeting tools' rows no longer say they're paused; the next look syncs when due.
+            meeting?.jamie.privacyChanged()
         }
         // A source switched off or on: the agents read again without it (or with it), the map and
         // the Dashboard too.

@@ -101,6 +101,21 @@ struct PrompterTests {
         #expect(PrompterWords.keys("50% or fifty percent") == ["50", "%", "or", "50", "%"])
     }
 
+    @Test func numbersTooLargeForAnIntStartANewOne() {
+        // 10^19 doesn't fit in an Int: "billion" can't continue the number, and nothing crashes.
+        #expect(PrompterWords.keys("10000000000 billion") == ["10000000000", "1000000000"])
+        #expect(PrompterText("A market of 10,000,000,000 billion dollars.").keys == ["a", "market", "of", "10000000000", "1000000000", "dollars"])
+        // Digits and words mixed, at Int.max (9223372036854775807) and one step past it.
+        #expect(PrompterWords.keys("9223372036 billion eight hundred fifty four million seven hundred seventy five thousand eight hundred seven")
+            == ["9223372036854775807"])
+        #expect(PrompterWords.keys("9223372036 billion eight hundred fifty four million seven hundred seventy five thousand eight hundred nine")
+            == ["9223372036854775800", "9"])
+        #expect(PrompterWords.keys("9223372036 billion nine hundred million") == ["9223372036000000900", "1000000"])
+        // Large, but it fits.
+        #expect(PrompterWords.keys("9000000000 billion") == ["9000000000000000000"])
+        #expect(PrompterWords.keys("999999999999999 thousand") == ["999999999999999000"])
+    }
+
     @Test func germanNumberWordsBecomeDigits() {
         #expect(PrompterWords.keys("fünfundzwanzig") == ["25"])
         #expect(PrompterWords.keys("zweitausendsechsundzwanzig") == ["2026"])

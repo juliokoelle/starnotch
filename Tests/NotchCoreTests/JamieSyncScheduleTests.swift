@@ -79,6 +79,30 @@ import Testing
         #expect(schedule.nextSync == minutes(172))
     }
 
+    @Test func aSyncHeldBackByTarasSwitchesNoLongerWaitsOnceTheyLetMeetingsIn() {
+        var schedule = JamieSyncSchedule(connected: true, launched: launch)
+        schedule.succeeded(at: minutes(1))
+        schedule.failed(at: minutes(10))  // memory paused: the sidecar said `paused`
+        #expect(schedule.nextSync == minutes(15))
+        #expect(!schedule.shouldSync(.askOpened, now: minutes(12)))
+        schedule.released()  // the pause ended
+        #expect(schedule.failures == 0 && schedule.lastFailure == nil)
+        #expect(schedule.nextSync == minutes(31))  // the half hour again, as before the pause
+        #expect(schedule.shouldSync(.askOpened, now: minutes(12)))
+        schedule.released()  // twice changes nothing
+        #expect(schedule.failures == 0 && schedule.nextSync == minutes(31))
+    }
+
+    @Test func releasingAHoldKeepsTheFailuresBeforeIt() {
+        var schedule = JamieSyncSchedule(connected: true, launched: launch)
+        schedule.failed(at: minutes(1))  // a real failure
+        schedule.failed(at: minutes(6))  // then held back by a pause
+        #expect(schedule.nextSync == minutes(21))
+        schedule.released()
+        #expect(schedule.failures == 1)
+        #expect(schedule.nextSync == minutes(11))  // one failure's backoff, from the last try
+    }
+
     @Test func aBackoffHoldsBackTheMeetingFollowUp() {
         var schedule = JamieSyncSchedule(connected: true, launched: launch, meetingEnds: [minutes(0)])
         schedule.failed(at: minutes(5))

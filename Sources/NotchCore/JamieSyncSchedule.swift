@@ -74,4 +74,11 @@ public struct JamieSyncSchedule: Equatable, Sendable {
         lastFailure = date
         failures += 1
     }
+
+    /// Tara's switches let meetings in again after they held the last sync back (memory paused or
+    /// meetings off). That hold counted as a failed sync; it goes again, so no sync waits for it.
+    public mutating func released() {
+        failures = max(0, failures - 1)
+        if failures == 0 { lastFailure = nil }
+    }
 }

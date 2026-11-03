@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import TestSupport
 @testable import NotchCore
@@ -86,5 +87,25 @@ import TestSupport
         #expect(MeetingCommand.save(title: "Weekly") == Bytes.data(#"{"cmd":"save","title":"Weekly"}"# + "\n"))
         #expect(MeetingCommand.reload == Bytes.data(#"{"cmd":"reload"}"# + "\n"))
         #expect(MeetingCommand.prep(participants: ["Max"]) == Bytes.data(#"{"cmd":"prep","participants":["Max"]}"# + "\n"))
+    }
+
+    /// The Reson8 probe without any rc file: `setup` stands for what ~/.zshrc would do.
+    private func probe(_ setup: String) -> String {
+        let shell = Process(), out = Pipe()
+        shell.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        shell.arguments = ["-f", "-c", setup + RecordKeyProbe.script]
+        shell.environment = ["PATH": "/usr/bin:/bin"]
+        shell.standardOutput = out
+        guard (try? shell.run()) != nil else { return "run failed" }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        shell.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    @Test func theRecordKeyCountsOnlyWhenTheAgentWouldGetIt() {
+        #expect(probe("RESON8_API_KEY=test-key; ") == "")  // set in the shell, not exported
+        #expect(probe("export RESON8_API_KEY=test-key; ") == RecordKeyProbe.marker)  // never the key itself
+        #expect(probe("export RESON8_API_KEY=; ") == "")
+        #expect(probe("") == "")
     }
 }

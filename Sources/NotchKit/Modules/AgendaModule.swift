@@ -160,12 +160,13 @@ final class AgendaModule: NotchModule {
             ?? mockEvents.filter { $0.start >= first && $0.start < end }
     }
 
-    /// Shows another day; 0 goes back to today. An event being typed goes along to that day.
+    /// Shows another day; 0 goes back to today. An event being typed goes along to that day; one
+    /// being saved keeps its day.
     func showDay(_ offset: Int) {
         guard offset != dayOffset else { return }
         Haptics.tick()
         withAnimation(Theme.snappy) {
-            eventDraft?.shift(days: offset - dayOffset, calendar: .current)
+            if !savingEvent { eventDraft?.shift(days: offset - dayOffset, calendar: .current) }
             otherDay = offset == 0 ? [] : (source?.meetings(dayOffset: offset).map(CalEvent.init) ?? [])
             dayOffset = offset
             selectedID = nil
@@ -369,8 +370,9 @@ final class AgendaModule: NotchModule {
     }
 
     /// The form takes the detail side of the day; from the week or the month it opens the day.
+    /// Not while one is being saved.
     func startEvent() {
-        guard canAddEvents else { return }
+        guard canAddEvents, !savingEvent else { return }
         Haptics.tick()
         withAnimation(Theme.snappy) {
             if span != .day {
@@ -391,24 +393,29 @@ final class AgendaModule: NotchModule {
         }
     }
 
+    /// While it saves the form stays as it is: what's added is what was on screen.
     func updateEvent(text: String) {
+        guard !savingEvent else { return }
         eventDraft?.update(text: text, now: now, calendar: .current)
         if eventError != nil { eventError = nil }
         followDraft()
     }
 
     func shiftEvent(days: Int) {
+        guard !savingEvent else { return }
         Haptics.tick()
         withAnimation(Theme.snappy) { eventDraft?.shift(days: days, calendar: .current) }
         followDraft()
     }
 
     func shiftEvent(minutes: Int) {
+        guard !savingEvent else { return }
         Haptics.tick()
         withAnimation(Theme.snappy) { eventDraft?.shift(minutes: minutes, calendar: .current) }
     }
 
     func nextEventLength() {
+        guard !savingEvent else { return }
         Haptics.tick()
         withAnimation(Theme.snappy) { eventDraft?.nextLength() }
     }
@@ -1501,6 +1508,7 @@ private struct EventComposer: View {
                     .font(Theme.font(14.5, .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .focused($focused)
+                    .disabled(module.savingEvent)
                     .onSubmit { module.saveEvent() }
                     .simultaneousGesture(TapGesture().onEnded { NotchPanel.takeKeyboard() })
                     .padding(.horizontal, 10)

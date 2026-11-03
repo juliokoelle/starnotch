@@ -269,11 +269,14 @@ class Agent:
                  today: dt.date | None = None, captures: Path | None = None, connectors: Path | None = None,
                  brain: str | None = None, usage: Path | None = None, gap: float = MEETING_GAP,
                  clock: Callable[[], float] | None = None, privacy: Path | None = None,
-                 vault: vault_index.VaultIndex | None = None, own: vault_index.VaultIndex | None = None):
+                 vault: vault_index.VaultIndex | None = None, own: vault_index.VaultIndex | None = None,
+                 follow: Callable[[vault_index.VaultIndex | None], vault_index.VaultIndex | None] | None = None):
         self._memory = memory
         self.vault = vault  # the whole notes vault, searched per question
+        self.follow = follow  # the vault configured now, asked before each question; None keeps `vault`
         self.own = own  # the visible Starnotch folder (Inbox.md, documents handed to Tara), searched the same way
         self.vault_updated = float("-inf")  # self.clock() of the last vault index update
+        self.wiki_due = False  # the vault changed: the wiki is built again from the new one before it's used
         self.privacy_path = privacy  # None: privacy.json in the app's folder (or STARNOTCH_PRIVACY)
         self.ledger = ledger.Ledger(usage) if usage else None
         self.captures_path = captures
@@ -451,6 +454,7 @@ class Agent:
             return {"type": "error", "message": "ask: empty question"}
         notes = self.notes()
         seen = self._screen(screen)
+        self._follow_vault()
         found = self._vault_hits(question)
         known = self._wiki(question)
         result, brain = None, "rules"
@@ -507,6 +511,19 @@ class Agent:
             text = NO_PICTURE[_language(question)] + text
         return {"type": "answer", "question": question, "text": text, "sources": sources, "brain": brain}
 
+    def _follow_vault(self) -> None:
+        """The vault the app or config.toml names now: a switched or removed one is never searched again. A new one is
+        indexed before its first search and its wiki built again."""
+        if self.follow is None:
+            return
+        try:
+            vault = self.follow(self.vault)
+        except Exception as error:  # an unreadable vault must not cost the answer, nor leave the old one searched
+            print(f"vault index: {error}", file=sys.stderr)
+            vault = None
+        if vault is not self.vault:
+            self.vault, self.vault_updated, self.wiki_due = vault, float("-inf"), True
+
     def _vault_hits(self, question: str) -> list[linked.Item]:
         """The notes of the whole vault that match the question, from the full-text index (brought up to date at most
         every VAULT_REFRESH seconds); nothing while notes are off or during a question about one day."""
@@ -532,8 +549,11 @@ class Agent:
             screen = self.privacy.shares("screen")
             stale = wiki.age(self.wiki_folder)
             # The screen's blocks come from the app; this build keeps what it had, or drops it while screen is off.
-            pages = wiki.build(self.vault, self.memory, self.wiki_folder, blocks=None if screen else []) \
-                if stale is None or stale > WIKI_REFRESH else wiki.load(self.wiki_folder)
+            if stale is None or stale > WIKI_REFRESH or self.wiki_due:
+                pages = wiki.build(self.vault, self.memory, self.wiki_folder, blocks=None if screen else [])
+                self.wiki_due = False
+            else:
+                pages = wiki.load(self.wiki_folder)
             return wiki.as_context(wiki.lookup(pages if screen else wiki.without_screen(pages), question))
         except Exception as error:  # a broken wiki must not cost the answer
             print(f"wiki: {error}", file=sys.stderr)
@@ -1226,10 +1246,11 @@ def main(argv: list[str] | None = None) -> int:
     captures = Path(args.captures).expanduser() if args.captures else None
     connectors = Path(args.connectors).expanduser() if args.connectors else None
     usage = Path(args.usage).expanduser() if args.usage else None
-    # Only when the app runs it with the connectors: the notes vault (config.toml's or the app's), searched per question.
-    vault = vault_index.from_config() if connectors else None
+    # Only when the app runs it with the connectors: the notes vault (config.toml's or the app's), searched per question
+    # and looked up again before each one, so a vault picked, switched or removed in the app counts at once.
     own = vault_index.own() if connectors else None
-    agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage, _gap(args.meeting_gap), vault=vault, own=own)
+    agent = Agent(memory, llm, emit, today, captures, connectors, brain, usage, _gap(args.meeting_gap), own=own,
+                  follow=vault_index.follow if connectors else None)
     emit({"type": "ready", "meetings": len(memory.meetings), "memory": str(memory.folder),
           "brain": brain, "model": getattr(llm, "model", None), "errors": memory.errors})
     run(agent, sys.stdin, captures if args.watch_captures else None)

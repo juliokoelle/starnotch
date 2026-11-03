@@ -177,20 +177,23 @@ public enum AppleNotesScript {
     end run
     """
 
+    /// The error number `create` stops with when the folder picked for captures is gone.
+    public static let folderGone = 1001
+
     /// A new note (arguments: the folder's id, "" for Notes' default folder; the body as HTML);
-    /// answers its id. A folder that is gone falls back to the default one.
+    /// answers its id. A folder that is gone is an error, never the default folder: that can be
+    /// in another account, one that syncs.
     public static let create = argHandler + "\n\n" + """
     on run argv
         set folderID to arg(argv, 1)
         set theBody to arg(argv, 2)
         tell application "Notes"
-            set target to missing value
-            if folderID is not "" then
-                try
-                    if exists folder id folderID then set target to folder id folderID
-                end try
+            if folderID is "" then
+                set target to default folder of default account
+            else
+                if not (exists folder id folderID) then error "The folder for captures is no longer in Notes." number \(folderGone)
+                set target to folder id folderID
             end if
-            if target is missing value then set target to default folder of default account
             set madeNote to make new note at target with properties {body:theBody}
             return id of madeNote
         end tell

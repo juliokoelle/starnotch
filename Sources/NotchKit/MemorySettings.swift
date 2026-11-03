@@ -45,8 +45,7 @@ struct MemorySettings: View {
             }
             Spacer(minLength: 12)
             if canDelete(source) {
-                Button("Delete…") { deleting = source }
-                    .controlSize(.regular)
+                DashboardButton(title: "Delete…") { deleting = source }
                     .help(Text("Delete what Tara remembers from this source"))
             }
             Toggle("", isOn: Binding(get: { on }, set: { value in
@@ -137,7 +136,7 @@ struct MemorySettings: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
-            Button(apps.isEmpty ? "Choose apps…" : "Change…", action: openSetup)
+            DashboardButton(title: apps.isEmpty ? "Choose apps…" : "Change…", action: openSetup)
         }
         .padding(.vertical, 2)
     }
@@ -159,15 +158,25 @@ private struct PauseRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
+            // The Dashboard's own capsule, like the buttons around it. The system pop-up drew its
+            // label white on a white box in a light window.
             if paused {
-                Button("Resume") { state.settings.privacy.resume() }
+                DashboardButton(title: "Resume") { state.settings.privacy.resume() }
                     .keyboardShortcut(.defaultAction)
             } else {
-                Menu("Pause") {
+                Menu {
                     ForEach(MemoryPause.allCases, id: \.self) { length in
                         Button(LocalizedStringKey(length.title)) { state.settings.privacy.pause(length, now: Date()) }
                     }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Pause").font(.system(size: 13, weight: .medium))
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    }
                 }
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .buttonStyle(DashboardCapsuleStyle())
                 .fixedSize()
             }
         }
@@ -200,7 +209,7 @@ private struct IgnoreList: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)
-                Button("Add an app…", action: pick)
+                DashboardButton(title: "Add an app…", action: pick)
             }
             ForEach(state.settings.privacy.ignoredApps, id: \.bundleID) { app in
                 HStack(spacing: 10) {

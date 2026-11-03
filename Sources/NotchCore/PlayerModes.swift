@@ -63,8 +63,11 @@ public struct PlayerModes: Equatable, Sendable {
     }
 
     /// Reads the modes; with `toggle`, flips one in the player first. One round trip, and the
-    /// reply is what the player ended up with (also when the button showed an old state).
-    public static func script(for source: PlayerStatus.Source, toggle: Control? = nil) -> String {
+    /// reply is what the player ended up with (also when the button showed an old state). The
+    /// favorite only flips on `track`, the song the click was for: macOS's dialog can be up while
+    /// the next one starts, and then nothing changes. Without `track` it doesn't flip at all.
+    public static func script(for source: PlayerStatus.Source, toggle: Control? = nil,
+                              track: (title: String, artist: String)? = nil) -> String {
         switch source {
         case .spotify:
             let change = switch toggle {
@@ -92,11 +95,18 @@ public struct PlayerModes: Equatable, Sendable {
                     set song repeat to off
                 end if
                 """
-            case .favorite: """
-                try
-                    set «class pLov» of current track to not («class pLov» of current track)
-                end try
-                """
+            case .favorite:
+                // `t` is that song itself, not whatever plays a moment later.
+                if let track {
+                    """
+                    try
+                        set t to current track
+                        if name of t is \(literal(track.title)) and artist of t is \(literal(track.artist)) then set «class pLov» of t to not («class pLov» of t)
+                    end try
+                    """
+                } else {
+                    ""
+                }
             case nil: ""
             }
             return """
@@ -111,6 +121,11 @@ public struct PlayerModes: Equatable, Sendable {
             end tell
             """
         }
+    }
+
+    /// `text` as an AppleScript string, quotes and backslashes escaped: a title can't end it early.
+    static func literal(_ text: String) -> String {
+        "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
     /// Whether the app may send the player Apple Events, from `AEDeterminePermissionToAutomateTarget`

@@ -24,8 +24,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
@@ -133,9 +134,13 @@ class Library:
     def __init__(self, memory_dir: Path | None = None, captures: Path | None = None, connectors: Path | None = None,
                  claude_projects: Path | None = None, privacy_file: Path | None = None,
                  now: dt.datetime | None = None, calendar: Path | None = None,
-                 vault: vault_index.VaultIndex | None = None):
+                 vault: vault_index.VaultIndex | None = None,
+                 follow: Callable[[vault_index.VaultIndex | None], vault_index.VaultIndex | None] | None = None):
         self.memory_dir = memory_dir or DEFAULT_DIR
-        self.vault = vault  # the whole notes vault's index; build() sets the one config.toml or the app names
+        self.vault = vault  # the whole notes vault's index; build() follows the one config.toml or the app names
+        self.follow = follow  # the vault configured now, asked before each use; None keeps `vault`
+        self.wiki_due = False  # the vault changed: the wiki is built again from the new one before it's used
+        self.vault_lock = threading.Lock()  # tools run on worker threads
         self.captures_path = captures or quick.QUEUE
         self.connectors_path = connectors or linked.FOLDER
         self.claude_projects = claude_projects or CLAUDE_PROJECTS
@@ -153,6 +158,19 @@ class Library:
 
     def privacy(self) -> switches.Privacy:
         return switches.load(self.privacy_file)
+
+    def notes_vault(self) -> vault_index.VaultIndex | None:
+        """The vault's index; with `follow`, the vault named now, so a switched or removed one is never read again."""
+        if self.follow is None:
+            return self.vault
+        with self.vault_lock:
+            try:
+                vault = self.follow(self.vault)
+            except Exception:  # an unreadable vault must not cost the other sources, nor leave the old one read
+                vault = None
+            if vault is not self.vault:
+                self.vault, self.wiki_due = vault, True
+            return vault
 
     def meetings(self, p: switches.Privacy) -> list[Meeting]:
         return Memory(self.memory_dir).meetings if p.shares("meetings") else []
@@ -230,10 +248,11 @@ def search(lib: Library, query: str, sources: list[str] | None = None, limit: in
             score = _score(words, c.text)
             if score:
                 hits.append((score, c.day, {**_capture_source(c), "text": _short(c.text)}))
-    if words and "notes" in asked and lib.vault is not None and p.shares("notes"):
+    vault = lib.notes_vault()
+    if words and "notes" in asked and vault is not None and p.shares("notes"):
         try:
-            lib.vault.update()
-            found = lib.vault.search(query, limit=max(1, min(limit, 30)))
+            vault.update()
+            found = vault.search(query, limit=max(1, min(limit, 30)))
         except Exception:  # a broken index must not cost the other sources
             found = []
         for rank, h in enumerate(found):
@@ -338,7 +357,7 @@ def today_view(lib: Library) -> dict[str, Any]:
 
 def build(lib: Library | None = None) -> MCPServer:
     """The server; `lib` is the seam for tests."""
-    library = lib or Library(vault=vault_index.from_config())
+    library = lib or Library(follow=vault_index.follow)
     server = MCPServer(
         "starnotch-memory",
         instructions=("Tara's memory from Starnotch, on the user's Mac: their meetings (transcripts, decisions, "

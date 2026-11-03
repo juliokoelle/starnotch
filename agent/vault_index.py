@@ -20,6 +20,10 @@ def from_config(*args: Any, **kwargs: Any) -> VaultIndex | None:
     return None
 
 
+def follow(*args: Any, **kwargs: Any) -> VaultIndex | None:
+    return None
+
+
 def own(*args: Any, **kwargs: Any) -> VaultIndex | None:
     return None
 

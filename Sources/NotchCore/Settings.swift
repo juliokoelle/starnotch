@@ -457,7 +457,8 @@ public struct SwitcherSettings: Codable, Equatable, Sendable {
             remindersInToday: (try? c.decodeIfPresent(Bool.self, forKey: .remindersInToday)) ?? false,
             musicModes: (try? c.decodeIfPresent(Bool.self, forKey: .musicModes)) ?? true,
             cameraCheck: (try? c.decodeIfPresent(Bool.self, forKey: .cameraCheck)) ?? true,
-            timeToLeave: (try? c.decodeIfPresent(Bool.self, forKey: .timeToLeave)) ?? true,
+            // Saved before Time to leave: it stays off, so no place goes to Apple Maps unasked.
+            timeToLeave: (try? c.decodeIfPresent(Bool.self, forKey: .timeToLeave)) ?? false,
             travelMode: (try? c.decodeIfPresent(TravelMode.self, forKey: .travelMode)) ?? .driving,
             shelfActions: (try? c.decodeIfPresent(Bool.self, forKey: .shelfActions)) ?? true,
             shelfKeeps: (try? c.decodeIfPresent(Bool.self, forKey: .shelfKeeps)) ?? true,

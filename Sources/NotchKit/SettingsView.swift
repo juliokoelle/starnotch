@@ -100,7 +100,7 @@ struct SettingsView: View {
 
             if shows(.agents) {
             Section {
-                ProviderSwitches(state: state)
+                ProviderSwitches(state: state, setup: setup)
             } header: {
                 Text("Providers")
             } footer: {
@@ -1295,6 +1295,8 @@ private struct ColorwayPicker: View {
 /// One switch per agent tool found on this Mac, and the visible setup for Codex approvals.
 private struct ProviderSwitches: View {
     @Bindable var state: AppState
+    /// For whether Codex runs the approvals hook.
+    var setup: SetupCenter?
     @State private var copied = false
 
     /// What each tool's switch covers.
@@ -1337,6 +1339,7 @@ private struct ProviderSwitches: View {
             } label: {
                 Text(setup.title)
                 Text(setup.note ?? "")
+                if let center = self.setup { CodexHookStatusLine(center: center, showsWhere: false) }
             }
         }
     }

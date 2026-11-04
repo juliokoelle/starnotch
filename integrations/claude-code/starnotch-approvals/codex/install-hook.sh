@@ -6,9 +6,10 @@
 #   ./install-hook.sh --remove   # remove (keeps a backup too)
 #
 # Copies scripts/ask-notch.sh to ~/.codex/hooks/starnotch-ask-notch.sh, so the hook doesn't depend
-# on where this folder lives. Other hooks in the file stay as they are. Codex runs new hooks only
-# after you trust them: open /hooks in Codex once. Without the notch running, the hook prints
-# nothing and Codex asks as usual.
+# on where this folder lives. Other hooks in the file stay as they are, and a second run leaves
+# ours in place. Codex runs new hooks only after you trust them: in the Codex app Settings › Hooks
+# › Asking in the notch › Trust, and switch it on; in the terminal /hooks. Without the notch
+# running, the hook prints nothing and Codex asks as usual.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 codex="${CODEX_HOME:-$HOME/.codex}"
@@ -34,25 +35,37 @@ data = {"hooks": {}}
 if os.path.exists(path) and os.path.getsize(path) > 0:
     with open(path) as f:
         data = json.load(f)
+before = json.dumps(data, sort_keys=True)
 hooks = data.setdefault("hooks", {})
-groups = [g for g in hooks.get("PermissionRequest", [])
-          if not any("starnotch-ask-notch.sh" in h.get("command", "") for h in g.get("hooks", []))]
+groups = hooks.get("PermissionRequest", [])
+ours = [i for i, g in enumerate(groups)
+        if any("starnotch-ask-notch.sh" in h.get("command", "") for h in g.get("hooks", []))]
+# Codex keys its trust by the hook's place (group and handler index) and a hash of its
+# definition: ours keeps its place and its exact fields, or Codex asks the user again.
+keep = ours[0] if ours and mode != "--remove" else None
+groups = [g for i, g in enumerate(groups) if i == keep or i not in ours]
 if mode != "--remove":
-    groups.append({"hooks": [{"type": "command", "command": '"%s" codex' % target,
-                              "timeout": 75, "statusMessage": "Asking in the notch"}]})
+    group = {"hooks": [{"type": "command", "command": '"%s" codex' % target,
+                        "timeout": 75, "statusMessage": "Asking in the notch"}]}
+    if keep is None:
+        groups.append(group)
+    else:
+        groups[keep] = group
 if groups:
     hooks["PermissionRequest"] = groups
 else:
     hooks.pop("PermissionRequest", None)
-with open(path + ".tmp", "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-os.replace(path + ".tmp", path)
+# Nothing changed: the file stays exactly as it is.
+if json.dumps(data, sort_keys=True) != before:
+    with open(path + ".tmp", "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(path + ".tmp", path)
 PY
 
 if [ "$mode" = "--remove" ]; then
     rm -f "$target"
     echo "Removed the Starnotch hook from $hooks"
 else
-    echo "Added the Starnotch hook to $hooks. Open /hooks in Codex once to trust it."
+    echo "Added the Starnotch hook to $hooks. Trust it once in Codex: in the app Settings › Hooks › Asking in the notch › Trust, and switch it on; in the terminal /hooks."
 fi

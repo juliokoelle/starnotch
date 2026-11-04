@@ -84,6 +84,7 @@ enum MeetingAgentSetup {
         try? FileManager.default.createDirectory(at: Brand.supportFolder, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: keysFile.path, contents: Data(text.utf8),
                                        attributes: [.posixPermissions: 0o600])
+        ScreenMaskKeys.changed()
     }
 
     /// The environment for the agent's processes: the app's own, the brain, and the keys under a prefix,

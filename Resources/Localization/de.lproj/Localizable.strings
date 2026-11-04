@@ -112,7 +112,13 @@
 "Open at login" = "Beim Anmelden öffnen";
 "Music and Spotify control" = "Musik- und Spotify-Steuerung";
 "Approve Claude Code's requests from the notch" = "Anfragen von Claude Code in der Notch freigeben";
-"Approve Codex from the notch; trust it once in Codex with /hooks" = "Codex in der Notch freigeben; einmal in Codex mit /hooks vertrauen";
+"Approve Codex from the notch; Codex asks you to trust it once" = "Codex in der Notch freigeben; Codex bittet dich einmal, dem Hook zu vertrauen";
+"Approve it in Codex › Settings › Hooks" = "In Codex › Settings › Hooks freigeben";
+"Switched off in Codex" = "In Codex ausgeschaltet";
+"In the Codex app: Settings › Hooks › Asking in the notch › Trust, and switch it on. In the terminal: /hooks." = "In der Codex-App: Settings › Hooks › Asking in the notch › Trust, dann einschalten. Im Terminal: /hooks.";
+"Codex can't ask in the notch yet" = "Codex kann noch nicht in der Notch fragen";
+"Codex can't ask in the notch" = "Codex kann nicht in der Notch fragen";
+"Switch it on in Codex › Settings › Hooks" = "In Codex › Settings › Hooks einschalten";
 "Plan limits and context in the notch; your status line keeps running" = "Planlimits und Kontext in der Notch; deine Statuszeile läuft weiter";
 "Any agent can show you a line or ask you yes or no" = "Jeder Agent kann dir eine Zeile zeigen oder Ja oder Nein fragen";
 "Terminal commands that run 30 s or longer show in the notch" = "Terminal-Befehle ab 30 s erscheinen in der Notch";
@@ -762,6 +768,7 @@
 "Loading" = "Wird geladen";
 "Nothing yet" = "Noch nichts";
 "Meeting with %@" = "Meeting mit %@";
+"Not set up" = "Nicht eingerichtet";
 "Following %@" = "Folgt %@";
 "Reading %@" = "Liest %@";
 "An Obsidian vault or any Markdown folder: your tasks and today's note in the notch" = "Ein Obsidian-Vault oder ein beliebiger Markdown-Ordner: deine Aufgaben und die heutige Notiz in der Notch";

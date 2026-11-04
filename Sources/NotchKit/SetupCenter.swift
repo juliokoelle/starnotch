@@ -28,6 +28,10 @@ final class SetupCenter {
     @ObservationIgnored weak var state: AppState?
     /// Switched off before its rule is removed.
     @ObservationIgnored weak var lidAwake: LidAwakeController?
+    /// Whether Codex runs the approvals hook: it waits until the user trusts it in Codex.
+    private(set) var codexHook: CodexHookTrust.Status = .notInstalled
+    /// When a Codex approval last came through the hook (proof that Codex runs it).
+    static let codexRequestKey = "setup.codexHookRequest"
 
     init(state: AppState?) {
         self.state = state
@@ -46,6 +50,7 @@ final class SetupCenter {
         // Sharing Tara's memory with an AI app is a choice of its own: off until chosen too.
         selected = Set(offered.filter { isAvailable($0) && !isSetUp($0) && !Self.moreAgentItems.contains($0)
                 && !SetupItem.memoryItems.contains($0) })
+        Task { await checkCodexHook() }
     }
 
     static func installed(_ bundleID: String) -> Bool {
@@ -206,6 +211,7 @@ final class SetupCenter {
                     switch outcome {
                     case .success(let entry):
                         ledger.record(entry)
+                        if item == .codexHook { await checkCodexHook() }
                         result = .done(entry.note)
                     case .failure(let error):
                         result = .failed(String(describing: error))
@@ -363,12 +369,31 @@ final class SetupCenter {
             switch outcome {
             case .success:
                 ledger.forget(item)
+                if item == .codexHook { await checkCodexHook() }
                 status[item] = .idle
             case .failure(let error):
                 status[item] = .failed(String(describing: error))
             }
             try? ledger.save(paths.ledgerFile)
         }
+    }
+
+    // MARK: Codex hook trust
+
+    /// Reads Codex's hooks.json and config.toml again (off the main thread).
+    func checkCodexHook() async {
+        guard !preview else { return }
+        let home = paths.codexHome
+        let request = UserDefaults.standard.object(forKey: Self.codexRequestKey) as? Date
+        let status = await Task.detached(priority: .utility) { CodexHookTrust.status(codexHome: home, lastRequest: request) }.value
+        if status != codexHook { codexHook = status }
+    }
+
+    /// A Codex approval came through the hook: Codex runs it.
+    func noteCodexRequest() {
+        guard !preview else { return }
+        UserDefaults.standard.set(Date(), forKey: Self.codexRequestKey)
+        Task { await checkCodexHook() }
     }
 
     // MARK: Keep awake with the lid closed
@@ -409,16 +434,19 @@ final class SetupCenter {
     func resetForPreview() {
         preview = true
         ledger = SetupLedger()
+        codexHook = .notInstalled
         selected = Set(offered).subtracting(Self.moreAgentItems).subtracting(SetupItem.memoryItems)
     }
 
     /// Recordings: a page as it looks after setting up.
     func usePreviewLedger() {
         preview = true
+        codexHook = .active
         let now = Date()
         ledger = SetupLedger(entries: [
             .init(item: .claudePlugin, at: now, previous: SetupPaths.marketplaceRepo, note: "Marketplace: juliokoelle/starnotch. Restart running sessions."),
-            .init(item: .codexHook, at: now, backup: "~/.codex/hooks.json.bak-starnotch-20261024-101500", note: "Trust it once in Codex: /hooks"),
+            .init(item: .codexHook, at: now, backup: "~/.codex/hooks.json.bak-starnotch-20261024-101500",
+                  note: "Trust it once in Codex: Settings › Hooks › Asking in the notch › Trust (in the terminal: /hooks)"),
             .init(item: .statusLine, at: now, backup: "backups/claude-settings.json-20261024-101500", previous: "{}", note: "Your status line keeps running after the bridge."),
             .init(item: .shellHook, at: now, backup: "backups/zshrc-20261024-101500", note: "New terminal windows pick it up."),
             .init(item: .launchAtLogin, at: now),
@@ -455,7 +483,10 @@ struct SetupItemRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
-                if let status = center.status[item] {
+                if item == .codexHook, setUp, center.status[item] != .running {
+                    // Codex runs the hook only once it is trusted there: what it says now.
+                    CodexHookStatusLine(center: center)
+                } else if let status = center.status[item] {
                     switch status {
                     case .done(let note):
                         Label(note ?? Localization.string("Done"), systemImage: "checkmark.circle.fill")
@@ -489,7 +520,7 @@ struct SetupItemRow: View {
     static func summary(_ item: SetupItem) -> String {
         switch item {
         case .claudePlugin: "Approve Claude Code's requests from the notch"
-        case .codexHook: "Approve Codex from the notch; trust it once in Codex with /hooks"
+        case .codexHook: "Approve Codex from the notch; Codex asks you to trust it once"
         case .statusLine: "Plan limits and context in the notch; your status line keeps running"
         case .mcpServer: "Any agent can show you a line or ask you yes or no"
         case .shellHook: "Terminal commands that run 30 s or longer show in the notch"
@@ -505,6 +536,35 @@ struct SetupItemRow: View {
         case .copilotApprovals: "Copilot's requests ask in the notch first"
         case .memoryClaudeDesktop, .memoryClaudeCode, .memoryCursor, .memoryChatGPT:
             "Can search your meetings, captures and notes, read only"
+        }
+    }
+}
+
+/// Whether Codex runs the approvals hook, and where to trust it while it doesn't. Read again
+/// every few seconds while on screen: the user trusts it in Codex meanwhile.
+struct CodexHookStatusLine: View {
+    let center: SetupCenter
+    /// The place to trust it, when the row around doesn't say it already.
+    var showsWhere = true
+
+    var body: some View {
+        let status = center.codexHook
+        VStack(alignment: .leading, spacing: 2) {
+            if status != .notInstalled {
+                Label(Localization.string(status.title), systemImage: status == .active ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(status == .active ? Theme.ok : Theme.waiting)
+            }
+            if showsWhere && status.isBlocked {
+                Text(Localization.string(CodexHookTrust.whereToTrust)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(.system(size: 13.5))
+        .task {
+            while !Task.isCancelled {
+                await center.checkCodexHook()
+                try? await Task.sleep(for: .seconds(3))
+            }
         }
     }
 }
@@ -527,6 +587,7 @@ struct SetupLedgerList: View {
                     Text(Localization.string(entry.item.title))
                     Text(lines(entry)).font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if entry.item == .codexHook { CodexHookStatusLine(center: center) }
                     if case .failed(let why) = center.status[entry.item] {
                         Text(why).font(.callout).foregroundStyle(.orange)
                     }
@@ -548,7 +609,8 @@ struct SetupLedgerList: View {
 
     private func lines(_ entry: SetupLedger.Entry) -> String {
         var parts = ["Since \(entry.at.formatted(date: .abbreviated, time: .shortened))"]
-        if let note = entry.note { parts.append(note) }
+        // Codex's line says where to trust the hook, from what Codex says now (older notes said /hooks only).
+        if let note = entry.note, entry.item != .codexHook { parts.append(note) }
         if let backup = entry.backup { parts.append("Backup: \((backup as NSString).abbreviatingWithTildeInPath)") }
         return parts.joined(separator: " · ")
     }

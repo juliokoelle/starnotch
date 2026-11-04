@@ -37,15 +37,34 @@ public enum ScreenMask {
 
     /// The text with private key blocks, seed phrases, card numbers (Luhn-checked), IBANs
     /// (checksum-checked), keys and tokens of common shapes, one-time codes near words like
-    /// "code" and passwords after a label replaced. Line breaks are kept.
-    public static func mask(_ text: String) -> Result {
+    /// "code" and passwords after a label replaced. Line breaks are kept. The keys this Mac already
+    /// holds (`known`) go first, whatever their shape; gitleaks' rules run after the known prefixes,
+    /// each only when the text holds one of its keywords.
+    public static func mask(_ text: String, known: KnownSecrets = .current) -> Result {
         var counts: [Kind: Int] = [:]
         var out = text
-        for rule in rules {
+        let upstreamRules = upstream(for: text).map { Rule(kind: .key, find: secrets($0.rule, $0.regex)) }
+        for rule in (known.isEmpty ? [] : [Rule(kind: .key, find: known.ranges)]) + rules + upstreamRules + laterRules {
             out = rule.apply(out) { counts[rule.kind, default: 0] += 1 }
         }
         return Result(text: out, counts: counts)
     }
+
+    /// Whether a page's address is one for API keys or tokens (`/settings/keys`, `/api-keys`,
+    /// `/tokens`, `/credentials`, anything under `/security/` …): such a page isn't read at all, so
+    /// a key it shows once never has to be caught by a rule. Only http and https addresses.
+    public static func isKeyPage(_ url: String) -> Bool {
+        guard let parts = URLComponents(string: url), let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https"
+        else { return false }
+        let place = parts.percentEncodedPath + (parts.percentEncodedFragment.map { "#" + $0 } ?? "")
+        return keyPagePattern.firstMatch(in: place, range: NSRange(location: 0, length: (place as NSString).length)) != nil
+    }
+
+    /// A whole path segment (or a fragment, as in `#/security_credentials`), `/settings/api` (Supabase,
+    /// Linear) and anything under `/security/`.
+    private static let keyPagePattern = regex(#"(?i)[/#](?:keys|api[\-_]?keys?|(?:api|access|personal[\-_]access|auth)[\-_]?tokens|tokens"#
+                                              + #"|credentials|security[\-_]credentials|secrets|environment-variables|my-integrations)(?:[/?#]|$)"#
+                                              + #"|/settings/api(?:[\-_/?#]|$)|/security/"#)
 
     // MARK: Rules, in order
 
@@ -134,8 +153,12 @@ public enum ScreenMask {
 
     /// Words that put a password right after them ("Password: hunter2", "Passwort = …").
     static let passwordLabels = "password|passwort|kennwort|passwd|pwd|passcode|pin|mot de passe|contraseña"
-    /// Words that name a secret in a label, also inside a longer name (`AWS_SECRET_ACCESS_KEY`, `SecretAccessKey`).
+    /// Words that name a secret in a label, also inside a longer name (`AWS_SECRET_ACCESS_KEY`, `SecretAccessKey`,
+    /// `API-Schlüssel`, `Zugangsschlüssel`, `DatenbankPasswort`): English, German, and the key words of
+    /// French, Spanish, Italian, Portuguese and Dutch.
     static let secretLabels = #"api[_\-. ]?key|secret|token|access[_\-. ]?key|client[_\-. ]?secret|private[_\-. ]?key|auth[_\-. ]?key|credential|session[_\-. ]?key"#
+        + #"|schlüssel|geheim|zugangsdaten|passw(?:or)?d|passwort|kennwort"#
+        + #"|cl[eé] api|cl[eé] secr[eè]te|clave api|clave secreta|chiave api|chiave segreta|chave api|sleutel"#
     /// Words that make a short number nearby a one-time code.
     static let codeWords = "code|codes|otp|tan|2fa|mfa|verification|verify|bestätigungscode|sicherheitscode|einmalcode|anmeldecode|bestätigung|one-time|einmal|passcode|sign[ \\-]?in|log[ \\-]?in|anmelden|anmeldung"
     /// Words after "password is" that describe it instead of being it ("Your password is incorrect").
@@ -178,12 +201,38 @@ public enum ScreenMask {
         Rule(kind: .key, regex: regex(#"\bhf_[A-Za-z0-9]{30,}"#)),
         Rule(kind: .key, regex: regex(#"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"#)),
         Rule(kind: .key, regex: regex(#"(?i)\bbearer\s+([A-Za-z0-9._~+/\-]{16,}=*)"#), group: 1),
+        // More prefixes, each from the provider's documented or detected shape (gitleaks, TruffleHog,
+        // Google's OSV-SCALIBR, the Stripe CLI). A rare prefix takes any long tail; a common one only
+        // its exact shape. Brevo's API and SMTP keys (64 hex, a dash, 16 more):
+        Rule(kind: .key, regex: regex(#"\bx(?:keysib|smtpsib)-[A-Za-z0-9_\-]{20,}"#)),
+        // Supabase's secret and personal keys (sb_publishable_ is public by design and stays):
+        Rule(kind: .key, regex: regex(#"\bsb_secret_[A-Za-z0-9_\-]{31,}"#)),
+        Rule(kind: .key, regex: regex(#"\bsbp_[a-z0-9]{40}(?![A-Za-z0-9_])"#)),
+        // Stripe's webhook signing secrets:
+        Rule(kind: .key, regex: regex(#"\bwhsec_[A-Za-z0-9+/]{32,}=*"#)),
+        // Resend: re_, 8 characters, an underscore, 24 more; only with a capital or a digit after the
+        // prefix, so a snake_case name of that length stays.
+        Rule(kind: .key, regex: regex(#"\bre_[1-9A-HJ-NP-Za-km-z]{8}_[1-9A-HJ-NP-Za-km-z]{24}(?![A-Za-z0-9_])"#),
+             accept: { $0.dropFirst(3).contains { $0.isUppercase || $0.isNumber } }),
+        // Groq, xAI, Replicate, Google's OAuth client secrets, LangSmith, ElevenLabs.
+        Rule(kind: .key, regex: regex(#"\bgsk_[A-Za-z0-9]{20,}"#)),
+        Rule(kind: .key, regex: regex(#"\bxai-[A-Za-z0-9_]{20,}"#)),
+        Rule(kind: .key, regex: regex(#"\br8_[A-Za-z0-9_\-]{20,}"#)),
+        Rule(kind: .key, regex: regex(#"\bGOCSPX-[A-Za-z0-9_\-]{20,}"#)),
+        Rule(kind: .key, regex: regex(#"\blsv2_(?:pt|sk)_[a-f0-9]{32}_[a-f0-9]{10}(?![A-Za-z0-9_])"#)),
+        Rule(kind: .key, regex: regex(#"\bsk_[a-f0-9]{48}(?![A-Za-z0-9_])"#)),
+    ]
+
+    // gitleaks' rules (`upstream`) run here, between the known prefixes and the labels.
+
+    private static let laterRules: [Rule] = [
         // A labelled secret: only a value with letters and digits mixed ("token: expired" stays).
         Rule(kind: .key,
              regex: regex(#"(?i)(?<![A-Za-z0-9])[A-Za-z0-9_.\-]*?(?:"# + secretLabels + #")[A-Za-z0-9_.\-]*["']?\s*[:=]\s*["']?([A-Za-z0-9._~+/=\-]{12,})"#),
              group: 1, accept: mixed),
-        // … or a label alone with the value on the next line.
-        Rule(kind: .key, regex: regex(#"(?im)^[ \t]*(?:"# + secretLabels + #")[ \t]*:?[ \t]*\n[ \t]*([A-Za-z0-9._~+/=\-]{12,})[ \t]*$"#),
+        // … or a label alone with the value on the next line ("API-Schlüssel", "Your API key").
+        Rule(kind: .key, regex: regex(#"(?im)^[ \t]*(?:\S+[ \t]+){0,3}?[A-Za-z0-9_.\-]*?(?:"# + secretLabels
+                                      + #")[A-Za-z0-9_.\-]*[ \t]*:?[ \t]*\n[ \t]*([A-Za-z0-9._~+/=\-]{12,})[ \t]*$"#),
              group: 1, accept: mixed),
         // IBAN: country, check digits, then groups; only with a valid checksum.
         Rule(kind: .iban, regex: regex(#"(?i)\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b"#), accept: isIBAN, trim: .end),
@@ -205,7 +254,54 @@ public enum ScreenMask {
         // Anything that looks like a key without a label: 40 or more characters of upper and lower
         // case letters and digits (an AWS secret key on its own, a key file's body line).
         Rule(kind: .key, regex: regex(#"(?<![A-Za-z0-9+/=_\-])[A-Za-z0-9+/=_\-]{40,}(?![A-Za-z0-9+/=_\-])"#), accept: looksRandom),
+        // The net for keys of any other shape: 32 or more characters that look random (`looksLikeKey`).
+        // A slash, a dot or a colon ends a candidate, so only the random part of a URL or a file name goes.
+        Rule(kind: .key, regex: regex(#"(?<![A-Za-z0-9+_\-])[A-Za-z0-9+_\-]{32,}=*(?![A-Za-z0-9+_\-=])"#), accept: looksLikeKey),
     ]
+
+    // MARK: gitleaks
+
+    /// One of gitleaks' rules (ScreenMaskGitleaks.swift, generated from its config): as in gitleaks,
+    /// its regex runs only when the text, in lower case, contains one of its keywords.
+    struct UpstreamRule: Sendable {
+        var id: String
+        var keywords: [String]
+        var pattern: String
+        /// The capture group with the secret; 0: the first group that matched, else the whole match.
+        var group = 0
+        /// The secret's Shannon entropy must be above this (0: any).
+        var entropy = 0.0
+    }
+
+    /// gitleaks' rules whose regex compiles here (all of them, when the generated file is current).
+    static let upstream: [(rule: UpstreamRule, regex: NSRegularExpression)] = gitleaksRules.compactMap { rule in
+        (try? NSRegularExpression(pattern: rule.pattern, options: [])).map { (rule, $0) }
+    }
+
+    private static let upstreamKeywords = Set(upstream.flatMap(\.rule.keywords))
+
+    /// The upstream rules worth running on a text: those with a keyword in it. A literal search in
+    /// an NSString: String.contains took a hundred milliseconds for a full screen.
+    static func upstream(for text: String) -> [(rule: UpstreamRule, regex: NSRegularExpression)] {
+        let lower = text.lowercased() as NSString
+        let present = upstreamKeywords.filter { lower.range(of: $0, options: .literal).location != NSNotFound }
+        return present.isEmpty ? [] : upstream.filter { !present.isDisjoint(with: $0.rule.keywords) }
+    }
+
+    /// Where an upstream rule's secrets stand: its secret group, or the first group that matched, or
+    /// the whole match; only a secret varied enough for the rule's entropy.
+    private static func secrets(_ rule: UpstreamRule, _ regex: NSRegularExpression) -> (NSString) -> [NSRange] {
+        { text in
+            regex.matches(in: text as String, range: NSRange(location: 0, length: text.length)).compactMap { match in
+                let range = rule.group > 0
+                    ? (rule.group < match.numberOfRanges ? match.range(at: rule.group) : NSRange(location: NSNotFound, length: 0))
+                    : (1..<match.numberOfRanges).lazy.map(match.range(at:)).first { $0.location != NSNotFound && $0.length > 0 } ?? match.range
+                guard range.location != NSNotFound, range.length > 0 else { return nil }
+                if rule.entropy > 0, entropy(text.substring(with: range)) <= rule.entropy { return nil }
+                return range
+            }
+        }
+    }
 
     // MARK: Checks
 
@@ -215,9 +311,57 @@ public enum ScreenMask {
     }
 
     /// Upper and lower case letters and digits: a key, not a word, a hash (lower-case hex) or a path.
+    /// A URL's path has a word between two slashes; its random part is left to `looksLikeKey`. A
+    /// file name in camelCase switches too rarely (`switchRate`, a little below the net's 0.25, as
+    /// this rule already asks for all three kinds of characters).
     static func looksRandom(_ value: String) -> Bool {
         value.contains(where: \.isUppercase) && value.contains(where: \.isLowercase) && value.contains(where: \.isNumber)
-            && !value.contains("//")
+            && !value.contains("//") && !value.split(separator: "/").contains { $0.count >= 3 && $0.allSatisfy(\.isLowercase) }
+            && switchRate(value) >= 0.2 && !publicPrefixes.contains(where: value.hasPrefix)
+    }
+
+    /// A key of unknown shape: letters and digits mixed, as varied as a key and not made of words.
+    /// UUIDs, commit IDs (40 hex) and SHA-256 digests (64 hex) stay: that is what long hex on a
+    /// screen usually is, and a key of that shape with a label is still caught by the label rules.
+    static func looksLikeKey(_ candidate: String) -> Bool {
+        let value = String(candidate.reversed().drop { $0 == "=" }.reversed())
+        guard value.count >= 32, mixed(value), !publicPrefixes.contains(where: value.hasPrefix),
+              uuidPattern.firstMatch(in: value, range: NSRange(location: 0, length: (value as NSString).length)) == nil else { return false }
+        let hex = value.allSatisfy(\.isHexDigit) && (value == value.lowercased() || value == value.uppercased())
+        if hex, value.count == 40 || value.count == 64 { return false }
+        // Shannon entropy in bits per character: gitleaks' threshold for keys (3.5), detect-secrets'
+        // for hex (3.0). Then the switches: random text changes between letters and digits, or from
+        // a small letter to a capital, at about every second character; names, slugs, file names and
+        // camelCase rarely do (`how-to-build-a-notch-app-2026`: 0.05, `iPhone15ProScreenRecording20261104`:
+        // 0.18, a random key: 0.4 to 0.6).
+        return entropy(value) >= (hex ? 3.0 : 3.5) && switchRate(value) >= 0.25
+    }
+
+    /// Keys that are public by design.
+    static let publicPrefixes = ["sb_publishable_"]
+    private static let uuidPattern = regex(#"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"#)
+
+    /// Shannon entropy of the characters, in bits per character.
+    static func entropy(_ value: String) -> Double {
+        var counts: [Character: Int] = [:]
+        for char in value { counts[char, default: 0] += 1 }
+        let total = Double(value.count)
+        return counts.values.reduce(0) { sum, count in
+            let share = Double(count) / total
+            return sum - share * log2(share)
+        }
+    }
+
+    /// How often the letters and digits switch between letter and digit, or from a small letter to a
+    /// capital, per pair of neighbours (other characters skipped).
+    static func switchRate(_ value: String) -> Double {
+        let chars = value.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        guard chars.count > 1 else { return 0 }
+        var switches = 0
+        for (a, b) in zip(chars, chars.dropFirst()) where a.isNumber != b.isNumber || (a.isLowercase && b.isUppercase) {
+            switches += 1
+        }
+        return Double(switches) / Double(chars.count - 1)
     }
 
     /// Runs of 12 or more words from the BIP39 list, with only spaces, line breaks, numbers and

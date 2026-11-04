@@ -6,7 +6,7 @@ import Security
 /// tools' API keys (Fireflies, Fathom) as generic passwords in the login Keychain, under the
 /// app's identifier. Nothing else reads them.
 enum Keychain {
-    enum Item: String {
+    enum Item: String, CaseIterable {
         case ouraToken = "oura.token"
         case whoopSecret = "whoop.client-secret"
         case whoopToken = "whoop.token"
@@ -34,9 +34,10 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Saves the value; an empty one deletes the item.
+    /// Saves the value; an empty one deletes the item. The screen mask learns the change.
     @discardableResult
     static func set(_ value: String?, for item: Item) -> Bool {
+        defer { ScreenMaskKeys.changed() }
         let query = query(item)
         guard let value, !value.isEmpty else {
             let status = SecItemDelete(query as CFDictionary)

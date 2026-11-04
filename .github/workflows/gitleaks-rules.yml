@@ -1,0 +1,81 @@
+name: Masking rules from gitleaks
+
+# Every week, and on demand: the latest gitleaks release's rules, converted for the screen mask
+# (scripts/gitleaks/convert.py into Sources/NotchCore/ScreenMaskGitleaks.swift). A pull request only
+# when the generated file changed. The Swift tests run on that pull request in CI. A pull request
+# opened with GITHUB_TOKEN starts no workflow by itself, so this job starts CI on its branch.
+# Needs Settings › Actions › General › "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"  # Mondays, 06:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write       # push the branch
+  pull-requests: write  # open the pull request
+  actions: write        # start CI on the branch
+
+concurrency:
+  group: gitleaks-rules
+  cancel-in-progress: false
+
+jobs:
+  update:
+    # Python and Swift (for the regex check) come with the Ubuntu image: no macOS runner needed.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # The private repository only: the public one gets the generated file with each export.
+      - name: Private repository?
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" >> "$GITHUB_OUTPUT"
+
+      - name: Converter tests
+        if: steps.repo.outputs.private == 'true'
+        run: python3 -m unittest discover -s scripts/gitleaks
+
+      - name: Fetch the latest gitleaks rules
+        if: steps.repo.outputs.private == 'true'
+        id: fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api repos/gitleaks/gitleaks/releases/latest --jq .tag_name)
+          [[ "$tag" =~ ^v[0-9][0-9A-Za-z.-]*$ ]] || { echo "unexpected tag: $tag"; exit 1; }
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gitleaks.toml" "https://raw.githubusercontent.com/gitleaks/gitleaks/$tag/config/gitleaks.toml"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Convert
+        if: steps.repo.outputs.private == 'true'
+        env:
+          TAG: ${{ steps.fetch.outputs.tag }}
+        run: |
+          swift --version
+          python3 scripts/gitleaks/convert.py "$RUNNER_TEMP/gitleaks.toml" --source "$TAG"
+
+      - name: Open a pull request when the rules changed
+        if: steps.repo.outputs.private == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.fetch.outputs.tag }}
+          BASE: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          file=Sources/NotchCore/ScreenMaskGitleaks.swift
+          if git diff --quiet -- "$file"; then echo "The rules didn't change."; exit 0; fi
+          branch="gitleaks-rules/$TAG"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then echo "$branch is there already."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -m "Screen context: masking rules from gitleaks $TAG" -- "$file"
+          git push origin "$branch"
+          gh pr create --base "$BASE" --head "$branch" --title "Masking rules from gitleaks $TAG" \
+            --body "The screen mask's rules from gitleaks $TAG (config/gitleaks.toml, MIT), converted by scripts/gitleaks/convert.py. The file's header lists the rules left out. CI runs the Swift tests on this branch."
+          gh workflow run ci.yml --ref "$branch"

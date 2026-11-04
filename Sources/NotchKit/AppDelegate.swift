@@ -24,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var previewDirector: PreviewDirector?
     private var agendaPreview: AgendaPreview?
     private var setup: SetupCenter!
+    /// The last look at whether Codex runs the approvals hook, and the day its line last showed.
+    private var codexHookCheckedAt = Date.distantPast
+    private static let codexNudgeKey = "setup.codexHookNudged"
     private var onboarding: OnboardingWindowController?
     private var cast: AvatarCast!
     /// Every module built, shown or not; `NotchModel.modules` holds the shown ones.
@@ -223,7 +226,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, ![.inbox, .palette].contains(self.notchModel.interaction) else { return }
             self.notch.collapse()
         }
-        approvals.onChange = { [weak agents] requests in agents?.setPendingApprovals(requests) }
+        approvals.onChange = { [weak self, weak agents] requests in
+            agents?.setPendingApprovals(requests)
+            // A Codex approval through the hook: proof that Codex runs it.
+            if requests.contains(where: { $0.provider == CodexProvider.id }) { self?.setup?.noteCodexRequest() }
+        }
         // A question while the session's own window (terminal, editor, the Claude app) is in
         // front: asked there at once instead of in the notch.
         approvals.isSessionInFront = { [weak agents] request in
@@ -260,6 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    detail: "subagent of \(parent.displayTitle)"),
                              key: "subagent.\(sub.id)")
         }
+        agents.onCodexWorking = { [weak self] in self?.checkCodexHook() }
         agents.onFinished = { [weak self, weak agents] agent in
             guard let self, let agents else { return }
             self.notch.sneak(Sneak(visual: .character(agents.character(of: agent), .finished, hue: agents.hue(of: agent)),
@@ -985,6 +993,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showMeetingCard(url)
                 continue
             }
+            if url.host == "settings" {
+                let pane = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "pane" }?.value
+                showSettings(pane.flatMap(SettingsPane.init(rawValue:)))
+                continue
+            }
             if url.host == "download" {
                 // Only a file in the watched folder: a link from elsewhere opens nothing.
                 if let folder = downloads?.folder,
@@ -1002,6 +1015,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 continue
             }
             show(status)
+        }
+    }
+
+    /// Codex works but doesn't run the approvals hook (never trusted there, or switched off): one
+    /// line a day at most, checked every ten minutes while Codex works; a click opens Settings › Agents.
+    private func checkCodexHook(now: Date = Date()) {
+        guard let setup, now.timeIntervalSince(codexHookCheckedAt) > 600 else { return }
+        codexHookCheckedAt = now
+        Task { [weak self] in
+            await setup.checkCodexHook()
+            let status = setup.codexHook
+            guard let self, CodexHookTrust.nudgeDue(status, lastShown: UserDefaults.standard.string(forKey: Self.codexNudgeKey), now: now) else { return }
+            let off = status == .switchedOff
+            let shown = self.notch.sneak(Sneak(visual: .symbol("hand.raised.slash", tint: .waiting),
+                                               title: Localization.string(off ? "Codex can't ask in the notch" : "Codex can't ask in the notch yet"),
+                                               detail: Localization.string(off ? "Switch it on in Codex › Settings › Hooks" : status.title),
+                                               duration: 6, url: URL(string: "\(Brand.urlScheme)://settings?pane=agents")),
+                                         key: "codex.hook")
+            if shown { UserDefaults.standard.set(MorningLine.day(now), forKey: Self.codexNudgeKey) }
         }
     }
 

@@ -298,7 +298,7 @@ public actor CodexProvider: AgentProvider, UsageProvider, AgentEventSource, Appr
             title: "Codex approvals in the notch",
             install: script,
             remove: script + " --remove",
-            note: "Adds one PermissionRequest hook to ~/.codex/hooks.json (a backup is kept). Review it once with /hooks in Codex.")
+            note: "Adds one PermissionRequest hook to ~/.codex/hooks.json (a backup is kept). Codex runs it once you trust it: in the Codex app Settings › Hooks › Asking in the notch › Trust, and switch it on; in the terminal /hooks.")
     }
 
     public nonisolated func reply(to request: ApprovalRequest, with decision: ApprovalDecision) -> Data {

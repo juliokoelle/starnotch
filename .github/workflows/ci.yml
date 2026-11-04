@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  # Started by gitleaks-rules.yml on its branch (its pull request, opened with GITHUB_TOKEN, starts nothing).
+  workflow_dispatch:
 
 permissions:
   contents: read

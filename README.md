@@ -62,7 +62,7 @@ The first launch is one calm window with one card per step: meet Tara and pick h
 
 ## Set up in one click
 
-The second step of the first launch lists the agents it found (Claude Code, Codex and the other agent tools) and exactly what it would set up: the Claude Code approvals plugin, the Codex approvals hook, the plan-limits status line (your current status line keeps running behind it), the MCP server and a small zsh snippet for long terminal commands. One button sets up everything, or switch items off first. The calendar and the players get a step each, and open at login sits with the tools. Nothing happens before that click; each change keeps a backup, and Settings › What's set up removes it again exactly. The one step left to you: trust the new hook once in Codex with `/hooks`. The menu bar's "Set up…" opens it again.
+The second step of the first launch lists the agents it found (Claude Code, Codex and the other agent tools) and exactly what it would set up: the Claude Code approvals plugin, the Codex approvals hook, the plan-limits status line (your current status line keeps running behind it), the MCP server and a small zsh snippet for long terminal commands. One button sets up everything, or switch items off first. The calendar and the players get a step each, and open at login sits with the tools. Nothing happens before that click; each change keeps a backup, and Settings › What's set up removes it again exactly. The one step left to you: trust the new hook once in Codex (the Codex app: Settings › Hooks › Asking in the notch › Trust, and switch it on; the terminal: `/hooks`). Until then Codex asks in its own window; the setup page and Settings › Agents show whether Codex runs it, and the notch says so once a day while Codex works without it. The menu bar's "Set up…" opens it again.
 
 ## Permissions
 
@@ -131,7 +131,7 @@ integrations/claude-code/starnotch-approvals/codex/install-hook.sh
 integrations/claude-code/starnotch-approvals/codex/install-hook.sh --remove
 ```
 
-Then open `/hooks` in Codex once to trust the new hook. Codex can't take a rule for the whole session, so its card offers **Allow once** and **Deny** only.
+Then trust the new hook once in Codex: in the Codex app under Settings › Hooks › Asking in the notch › Trust (and switch it on), or with `/hooks` in the terminal. Codex runs a new or changed hook only after that. Codex can't take a rule for the whole session, so its card offers **Allow once** and **Deny** only.
 
 ## Other notch apps
 

@@ -95,6 +95,30 @@ import TestSupport
         #expect(!SetupSandbox.hasCodexHook(paths))
     }
 
+    /// Codex keys its trust by the hook's place and definition: a second run changes neither.
+    @Test func codexHookStaysInPlaceOnASecondRun() throws {
+        let paths = SetupSandbox.make()
+        defer { Fixtures.remove(paths.home) }
+        let file = paths.codexHome.appending(path: "hooks.json")
+        try #"{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"first"}]}]}}"#.write(to: file, atomically: true, encoding: .utf8)
+        _ = try SetupActions.installCodexHook(paths)
+        // The user adds a hook after ours.
+        var root = SetupSandbox.json(file)
+        var hooks = root["hooks"] as? [String: Any] ?? [:]
+        hooks["PermissionRequest"] = (hooks["PermissionRequest"] as? [Any] ?? []) + [["hooks": [["type": "command", "command": "last"]]]]
+        root["hooks"] = hooks
+        try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys]).write(to: file)
+        let before = SetupSandbox.read(file)
+        _ = try SetupActions.installCodexHook(paths)
+        #expect(SetupSandbox.read(file) == before)
+        let place = CodexHookTrust.place(in: Data(before.utf8))
+        #expect(place?.group == 1 && place?.handler == 0)
+        // Taking it out leaves the others in their order.
+        try SetupActions.removeCodexHook(paths)
+        let left = (SetupSandbox.json(file)["hooks"] as? [String: Any])?["PermissionRequest"] as? [[String: Any]] ?? []
+        #expect(left.compactMap { ($0["hooks"] as? [[String: Any]])?.first?["command"] as? String } == ["first", "last"])
+    }
+
     @Test func shellHookAddsAndRemovesItsBlockOnly() throws {
         let paths = SetupSandbox.make()
         defer { Fixtures.remove(paths.home) }

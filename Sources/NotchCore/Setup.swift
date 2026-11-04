@@ -62,7 +62,7 @@ public enum SetupItem: String, CaseIterable, Codable, Sendable {
         case .claudePlugin:
             "Runs claude plugin marketplace add \(SetupPaths.marketplaceRepo) (or the app's copy of its own marketplace folder, in its support folder) and claude plugin install \(SetupPaths.pluginID)."
         case .codexHook:
-            "Adds one PermissionRequest hook to ~/.codex/hooks.json, with a backup. Codex asks you to trust it once in /hooks."
+            "Adds one PermissionRequest hook to ~/.codex/hooks.json, with a backup. Codex runs it once you trust it: in the Codex app Settings › Hooks › Asking in the notch › Trust, and switch it on; in the terminal /hooks."
         case .statusLine:
             "Sets Claude Code's status line in ~/.claude/settings.json to a bridge that saves the limits, then runs your current status line unchanged. Backup first."
         case .mcpServer:
@@ -364,7 +364,7 @@ public enum SetupActions {
         let result = run("/bin/bash", [script.path], ["HOME": paths.home.path, "CODEX_HOME": paths.codexHome.path])
         guard result.status == 0 else { throw SetupError.failed(result.output.trimmingCharacters(in: .whitespacesAndNewlines)) }
         let backup = result.output.split(separator: "\n").first { $0.hasPrefix("Backup: ") }.map { String($0.dropFirst(8)) }
-        return SetupLedger.Entry(item: .codexHook, at: now, backup: backup, note: "Trust it once in Codex: /hooks")
+        return SetupLedger.Entry(item: .codexHook, at: now, backup: backup, note: "Trust it once in Codex: Settings › Hooks › Asking in the notch › Trust (in the terminal: /hooks)")
     }
 
     public static func removeCodexHook(_ paths: SetupPaths, run: SetupRunner = processRunner) throws {

@@ -61,6 +61,8 @@ final class AgentsModule: NotchModule {
     @ObservationIgnored var onLimitAlert: ((String, String, Double, String?) -> Void)?
     /// A loop finished (a new logged run or a push): for its sneak.
     @ObservationIgnored var onLoopFinished: ((AgentSnapshot.LoopStatus) -> Void)?
+    /// A Codex session works (each scan): the app checks now and then that Codex runs the approvals hook.
+    @ObservationIgnored var onCodexWorking: (() -> Void)?
     /// The agents inbox, for its count in the ear (set by the app).
     @ObservationIgnored weak var inbox: AgentsInbox?
     var inboxCount: Int { inbox?.count ?? 0 }
@@ -497,6 +499,7 @@ final class AgentsModule: NotchModule {
             if usages != toolUsages, !previewMode { toolUsages = usages }
             recordUsage(now: usagesAt)
         }
+        if !previewMode, next.agents.contains(where: { $0.provider == CodexProvider.id && $0.isBusy }) { onCodexWorking?() }
         // A preview took over while this scan ran: its made-up sessions stay.
         guard !previewMode, next != snapshot else { return }
         if didLoadOnce {

@@ -35,7 +35,7 @@ jobs:
       - name: No private assets in the bundle
         run: |
           ls build/*.app/Contents/Resources/Characters
-          test "$(ls build/*.app/Contents/Resources/Characters | tr '\n' ' ')" = "astra.notchpack cat.notchpack pebbles.notchpack "
+          test "$(ls build/*.app/Contents/Resources/Characters | tr '\n' ' ')" = "astra.notchpack pebbles.notchpack "
       - name: Zip the app
         run: ditto -c -k --keepParent build/*.app build/Starnotch.zip
       - name: Upload the app

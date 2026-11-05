@@ -392,9 +392,9 @@ final class PreviewDirector {
         NSApp.terminate(nil)
     }
 
-    /// About 18 s: the cat through the effort levels (its eyes change), then Astra (its colours).
+    /// About 18 s: Pebble through the effort levels (the colour scale), then Astra (its colours).
     private func levelsTour() async {
-        agents.cast.previewCharacter = "cat"
+        agents.cast.previewCharacter = "pebble"
         agents.usePreview(Self.levelSnapshot(main: .low))
         await pause(1.2)
         notch.tourPeek()
@@ -942,7 +942,7 @@ final class PreviewDirector {
         if name.hasPrefix("mood-tour") {
             // mood-tour[:character]: the main session goes idle → working → done → your turn → idle.
             let parts = name.split(separator: ":").map(String.init)
-            agents.cast.previewCharacter = parts.count > 1 ? parts[1] : "cat"
+            agents.cast.previewCharacter = parts.count > 1 ? parts[1] : "astra"
             Task { await moodTour() }
             return
         }
@@ -956,7 +956,7 @@ final class PreviewDirector {
             return
         }
         if name == "levels-tour" {
-            agents.cast.previewCharacter = "cat"
+            agents.cast.previewCharacter = "pebble"
             agents.usePreview(Self.levelSnapshot(main: .low))
             agents.previewPlan = StatusSnapshot(
                 sessionID: "preview", fiveHour: .init(usedPercentage: 62, resetsAt: Date().addingTimeInterval(2 * 3600 + 14 * 60)),

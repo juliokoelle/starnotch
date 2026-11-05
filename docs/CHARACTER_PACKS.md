@@ -1,9 +1,8 @@
 # Character packs
 
-The characters in Starnotch come from packs. The app ships with three:
+The characters in Starnotch come from packs. The app ships with two:
 
 - **Astra**, the default: a little star in six colours (Nova, Mint, Aurora, Cosmo, Sol, Rosé), one colour per effort level. Built by `scripts/make-astra-pack.swift` from an image export, so new art is a pure asset swap.
-- **Cat**: its eyes change with the effort level.
 - **Pebbles**: five minimal round characters, drawn by `scripts/make-pebbles.swift`.
 
 You can add your own.
@@ -54,7 +53,7 @@ mine.notchpack/
 - **`tint`** colours the character's accents (rings, chips).
 - **`sourceHeight`** is the figure's height in pixels in that file. Small figures look soft when drawn big, so the app falls back to the portrait when a sprite is less than half the drawn height.
 - **Sprites** are PNGs with transparency. The bottom edge of the image is where the figure stands: the app lines it up with the edge of the card or the notch. 240 px tall works well for every size the app draws.
-- **`license`** is shown nowhere yet, but say it: only ship characters you may redistribute. Pebbles is Apache 2.0 and fine to build on; Tara and the Cat are all rights reserved (see the `LICENSE` in their packs), so don't reuse their images.
+- **`license`** is shown nowhere yet, but say it: only ship characters you may redistribute. Pebbles is Apache 2.0 and fine to build on; Tara is all rights reserved (see the `LICENSE` in her pack), so don't reuse her images.
 
 ## Effort levels
 
@@ -63,12 +62,12 @@ With colours following performance (Settings › Colour scale), a character can 
 ```json
 "levels": {
   "low":   { "name": "Mint", "tint": "#3ED6A0", "states": { "idle": { "file": "mint/neutral.png", "sourceHeight": 270 } } },
-  "max":   { "name": "Max eyes", "states": { "working": { "file": "cat/level-max.png", "sourceHeight": 122 } } },
+  "max":   { "name": "Max eyes", "states": { "working": { "file": "fox/max-eyes.png", "sourceHeight": 240 } } },
   "xhigh": { "name": "Cosmo", "colorway": "astra_cosmo" }
 }
 ```
 
-- **`states`** replace the base states at that level for the moods they cover (all of them for a full colour set like Astra's; only the busy ones for the Cat's eyes). Level sprites may be wider than upright poses.
+- **`states`** replace the base states at that level for the moods they cover (all of them for a full colour set like Astra's; only the busy ones for, say, other eyes while working). Level sprites may be wider than upright poses.
 - **`colorway`** tints the base sprites instead, with a built-in colorway or one of the pack's `recipes`.
 - **`name`** shows in Settings; **`tint`** colours the glow and accents.
 - A colour the user picks for a level in Settings wins over the character's own look; picking the character's tile there brings it back.
@@ -82,7 +81,7 @@ Pack-wide extras:
 
 - **`recipes`** add colorways to the Settings picker: `hue` (degrees), `saturation`, `brightness`, `contrast`, `shade` (multiply, 0 to 1), `tint` with `tintAmount` (wash in one colour, for gradient art).
 - **`finish`** asks the app for a soft outer glow in the look's tint and a sheen on the upper half.
-- **`"tintable": false`** on a character: the app never recolours it. No colorways, hue offsets or session colours; Settings shows its own looks and hides "Colour by: Session". Two sessions on the same level are told apart by their titles. The Cat uses this: only its eyes change.
+- **`"tintable": false`** on a character: the app never recolours it. No colorways, hue offsets or session colours; Settings shows its own looks and hides "Colour by: Session". Two sessions on the same level are told apart by their titles.
 
 ## States
 

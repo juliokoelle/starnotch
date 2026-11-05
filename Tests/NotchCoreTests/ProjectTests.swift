@@ -44,6 +44,25 @@ import TestSupport
         #expect(ProjectAssignment.character(project: "docs", styles: [:], characters: cast, fallback: "plum") == "plum")
     }
 
+    /// The cat left the app (5 November 2026). Picks and config defaults that still name it get the
+    /// character projects without a pick get (the lead one, "astra" here), never an empty figure.
+    @Test func aCharacterThatLeftTheAppFallsBack() {
+        let shipped = ["astra", "pebble", "moss", "ember", "plum", "slate"]
+        let styles = ["api-server": ProjectStyle(character: "cat", hue: 30)]
+        let defaults = ["site": "cat"]
+        #expect(ProjectAssignment.character(project: "api-server", styles: styles, characters: shipped,
+                                            defaults: defaults, fallback: "astra") == "astra")
+        #expect(ProjectAssignment.character(project: "site", styles: styles, characters: shipped,
+                                            defaults: defaults, fallback: "astra") == "astra")
+        #expect(ProjectAssignment.characters(projects: ["api-server", "site", "notes"], styles: styles, characters: shipped,
+                                             defaults: defaults, fallback: "astra")
+                == ["api-server": "astra", "site": "astra", "notes": "astra"])
+        // A character per project (`fallback = ""`): still one that ships.
+        let own = ProjectAssignment.characters(projects: ["api-server", "site"], styles: styles, characters: shipped, defaults: defaults)
+        #expect(own.count == 2 && own.values.allSatisfy(shipped.contains))
+        #expect(shipped.contains(ProjectAssignment.character(project: "api-server", styles: styles, characters: shipped, defaults: defaults)))
+    }
+
     @Test func performanceLevels() {
         #expect(PerformanceLevel(effort: "max") == .max)
         #expect(PerformanceLevel(effort: "Ultra") == .ultra)

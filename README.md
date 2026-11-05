@@ -155,7 +155,7 @@ Claude thinks on your own Claude plan through Claude Code when it's installed an
 ## Extend it
 
 - **Connectors** bring your own data: a Today list, loops, people for meeting prep, a quick capture inbox. A connector is a small Swift package; see [docs/SDK.md](docs/SDK.md).
-- **Character packs** add characters: a folder with a `manifest.json` and one PNG per state, optionally a look per effort level. Starnotch ships Tara, the Cat (its eyes show the effort) and Pebbles. See [docs/CHARACTER_PACKS.md](docs/CHARACTER_PACKS.md).
+- **Character packs** add characters: a folder with a `manifest.json` and one PNG per state, optionally a look per effort level. Starnotch ships Tara and Pebbles. See [docs/CHARACTER_PACKS.md](docs/CHARACTER_PACKS.md).
 - **Local status API**: scripts post a line to the notch over `127.0.0.1` with a token, or with a `starnotch://status?title=…` link. See [docs/SDK.md](docs/SDK.md#local-status-api).
 
 ## Release
@@ -183,6 +183,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The code is under the [Apache License 2.0](LICENSE), and so is the Pebbles character pack (drawn by `scripts/make-pebbles.swift`).
 
-Tara (the default character) and the Cat are not: Copyright © 2026 Julio Koelle, all rights reserved. They may be used only as part of Starnotch as distributed by its authors. See the `LICENSE` file in `Resources/Characters/astra.notchpack`, `Resources/Characters/cat.notchpack`, `art/astra` and `art/cat`. Versions published before 29 October 2026 keep the Apache License 2.0 they came with.
+Tara (the default character) is not: Copyright © 2026 Julio Koelle, all rights reserved. She may be used only as part of Starnotch as distributed by its authors. See the `LICENSE` file in `Resources/Characters/astra.notchpack` and `art/astra`. Versions published before 29 October 2026 keep the Apache License 2.0 they came with.
 
-Starnotch™ and Tara™, and the characters Tara and the Cat, are trademarks of Julio Koelle; a fork you distribute needs another name and no Tara or Cat. See [TRADEMARKS.md](TRADEMARKS.md).
+Starnotch™ and Tara™, and the character Tara, are trademarks of Julio Koelle; a fork you distribute needs another name and no Tara. See [TRADEMARKS.md](TRADEMARKS.md).

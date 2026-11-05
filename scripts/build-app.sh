@@ -36,7 +36,7 @@ BUNDLE_ID="${BUNDLE_ID:-app.$LOWER.mac}"
 SUPPORT_FOLDER="${SUPPORT_FOLDER:-$BRAND}"
 URL_SCHEME="${URL_SCHEME:-$LOWER}"
 OUT="${NOTCH_OUT:-$REPO/build}"
-COPYRIGHT="${COPYRIGHT:-Code under the Apache License 2.0. Tara and the Cat © 2026 Julio Koelle, all rights reserved.}"
+COPYRIGHT="${COPYRIGHT:-Code under the Apache License 2.0. Tara © 2026 Julio Koelle, all rights reserved.}"
 VERSION="${VERSION:-0.1.0}"
 if [[ "${STARNOTCH_SPARKLE:-}" == "1" ]]; then SCREEN_CONTEXT="${SCREEN_CONTEXT:-0}"; else SCREEN_CONTEXT="${SCREEN_CONTEXT:-1}"; fi
 BUILD_NUMBER="$(git -C "$REPO" rev-list --count HEAD 2>/dev/null || echo 1)"
@@ -68,7 +68,7 @@ swift build --package-path "$REPO" -c release --product AppleModel
 cp "$(swift build --package-path "$REPO" -c release --show-bin-path)/AppleModel" "$APP/Contents/MacOS/AppleModel"
 codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP/Contents/MacOS/AppleModel"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-# Character packs: the public ones (Astra, Cat, Pebbles), plus any the build adds.
+# Character packs: the public ones (Astra, Pebbles), plus any the build adds.
 cp -R Resources/Characters/*.notchpack "$APP/Contents/Resources/Characters/"
 if [[ -n "${NOTCH_EXTRA_PACKS:-}" ]]; then
     IFS=':' read -r -a EXTRA <<< "$NOTCH_EXTRA_PACKS"
